@@ -440,12 +440,12 @@ RETRO_DIFFUSION_API_KEY=your_retro_key_here`}</code>
                             <tr className="border-b border-slate-800">
                               <td className="py-2"><code className="text-cyan-400">OPENAI_API_KEY</code></td>
                               <td className="py-2 text-xs">sk-your_key</td>
-                              <td className="py-2 text-amber-400 text-xs">If using OpenAI</td>
+                              <td className="py-2 text-red-400 text-xs font-semibold">MUST ADD (if using OpenAI)</td>
                             </tr>
                             <tr className="border-b border-slate-800">
                               <td className="py-2"><code className="text-cyan-400">GROK_API_KEY</code></td>
                               <td className="py-2 text-xs">your_grok_key</td>
-                              <td className="py-2 text-amber-400 text-xs">If using Grok</td>
+                              <td className="py-2 text-red-400 text-xs font-semibold">MUST ADD (if using Grok)</td>
                             </tr>
                             <tr>
                               <td className="py-2"><code className="text-cyan-400">RETRO_DIFFUSION_API_KEY</code></td>
@@ -460,6 +460,8 @@ RETRO_DIFFUSION_API_KEY=your_retro_key_here`}</code>
                         <p className="text-red-300">
                           <strong>🚨 CRITICAL:</strong> You MUST manually add all secrets marked "MUST ADD!" above. 
                           The auto-provided ones are not enough - the Edge Function needs the EDGE_ prefixed versions!
+                          <br /><br />
+                          <strong>You also MUST add at least ONE AI provider key (OPENAI_API_KEY or GROK_API_KEY) - NPCs will not work without it!</strong>
                         </p>
                       </div>
 
@@ -642,7 +644,6 @@ WHERE user_id = 'your-uuid-here';`}</code>
                         <li>Fill in:
                           <ul className="ml-6 mt-2 space-y-1">
                             <li>• <strong>Name:</strong> <code className="text-cyan-400">Mystical Forest</code> (this will be normalized automatically)</li>
-                            <li>• <strong>Display Name:</strong> <code className="text-cyan-400">Mystical Forest</code> (same as name is fine)</li>
                             <li>• <strong>Description:</strong> A brief description of the region's theme</li>
                           </ul>
                         </li>

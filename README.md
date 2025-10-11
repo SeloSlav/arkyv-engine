@@ -6,9 +6,9 @@ An open-source text-based multi-user dungeon (MUD) built with Next.js, Supabase,
 
 ## Why This Exists
 
-I grew up playing MUDs and always wondered where they all went. I guess hosting was expensive and people moved on to graphical games, but as a huge reader and fan of sci-fi and fantasy, I've always loved the power of text-based storytelling and imagination. 
+I grew up playing MUDs and always wondered where they all went. I guess hosting was expensive and people moved on to graphical games, but as a huge reader and fan of sci-fi and fantasy, I've always loved the power of text-based storytelling and imagination.
 
-So I built Arkyv Engine—a modern MUD system that's actually easy to host. With free tiers on Supabase and Vercel, and AI to help generate content, anyone can now create and run their own text-based world without breaking the bank or needing a CS degree. 
+So I built Arkyv Engine—a modern MUD system that's actually easy to host. With free tiers on Supabase and Vercel, and AI to help generate content, anyone can now create and run their own text-based world without breaking the bank or needing a CS degree.
 
 This is for the dreamers, the storytellers, and anyone who believes that the best graphics are the ones in your mind.
 
@@ -229,11 +229,11 @@ Find your project ref in your Supabase project URL: `https://supabase.com/dashbo
 | `EDGE_SERVICE_ROLE_KEY` | your_service_role_key | **MUST ADD!** |
 | `SUPABASE_DB_URL` | Auto-provided ✓ | Database URL |
 | `AI_PROVIDER` | openai or grok | **MUST ADD!** |
-| `OPENAI_API_KEY` | sk-your_key | If using OpenAI |
-| `GROK_API_KEY` | your_grok_key | If using Grok |
+| `OPENAI_API_KEY` | sk-your_key | **MUST ADD** (if using OpenAI) |
+| `GROK_API_KEY` | your_grok_key | **MUST ADD** (if using Grok) |
 | `RETRO_DIFFUSION_API_KEY` | your_retro_key | Optional - for AI images |
 
-**🚨 CRITICAL:** You MUST manually add all secrets marked "MUST ADD!" - the auto-provided ones are not enough!
+**🚨 CRITICAL:** You MUST add all secrets marked "MUST ADD!" AND at least ONE AI provider key (OpenAI or Grok) for NPCs to work!
 
 **Method 2: Using CLI (Alternative)**
 
@@ -334,7 +334,6 @@ Navigate to `http://localhost:3000/admin` - you should now have access to the wo
 2. Click **"Create New Region"**
 3. Fill in:
    - **Name**: `Mystical Forest` (the system auto-normalizes to lowercase with hyphens)
-   - **Display Name**: `Mystical Forest` (same as name is fine)
    - **Description**: A brief description of the region's theme
 4. Click **"Create Region"**
 
