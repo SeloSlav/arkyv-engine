@@ -1,0 +1,189 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  color: white;
+  background: black;
+  overflow-x: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif !important;
+}
+
+* {
+  box-sizing: border-box;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+}
+
+input, select, textarea, button {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif !important;
+}
+
+/* Force font utilities to override Tailwind defaults */
+.font-sans, .font-sans * {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif !important;
+}
+
+.font-terminal, .font-terminal * {
+  font-family: 'JetBrains Mono', 'Consolas', 'Monaco', 'Courier New', monospace !important;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Custom Scrollbar Styles */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #374151;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #06B6D4;
+  border-radius: 4px;
+  border: 1px solid #1F2937;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #0891B2;
+}
+
+/* Cyberpunk Terminal Scrollbar */
+.terminal-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #FF1493 #1F2937;
+}
+
+.terminal-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.terminal-scroll::-webkit-scrollbar-track {
+  background: #1F2937;
+  border-radius: 3px;
+}
+
+.terminal-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #FF1493, #8A2BE2);
+  border-radius: 3px;
+}
+
+.terminal-scroll::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #FF69B4, #9370DB);
+}
+
+/* Button Gradient */
+@keyframes gradient-animation {
+  0% {
+      background-position: 0% 50%;
+  }
+  100% {
+      background-position: 100% 50%;
+  }
+}
+
+.bg-gradient-animation {
+  background: linear-gradient(45deg, #FFD700, #FFA500, #FF8C00, #FFA500, #FFD700);
+  background-size: 200% 100%;
+  animation: gradient-animation 5s linear infinite alternate-reverse;
+  transition: transform 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
+  box-shadow: 0px 4px 6px rgba(255, 215, 0, 0.4);
+}
+
+.bg-gradient-animation:hover {
+  transform: translateY(-2px);
+  box-shadow: 0px 6px 8px rgba(255, 255, 255, 0.6);
+}
+
+/* Chatbot Pulse */
+@keyframes customPulse {
+  0%, 100% {
+    background-color: #48BB78;
+    box-shadow: 0 0 5px 5px rgba(72, 187, 120, 0.5);
+  }
+  50% {
+    background-color: #C6F6D5;
+    box-shadow: 0 0 5px 5px rgba(198, 246, 213, 0.5);
+  }
+}
+
+/* Custom Cursors */
+.d3-svg-container {
+  cursor: move;
+}
+
+.node {
+  cursor: pointer;
+}
+
+.loader {
+  border: 8px solid rgba(0, 0, 0, 0.1);
+  border-top: 8px solid #3498db;
+  border-radius: 50%;
+  width: 50px;
+  height: 50px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* CTA Buttons */
+.cta-buttons button {
+  box-sizing: border-box;
+}
+
+/* Marquee utilities */
+@keyframes ticker-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.ticker {
+  position: relative;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.ticker__track {
+  display: inline-block;
+  white-space: nowrap;
+  will-change: transform;
+  animation: ticker-scroll 12s linear infinite;
+}
+
+.ticker--slow .ticker__track { animation-duration: 18s; }
+.ticker--fast .ticker__track { animation-duration: 8s; }
+
+@media (hover: hover) {
+  .ticker:hover .ticker__track { animation-play-state: paused; }
+}
+
+.ticker--fade {
+  -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+  mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+}
+
+/* Room Image Pixel-Perfect Rendering */
+img[alt*="Room visualization"],
+img[alt*="visualization"] {
+  image-rendering: -moz-crisp-edges;
+  image-rendering: -webkit-crisp-edges;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  -ms-interpolation-mode: nearest-neighbor;
+}
+
+@media (max-width: 640px) {
+  img[alt*="Room visualization"] {
+    max-width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+  }
+}
