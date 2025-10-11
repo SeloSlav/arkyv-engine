@@ -4,6 +4,8 @@
 
 An open-source text-based multi-user dungeon (MUD) built with Next.js, Supabase, and AI. Create immersive worlds where players explore interconnected regions, interact with intelligent NPCs, and shape emergent narratives through collaborative gameplay.
 
+**🎮 [Try the Live Demo](https://www.babushkabook.com/arkyv)** - See Arkyv Engine in action!
+
 ## Why This Exists
 
 I grew up playing MUDs and always wondered where they all went. I guess hosting was expensive and people moved on to graphical games, but as a huge reader and fan of sci-fi and fantasy, I've always loved the power of text-based storytelling and imagination.
