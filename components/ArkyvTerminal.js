@@ -2578,7 +2578,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                 </div>
 
                 {authFlow && !disabled && (
-                    <div className="text-xs text-gray-500 font-terminal mt-1.5">Type 'cancel' to abort the current authentication flow.</div>
+                    <div className="text-xs text-gray-500 font-terminal mt-1.5">Type &apos;cancel&apos; to abort the current authentication flow.</div>
                 )}
             </div>
 

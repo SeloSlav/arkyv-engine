@@ -260,4 +260,6 @@ const Loader = React.memo(({ onLoadingComplete, showEntryButton }) => {
     );
 });
 
+Loader.displayName = 'Loader';
+
 export default Loader;

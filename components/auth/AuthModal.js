@@ -125,7 +125,7 @@ const AuthModal = ({ isOpen, onClose, mode: initialMode = 'signin', onAuthSucces
 
         {mode === 'forgot' && (
           <p className="text-slate-300 text-center text-sm mb-6">
-            Enter your email address and we'll send you a link to reset your password.
+            Enter your email address and we&apos;ll send you a link to reset your password.
           </p>
         )}
 
