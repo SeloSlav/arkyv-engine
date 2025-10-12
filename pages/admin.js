@@ -433,6 +433,7 @@ export default function ArkyvAdminPanel() {
     const [saveError, setSaveError] = useState('');
     const [reloadCounter, setReloadCounter] = useState(0);
     const [regionsList, setRegionsList] = useState([]);
+    const [lastComputedRegionKey, setLastComputedRegionKey] = useState(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [currentLayer, setCurrentLayer] = useState(0);
     const [availableLayers, setAvailableLayers] = useState([0]);
@@ -682,7 +683,7 @@ export default function ArkyvAdminPanel() {
                 setRegionsData(data ?? []);
                 
                 const items = (data ?? []).map((r) => ({
-                    key: r?.name ?? 'unknown',
+                    key: r?.region_name ?? r?.name ?? 'unknown',
                     label: r?.display_name ?? r?.name ?? 'Unknown'
                 }));
                 setRegionsList(items);
@@ -1592,8 +1593,8 @@ export default function ArkyvAdminPanel() {
         
         // Get default region from parent room or use first available region
         let defaultRegion = regionsList[0]?.key || 'unknown';
-        console.log('🔍 Initial defaultRegion from regionsList[0]:', defaultRegion);
-        console.log('🔍 Available regions:', regionsList);
+        // Debug: Log region selection process
+        console.log('🔍 Selected region for new room:', defaultRegion);
         
         if (isVerticalExit) {
             console.log('🔍 Handling vertical exit, fetching parent room:', pendingVerticalExit.fromRoomId);
@@ -1618,6 +1619,7 @@ export default function ArkyvAdminPanel() {
         }
         
         console.log('✅ Final defaultRegion selected:', defaultRegion);
+        setLastComputedRegionKey(defaultRegion);
         
         setBlankRoom({ 
             name: 'New Room', 
@@ -1626,6 +1628,21 @@ export default function ArkyvAdminPanel() {
         });
         setShowBlankRoomDialog(true);
     }, [pendingRoomCreate, pendingVerticalExit, regionsList, supabase]);
+
+    // Ensure the region dropdown always reflects the intended default when dialog opens
+    useEffect(() => {
+        if (!showBlankRoomDialog) return;
+        if (!regionsList || regionsList.length === 0) return;
+
+        const hasMatch = regionsList.some((r) => r.key === blankRoom.region);
+        if (!hasMatch) {
+            const fallback = lastComputedRegionKey || regionsList[0]?.key || '';
+            if (fallback && blankRoom.region !== fallback) {
+                setBlankRoom((prev) => ({ ...prev, region: fallback }));
+            }
+        }
+    }, [showBlankRoomDialog, regionsList]);
+    
     
     const saveBlankRoom = useCallback(async () => {
         // Check if this is from a vertical exit or regular room create
@@ -1737,7 +1754,14 @@ export default function ArkyvAdminPanel() {
             setIsCreatingRoom(false);
             setPendingRoomCreate(null);
             setPendingVerticalExit(null);
-            setBlankRoom({ name: '', description: '', region: '' });
+            
+            // Close the blank room dialog first
+            setShowBlankRoomDialog(false);
+            
+            // Clear the blank room state after dialog is closed
+            setTimeout(() => {
+                setBlankRoom({ name: '', description: '', region: '' });
+            }, 100);
             
             // Open the new room for editing with exits
             setTimeout(() => {
@@ -1751,7 +1775,7 @@ export default function ArkyvAdminPanel() {
                 setIsDirty(false);
                 setSaveError('');
                 setIsDialogOpen(true);
-            }, 500);
+            }, 600);
             
         } catch (err) {
             console.error('Failed to create room:', err);
@@ -1813,7 +1837,14 @@ export default function ArkyvAdminPanel() {
             setReloadCounter((c) => c + 1);
             setIsCreatingRoom(false);
             setIsStandaloneRoom(false);
-            setBlankRoom({ name: '', description: '', region: '' });
+            
+            // Close the blank room dialog first
+            setShowBlankRoomDialog(false);
+            
+            // Clear the blank room state after dialog is closed
+            setTimeout(() => {
+                setBlankRoom({ name: '', description: '', region: '' });
+            }, 100);
             
             // Open the new room for editing
             setTimeout(() => {
@@ -4426,12 +4457,7 @@ export default function ArkyvAdminPanel() {
                 
                 {/* Blank Room Edit Dialog */}
                 {showBlankRoomDialog && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm" onMouseDown={(e) => {
-                        if (e.currentTarget === e.target) {
-                            setShowBlankRoomDialog(false);
-                            setBlankRoom({ name: '', description: '', region: '' });
-                        }
-                    }}>
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
                         <div className="bg-slate-900 border border-cyan-400/40 rounded-2xl shadow-[0_30px_70px_rgba(14,165,233,0.2)] max-w-2xl w-full max-h-[90vh] flex flex-col" onMouseDown={(e) => e.stopPropagation()}>
                             <div className="p-8 pb-4">
                                 <h3 className="font-terminal text-base tracking-[0.35em] uppercase text-cyan-200 mb-2">
