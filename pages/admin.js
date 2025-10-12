@@ -1498,6 +1498,15 @@ export default function ArkyvAdminPanel() {
         const rawDirection = handleId.replace(/-out$|-in$/, '');
         const direction = DIRECTION_ALIASES[rawDirection] || rawDirection;
         
+        console.log('🔍 handleCreateRoomFromHandle called:', {
+            parentRoomId,
+            handleId,
+            direction,
+            parentRoomData,
+            region_name: parentRoomData?.region_name,
+            region: parentRoomData?.region
+        });
+        
         // Store pending creation data and show dialog
         setPendingRoomCreate({
             parentRoomId,
@@ -1573,25 +1582,42 @@ export default function ArkyvAdminPanel() {
         const isVerticalExit = pendingVerticalExit !== null;
         const hasRegularPending = pendingRoomCreate !== null;
         
-        if (!hasRegularPending && !isVerticalExit) return;
+        if (!hasRegularPending && !isVerticalExit) {
+            console.log('❌ createBlankRoom: No pending create or vertical exit');
+            return;
+        }
         
         // Show the blank room dialog for editing before creating
         setShowCreateDialog(false);
         
         // Get default region from parent room or use first available region
         let defaultRegion = regionsList[0]?.key || 'unknown';
+        console.log('🔍 Initial defaultRegion from regionsList[0]:', defaultRegion);
+        console.log('🔍 Available regions:', regionsList);
         
         if (isVerticalExit) {
+            console.log('🔍 Handling vertical exit, fetching parent room:', pendingVerticalExit.fromRoomId);
             // Fetch parent room data for vertical exit
             const { data: roomData } = await supabase
                 .from('rooms')
-                .select('region_name')
+                .select('region_name, region')
                 .eq('id', pendingVerticalExit.fromRoomId)
                 .single();
-            defaultRegion = roomData?.region_name || defaultRegion;
+            console.log('🔍 Fetched room data for vertical exit:', roomData);
+            defaultRegion = roomData?.region_name || roomData?.region || defaultRegion;
         } else if (pendingRoomCreate?.parentRoomData) {
-            defaultRegion = pendingRoomCreate.parentRoomData.region_name || defaultRegion;
+            console.log('🔍 Using pendingRoomCreate.parentRoomData:', pendingRoomCreate.parentRoomData);
+            console.log('🔍 region_name:', pendingRoomCreate.parentRoomData.region_name);
+            console.log('🔍 region:', pendingRoomCreate.parentRoomData.region);
+            // Use region_name (preferred) or fall back to region field
+            defaultRegion = pendingRoomCreate.parentRoomData.region_name || 
+                          pendingRoomCreate.parentRoomData.region || 
+                          defaultRegion;
+        } else {
+            console.log('❌ No parentRoomData in pendingRoomCreate:', pendingRoomCreate);
         }
+        
+        console.log('✅ Final defaultRegion selected:', defaultRegion);
         
         setBlankRoom({ 
             name: 'New Room', 

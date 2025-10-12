@@ -43,7 +43,7 @@ CREATE TABLE public.rooms (
   height integer NOT NULL DEFAULT 0,
   image_url text,
   CONSTRAINT rooms_pkey PRIMARY KEY (id),
-  CONSTRAINT rooms_region_name_fkey FOREIGN KEY (region_name) REFERENCES public.regions(name)
+  CONSTRAINT rooms_region_name_fkey FOREIGN KEY (region_name) REFERENCES public.regions(name) ON DELETE CASCADE
 );
 
 -- 3) Characters depends on rooms and auth.users
@@ -55,8 +55,8 @@ CREATE TABLE public.characters (
   created_at timestamp with time zone DEFAULT now(),
   description text,
   CONSTRAINT characters_pkey PRIMARY KEY (id),
-  CONSTRAINT characters_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
-  CONSTRAINT characters_current_room_fkey FOREIGN KEY (current_room) REFERENCES public.rooms(id)
+  CONSTRAINT characters_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,
+  CONSTRAINT characters_current_room_fkey FOREIGN KEY (current_room) REFERENCES public.rooms(id) ON DELETE SET NULL
 );
 
 -- 4) Profiles depends on auth.users and rooms
@@ -71,9 +71,9 @@ CREATE TABLE public.profiles (
   membership_tier text,
   is_admin boolean DEFAULT false,
   CONSTRAINT profiles_pkey PRIMARY KEY (id),
-  CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id),
-  CONSTRAINT profiles_current_room_fkey FOREIGN KEY (current_room) REFERENCES public.rooms(id),
-  CONSTRAINT profiles_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+  CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE,
+  CONSTRAINT profiles_current_room_fkey FOREIGN KEY (current_room) REFERENCES public.rooms(id) ON DELETE SET NULL,
+  CONSTRAINT profiles_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE
 );
 
 -- 5) NPCs depends on rooms
@@ -90,7 +90,7 @@ CREATE TABLE public.npcs (
   greeting_behavior text DEFAULT 'none'::text,
   portrait_url text,
   CONSTRAINT npcs_pkey PRIMARY KEY (id),
-  CONSTRAINT npcs_current_room_fkey FOREIGN KEY (current_room) REFERENCES public.rooms(id)
+  CONSTRAINT npcs_current_room_fkey FOREIGN KEY (current_room) REFERENCES public.rooms(id) ON DELETE SET NULL
 );
 
 -- 6) Exits depends on rooms
@@ -100,8 +100,8 @@ CREATE TABLE public.exits (
   to_room uuid,
   verb text NOT NULL,
   CONSTRAINT exits_pkey PRIMARY KEY (id),
-  CONSTRAINT exits_from_room_fkey FOREIGN KEY (from_room) REFERENCES public.rooms(id),
-  CONSTRAINT exits_to_room_fkey FOREIGN KEY (to_room) REFERENCES public.rooms(id)
+  CONSTRAINT exits_from_room_fkey FOREIGN KEY (from_room) REFERENCES public.rooms(id) ON DELETE CASCADE,
+  CONSTRAINT exits_to_room_fkey FOREIGN KEY (to_room) REFERENCES public.rooms(id) ON DELETE CASCADE
 );
 
 -- 7) Sequences for commands and room_messages (your schema references nextval)
@@ -119,9 +119,9 @@ CREATE TABLE public.commands (
   conversation_history jsonb,
   user_id uuid,
   CONSTRAINT commands_pkey PRIMARY KEY (id),
-  CONSTRAINT commands_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id),
-  CONSTRAINT commands_room_id_fkey FOREIGN KEY (room_id) REFERENCES public.rooms(id),
-  CONSTRAINT commands_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+  CONSTRAINT commands_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id) ON DELETE CASCADE,
+  CONSTRAINT commands_room_id_fkey FOREIGN KEY (room_id) REFERENCES public.rooms(id) ON DELETE CASCADE,
+  CONSTRAINT commands_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE
 );
 
 -- Make sequences owned by their columns so drops are tidy later
@@ -140,10 +140,10 @@ CREATE TABLE public.room_messages (
   region text,
   region_name text,
   CONSTRAINT room_messages_pkey PRIMARY KEY (id),
-  CONSTRAINT room_messages_room_id_fkey FOREIGN KEY (room_id) REFERENCES public.rooms(id),
-  CONSTRAINT room_messages_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id),
-  CONSTRAINT room_messages_target_character_id_fkey FOREIGN KEY (target_character_id) REFERENCES public.characters(id),
-  CONSTRAINT room_messages_region_name_fkey FOREIGN KEY (region_name) REFERENCES public.regions(name)
+  CONSTRAINT room_messages_room_id_fkey FOREIGN KEY (room_id) REFERENCES public.rooms(id) ON DELETE CASCADE,
+  CONSTRAINT room_messages_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id) ON DELETE CASCADE,
+  CONSTRAINT room_messages_target_character_id_fkey FOREIGN KEY (target_character_id) REFERENCES public.characters(id) ON DELETE CASCADE,
+  CONSTRAINT room_messages_region_name_fkey FOREIGN KEY (region_name) REFERENCES public.regions(name) ON DELETE CASCADE
 );
 
 ALTER SEQUENCE public.room_messages_id_seq OWNED BY public.room_messages.id;
@@ -160,9 +160,9 @@ CREATE TABLE public.region_chats (
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   region_name text,
   CONSTRAINT region_chats_pkey PRIMARY KEY (id),
-  CONSTRAINT region_chats_room_id_fkey FOREIGN KEY (room_id) REFERENCES public.rooms(id),
-  CONSTRAINT region_chats_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id),
-  CONSTRAINT region_chats_region_name_fkey FOREIGN KEY (region_name) REFERENCES public.regions(name)
+  CONSTRAINT region_chats_room_id_fkey FOREIGN KEY (room_id) REFERENCES public.rooms(id) ON DELETE CASCADE,
+  CONSTRAINT region_chats_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id) ON DELETE CASCADE,
+  CONSTRAINT region_chats_region_name_fkey FOREIGN KEY (region_name) REFERENCES public.regions(name) ON DELETE CASCADE
 );
 
 -- =========================================
