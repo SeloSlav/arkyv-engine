@@ -528,7 +528,7 @@ supabase secrets set RETRO_DIFFUSION_API_KEY=your_key_here`}</code>
                       <ol className="space-y-2 text-slate-300 list-decimal list-inside">
                         <li>Start the dev server: <code className="text-cyan-400">npm run dev</code></li>
                         <li>Go to <code className="text-cyan-400">http://localhost:3000</code></li>
-                        <li>Click <strong>"Sign In to Play"</strong> → <strong>"Need an account? Sign Up"</strong></li>
+                        <li>Click <strong>"Sign In to Try Demo"</strong> → <strong>"Need an account? Sign Up"</strong></li>
                         <li>Create your admin account</li>
                       </ol>
                     </div>
@@ -594,7 +594,7 @@ WHERE user_id = 'your-uuid-here';`}</code>
                     <div className="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
                       <h3 className="text-xl font-semibold text-cyan-400 mb-3">Test Your Setup</h3>
                       <ol className="space-y-2 text-slate-300 list-decimal list-inside">
-                        <li>Click <strong>"Sign In to Play"</strong> and login with your admin account</li>
+                        <li>Click <strong>"Sign In to Try Demo"</strong> and login with your admin account</li>
                         <li>Create a character and enter the game</li>
                         <li>Try these commands:
                           <ul className="ml-6 mt-2 space-y-1">
@@ -941,6 +941,7 @@ git push -u origin main`}</code>
                       </p>
                     </div>
                   </div>
+                </div>
                 </div>
               )}
 

@@ -4,7 +4,9 @@
 
 An open-source text-based multi-user dungeon (MUD) built with Next.js, Supabase, and AI. Create immersive worlds where players explore interconnected regions, interact with intelligent NPCs, and shape emergent narratives through collaborative gameplay.
 
-**🎮 [Try the Live Demo](https://www.babushkabook.com/arkyv)** - See Arkyv Engine in action!
+**🎮 [Try the Live Demo](https://www.babushkabook.com/arkyv)** - Experience a fully customized world built with Arkyv Engine!
+
+**📚 [Visit Arkyv.org](https://www.arkyv.org)** - Includes a web-based setup manual and a basic demo game!
 
 ## Why This Exists
 
@@ -285,7 +287,7 @@ The admin panel uses a database column to control who has admin access.
 
 1. Start the dev server: `npm run dev`
 2. Go to `http://localhost:3000`
-3. Click "Sign In to Play" → "Need an account? Sign Up"
+3. Click "Sign In to Try Demo" → "Need an account? Sign Up"
 4. Create your admin account
 
 #### 7.2 Get Your User ID

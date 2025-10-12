@@ -129,7 +129,7 @@ export default function HomePage() {
               onClick={() => router.push(user ? '/play' : '/auth')}
               className="px-10 py-4 bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-bold rounded-lg hover:from-cyan-400 hover:to-blue-400 transition-all text-lg shadow-lg shadow-cyan-500/50 hover:shadow-cyan-400/60 hover:scale-105 transform uppercase tracking-[0.15em]"
             >
-              {user ? 'Enter Demo World' : 'Sign In to Play'}
+              {user ? 'Enter Demo World' : 'Sign In to Try Demo'}
             </button>
             
             <button
