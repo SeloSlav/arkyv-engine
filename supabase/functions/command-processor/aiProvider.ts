@@ -1,7 +1,10 @@
 /**
  * AI Provider Helper for Deno Edge Functions
  * 
- * Supports switching between OpenAI and Grok APIs via environment variables
+ * Supports switching between OpenAI and Grok APIs via environment variables.
+ * 
+ * IMPORTANT: If this file appears red or you see TypeScript warnings in your editor, 
+ * don't worry! It will work when copy and pasted into the Supabase Edge Functions dashboard.
  * 
  * Environment Variables:
  * - AI_PROVIDER: "openai" (default) or "grok"
