@@ -16,7 +16,7 @@ import {
 export default function HamburgerIcon() {
   const [isOpen, setIsOpen] = useState(false);
   const router = useRouter();
-  const { user, signOut } = useAuth();
+  const { user, profile, signOut } = useAuth();
 
   const handleSignOut = async () => {
     try {
@@ -107,17 +107,19 @@ export default function HamburgerIcon() {
                     <span>Profile</span>
                   </button>
                   
-                  {/* Admin */}
-                  <button
-                    onClick={() => {
-                      router.push('/admin');
-                      setIsOpen(false);
-                    }}
-                    className="flex items-center gap-3 w-full text-left px-4 py-3 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all font-terminal uppercase tracking-[0.1em] text-sm"
-                  >
-                    <FontAwesomeIcon icon={faShield} className="w-4 h-4 text-slate-400" />
-                    <span>Admin</span>
-                  </button>
+                  {/* Admin - Only show for admins */}
+                  {profile?.is_admin && (
+                    <button
+                      onClick={() => {
+                        router.push('/admin');
+                        setIsOpen(false);
+                      }}
+                      className="flex items-center gap-3 w-full text-left px-4 py-3 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all font-terminal uppercase tracking-[0.1em] text-sm"
+                    >
+                      <FontAwesomeIcon icon={faShield} className="w-4 h-4 text-slate-400" />
+                      <span>Admin</span>
+                    </button>
+                  )}
                   
                   <div className="my-2 border-t border-slate-700"></div>
                   
