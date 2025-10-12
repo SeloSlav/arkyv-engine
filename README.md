@@ -52,6 +52,17 @@ Before you begin, you'll need accounts with the following services:
 
 The rest of this README provides the same instructions in text format.
 
+### Setup Order (Important!)
+
+Whether you use Docker or deploy to Vercel, you **must** complete these steps in order:
+
+1. ✅ **Supabase Setup** - Create project, run migration, enable realtime, create storage buckets
+2. ✅ **Get API Keys** - Choose OpenAI or Grok for AI (required for NPCs)
+3. ✅ **Deploy Edge Functions** - Deploy command processor to Supabase
+4. ✅ **Choose Deployment** - Either Docker (self-host) OR Vercel (cloud)
+
+**Docker does NOT replace Supabase!** It only runs the Next.js app. You still need Supabase (free tier) for database, auth, and realtime features.
+
 ---
 
 ## Setup Guide
@@ -404,7 +415,62 @@ WHERE user_id = 'user-uuid-to-demote';
 
 ---
 
-## Production Deployment (Vercel)
+## Deployment Options
+
+### Option 1: Docker (Recommended for Self-Hosting)
+
+**Prerequisites:** You must complete the [Supabase Setup](#2-set-up-supabase) and [Edge Functions deployment](#5-deploy-supabase-edge-functions) sections first. Docker only runs the Next.js app - Supabase is external.
+
+**Quick Start with Docker:**
+
+```bash
+# 1. Clone the repo
+git clone https://github.com/SeloSlav/arkyv-engine.git
+cd arkyv-engine
+
+# 2. Complete Supabase setup (see sections 3.1 - 3.4 below)
+# - Create Supabase project
+# - Run migration SQL (supabase/sql/migrate.sql)
+# - Create storage buckets
+# - Deploy edge functions
+
+# 3. Create .env.local with your keys
+cp .env.example .env.local
+# Edit .env.local with your Supabase URL, keys, and AI provider key
+
+# 4. Build and run with Docker Compose
+docker-compose up -d
+
+# Your MUD is now running at http://localhost:3000
+```
+
+**Manual Docker Build:**
+
+```bash
+# Build the image
+docker build -t arkyv-engine .
+
+# Run the container
+docker run -p 3000:3000 --env-file .env.local arkyv-engine
+```
+
+**What Docker Handles:**
+- ✅ Next.js application (frontend & API routes)
+- ✅ Consistent Node.js environment
+- ✅ Easy updates and restarts
+- ✅ Works on any platform (Windows, Mac, Linux)
+
+**What You Still Need to Set Up:**
+- ⚠️ Supabase project (database, auth, storage, realtime) - **Free tier available**
+- ⚠️ Supabase Edge Functions deployment (command processor)
+- ⚠️ AI provider API key (OpenAI or Grok) - **Required for NPCs**
+- ⚠️ RetroDiffusion API key (optional, for images)
+
+**Why?** Supabase and AI APIs are external services that can't be containerized. Docker makes the app setup trivial, but you'll always need these external services (which offer free tiers).
+
+---
+
+### Option 2: Vercel (Recommended for Production)
 
 ### 1. Push to GitHub
 

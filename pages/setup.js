@@ -858,9 +858,52 @@ WHERE user_id = 'your-uuid-here';`}</code>
               {/* Deployment */}
               {activeSection === 'deployment' && (
                 <div className="space-y-6">
-                  <h2 className="text-3xl font-bold text-cyan-400">Production Deployment (Vercel)</h2>
+                  <h2 className="text-3xl font-bold text-cyan-400">Deployment Options</h2>
                   
                   <div className="space-y-6">
+                    {/* Docker Option */}
+                    <div className="bg-slate-800/50 p-6 rounded-lg border border-cyan-500/30">
+                      <h3 className="text-2xl font-semibold text-cyan-400 mb-4">Option 1: Docker (Self-Hosting)</h3>
+                      <p className="text-slate-300 mb-4">
+                        <strong className="text-amber-300">⚠️ Prerequisites:</strong> Complete Supabase setup and Edge Functions deployment first. Docker only runs the Next.js app.
+                      </p>
+                      
+                      <div className="space-y-4">
+                        <div>
+                          <h4 className="text-lg font-semibold text-slate-200 mb-2">Quick Start</h4>
+                          <pre className="bg-slate-950 border border-slate-700 rounded-lg p-4 overflow-x-auto text-sm">
+                            <code className="text-cyan-400">{`# Clone and setup
+git clone https://github.com/SeloSlav/arkyv-engine.git
+cd arkyv-engine
+
+# Create .env.local (edit with your keys)
+cp .env.example .env.local
+
+# Run with Docker Compose
+docker-compose up -d
+
+# Access at http://localhost:3000`}</code>
+                          </pre>
+                        </div>
+
+                        <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3">
+                          <p className="text-green-300 text-sm">
+                            <strong>✅ Benefits:</strong> One command deployment, consistent environment, works on Windows/Mac/Linux
+                          </p>
+                        </div>
+
+                        <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+                          <p className="text-amber-300 text-sm">
+                            <strong>⚠️ Note:</strong> You still need external services (Supabase for database, OpenAI/Grok for AI). 
+                            These can&apos;t be containerized but offer free tiers. Docker only runs the Arkyv Engine app itself.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Vercel Option */}
+                    <div className="bg-slate-800/50 p-6 rounded-lg border border-blue-500/30">
+                      <h3 className="text-2xl font-semibold text-blue-400 mb-4">Option 2: Vercel (Production)</h3>
                     <div>
                       <h3 className="text-xl font-semibold text-slate-200 mb-3">1. Push to GitHub</h3>
                       <pre className="bg-slate-950 border border-slate-700 rounded-lg p-4 overflow-x-auto text-sm">
