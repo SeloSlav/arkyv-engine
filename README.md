@@ -8,6 +8,22 @@ An open-source text-based multi-user dungeon (MUD) built with Next.js, Supabase,
 
 **📚 [Visit Arkyv.org](https://www.arkyv.org)** - Includes a web-based setup manual and a basic demo game!
 
+## Versions
+
+This is the **Supabase Edition** - the stable, production-ready version of Arkyv Engine.
+
+**🚀 [SpacetimeDB Edition](https://github.com/SeloSlav/arkyv-engine-spacetime)** (Experimental) - A rewrite using SpacetimeDB with enhanced real-time multiplayer features. The goal is to make Arkyv Engine **fully open source** without requiring cloud-based hosting providers - everything containerized and self-hostable with true persistent world state.
+
+| Feature | Supabase Edition | SpacetimeDB Edition |
+|---------|------------------|---------------------|
+| Status | ✅ Stable | ⚠️ Experimental |
+| Setup | Easy (cloud) | Moderate (self-host) |
+| Hosting | Supabase + Vercel | Fully containerized |
+| Real-time | Good | Excellent |
+| Persistent Events | ❌ | ✅ (ongoing music, mid-event joins) |
+| Tech Stack | TypeScript/Next.js | Rust + TypeScript |
+| Best For | Quick start, production | Advanced users, full control |
+
 ## Why This Exists
 
 I grew up playing MUDs and always wondered where they all went. I guess hosting was expensive and people moved on to graphical games, but as a huge reader and fan of sci-fi and fantasy, I've always loved the power of text-based storytelling and imagination.
