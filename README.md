@@ -20,7 +20,6 @@ This is the **Supabase Edition** - the stable, production-ready version of Arkyv
 | Setup | Easy (cloud) | Moderate (self-host) |
 | Hosting | Supabase + Vercel | Fully containerized |
 | Real-time | Good | Excellent |
-| Persistent Events | ❌ | ✅ (ongoing music, mid-event joins) |
 | Tech Stack | TypeScript/Next.js | Rust + TypeScript |
 | Best For | Quick start, production | Advanced users, full control |
 
