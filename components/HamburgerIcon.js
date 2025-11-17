@@ -81,6 +81,18 @@ export default function HamburgerIcon() {
                 <span>Setup Guide</span>
               </button>
               
+              {/* Demo Link */}
+              <a
+                href="https://www.babushkabook.com/arkyv"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 w-full text-left px-4 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 text-white hover:from-cyan-400 hover:to-blue-400 rounded-lg transition-all font-terminal font-bold shadow-md shadow-cyan-500/50 uppercase tracking-[0.15em] text-sm"
+              >
+                <FontAwesomeIcon icon={faGamepad} className="w-4 h-4" />
+                <span>Demo</span>
+                <span className="ml-auto text-xs">↗</span>
+              </a>
+              
               {user && (
                 <>
                   {/* Play - Highlighted */}
@@ -132,19 +144,6 @@ export default function HamburgerIcon() {
                     <span>Sign Out</span>
                   </button>
                 </>
-              )}
-              
-              {!user && (
-                <button
-                  onClick={() => {
-                    router.push('/auth');
-                    setIsOpen(false);
-                  }}
-                  className="flex items-center gap-3 w-full text-left px-4 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 text-white hover:from-cyan-400 hover:to-blue-400 rounded-lg transition-all font-terminal font-bold shadow-md shadow-cyan-500/50 uppercase tracking-[0.15em] text-sm"
-                >
-                  <FontAwesomeIcon icon={faRightToBracket} className="w-4 h-4" />
-                  <span>Sign In</span>
-                </button>
               )}
             </nav>
             
