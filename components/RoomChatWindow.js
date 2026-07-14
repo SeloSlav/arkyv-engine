@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { getSupabaseClient } from '@/lib/supabaseClient';
+import { getSpacetimeClient } from '@/lib/spacetimedbClient';
 
 const TypingDots = () => (
     <span className="inline-flex ml-1">
@@ -39,8 +39,7 @@ const buildRealtimeFilter = (regionName) => {
     if (!normalized) {
         return null;
     }
-    // Supabase realtime filters follow REST filter syntax; values with spaces must be URI encoded.
-    return `region_name=eq.${encodeURIComponent(normalized)}`;
+    return `region_name=eq.${normalized}`;
 };
 
 const formatTimestamp = (timestamp) => {
@@ -69,7 +68,7 @@ const RoomChatWindow = ({
     const [displayName, setDisplayName] = useState('');
     const [inputMessage, setInputMessage] = useState('');
     const [isSending, setIsSending] = useState(false);
-    const supabase = useMemo(() => getSupabaseClient(), []);
+    const spacetime = useMemo(() => getSpacetimeClient(), []);
     const messagesEndRef = useRef(null);
     const messagesSnapshotRef = useRef([]);
     const lastFetchedRegionRef = useRef('');
@@ -151,7 +150,7 @@ const RoomChatWindow = ({
         }
 
         try {
-            const { data, error } = await supabase
+            const { data, error } = await spacetime
                 .from('region_chats')
                 .select('id, region, region_name, room_id, character_id, character_name, kind, body, created_at')
                 .eq('region_name', normalizedRegion)
@@ -180,7 +179,7 @@ const RoomChatWindow = ({
         } finally {
             setIsLoading(false);
         }
-    }, [supabase, activeCharacter]);
+    }, [spacetime, activeCharacter]);
 
     useEffect(() => {
         fetchRegionMessages(regionName);
@@ -195,7 +194,7 @@ const RoomChatWindow = ({
             }
 
             try {
-                const { data, error } = await supabase
+                const { data, error } = await spacetime
                     .from('regions')
                     .select('display_name')
                     .eq('name', normalizedRegion)
@@ -216,7 +215,7 @@ const RoomChatWindow = ({
         };
 
         fetchRegionDisplayName();
-    }, [regionName, supabase]);
+    }, [regionName, spacetime]);
 
     useEffect(() => {
         const normalizedRegion = normalizeRegionName(regionName);
@@ -225,7 +224,7 @@ const RoomChatWindow = ({
         }
 
         const filter = buildRealtimeFilter(normalizedRegion);
-        const channel = supabase
+        const channel = spacetime
             .channel(`region-chat-${normalizedRegion}`)
             .on(
                 'postgres_changes',
@@ -252,9 +251,9 @@ const RoomChatWindow = ({
             .subscribe();
 
         return () => {
-            supabase.removeChannel(channel);
+            spacetime.removeChannel(channel);
         };
-    }, [regionName, supabase, fetchRegionMessages]);
+    }, [regionName, spacetime, fetchRegionMessages]);
 
     const formatMessage = useCallback((message) => {
         const type = message.kind || message.type || 'system';

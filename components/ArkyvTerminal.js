@@ -1,18 +1,18 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import TerminalLine from '@/components/TerminalLine';
-import getSupabaseClient from '@/lib/supabaseClient';
+import getSpacetimeClient from '@/lib/spacetimedbClient';
+import { useAuth } from '@/contexts/AuthContext';
 
 const COMMAND_PROMPT = '›';
 const MAX_LINES = 300;
-const DEFAULT_SYSTEM_MESSAGE = null; // No default welcome message
 const COMMAND_HELP = `
 Available commands:
-• login                  - Authenticate with your Arkyv account
-• register               - Create a new Arkyv account
-• forgot                 - Reset your password via email
-• cancel                 - Cancel the current login/registration/reset flow
-• logout                 - Sign out of Arkyv
-• whoami                 - Display current user identity
+• login                  - Open the saved-world picker
+• register               - Create a new saved world
+• forgot                 - Open the saved-world picker
+• cancel                 - Cancel the current prompt
+• logout                 - Log out of the active saved world
+• whoami                 - Display the active saved world
 • help or ?              - Show this help message
 • characters             - List your characters
 • create &lt;name&gt;          - Create a new character
@@ -80,13 +80,16 @@ const DIRECTION_ALIASES = {
 };
 
 export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, onRoomChange = null, onRoomMessage = null, onExecuteCommand = null, onConversationChange = null, className = '' }) {
-    const supabase = useMemo(() => getSupabaseClient(), []);
+    const spacetime = useMemo(() => getSpacetimeClient(), []);
+    const { activeWorld, signOut: signOutSavedWorld } = useAuth();
 
     const [lines, setLines] = useState([]);
     const [input, setInput] = useState('');
     const [history, setHistory] = useState([]);
     const [historyIndex, setHistoryIndex] = useState(-1);
     const [session, setSession] = useState(null);
+    const savedWorldName = activeWorld?.name || session?.user?.user_metadata?.world_name
+        || (session?.user?.id ? `World ${session.user.id.slice(0, 8)}` : 'Saved World');
     const [characters, setCharacters] = useState([]);
     const [profile, setProfile] = useState(null); // Real-world profile actor
     const profileRef = useRef(null);
@@ -99,8 +102,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
     }, []);
     const [roomSubscription, setRoomSubscription] = useState(null);
     const [roomCache, setRoomCache] = useState({});
-    const [authFlow, setAuthFlow] = useState(null);
-    const [isProcessing, setIsProcessing] = useState(false);
+    const isProcessing = false;
     const [availableExits, setAvailableExits] = useState([]);
     const [autocompleteIndex, setAutocompleteIndex] = useState(-1);
     const [roomNPCs, setRoomNPCs] = useState([]); // Track NPCs in current room
@@ -157,7 +159,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
         if (!activeCharacter?.current_room) return;
         
         // Fetch exits for current room
-        supabase
+        spacetime
             .from('exits')
             .select('to_room')
             .eq('from_room', activeCharacter.current_room)
@@ -167,7 +169,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                 const adjacentRoomIds = exits.map(e => e.to_room);
                 
                 // Fetch image URLs for adjacent rooms
-                supabase
+                spacetime
                     .from('rooms')
                     .select('image_url')
                     .in('id', adjacentRoomIds)
@@ -183,7 +185,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                         }
                     });
             });
-    }, [activeCharacter?.current_room, supabase]);
+    }, [activeCharacter?.current_room, spacetime]);
 
     useEffect(() => {
         if (!disabled && inputRef.current) {
@@ -265,7 +267,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
         if (!user) return null;
         try {
             // Try to read profile by auth user_id
-            let { data: prof, error } = await supabase
+            let { data: prof, error } = await spacetime
                 .from('profiles')
                 .select('id, handle, current_room, user_id')
                 .eq('id', user.id)
@@ -275,9 +277,8 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                 return null;
             }
             if (!prof) {
-                // Create default profile using email prefix as handle
-                const defaultHandle = (user.email || 'guest').split('@')[0];
-                const { data: newProf, error: insertErr } = await supabase
+                const defaultHandle = user.user_metadata?.world_name || 'traveler';
+                const { data: newProf, error: insertErr } = await spacetime
                     .from('profiles')
                     .insert({ user_id: user.id, handle: defaultHandle, current_room: STARTING_LOBBY_ROOM_ID })
                     .select('id, handle, current_room, user_id')
@@ -289,7 +290,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                 prof = newProf;
             }
             if (!prof.current_room) {
-                const { error: updErr } = await supabase
+                const { error: updErr } = await spacetime
                     .from('profiles')
                     .update({ current_room: STARTING_LOBBY_ROOM_ID })
                     .eq('id', prof.id);
@@ -306,7 +307,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
             console.error('ensureProfile error:', err);
             return null;
         }
-    }, [supabase]);
+    }, [spacetime]);
 
     const getRegistry = useCallback((roomId = 'global') => {
         if (!messageRegistryRef.current.has(roomId)) {
@@ -365,11 +366,11 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
 
     }, [registerLine]);
 
-    const greetUser = useCallback((email) => {
-        if (!email || welcomeRef.current) {
+    const greetUser = useCallback((worldName) => {
+        if (!worldName || welcomeRef.current) {
             return;
         }
-        appendLine(createSystemLine(`Welcome back, ${email}. Type 'help' for commands.`));
+        appendLine(createSystemLine(`Welcome back to ${worldName}. Type 'help' for commands.`));
         welcomeRef.current = true;
     }, [appendLine]);
 
@@ -387,7 +388,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
 
         if (roomSubscription) {
             const previousRoom = currentRoomRef.current;
-            supabase.removeChannel(roomSubscription);
+            spacetime.removeChannel(roomSubscription);
             setRoomSubscription(null);
             if (previousRoom) {
                 roomEntryTimesRef.current.delete(previousRoom);
@@ -402,14 +403,14 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                 onRoomChange?.(null, activeCharacterRef.current ?? activeCharacter);
             }
         }
-    }, [roomSubscription, supabase, onRoomChange, activeCharacter]);
+    }, [roomSubscription, spacetime, onRoomChange, activeCharacter]);
 
     useEffect(() => {
         let isMounted = true;
         let hasShownInitialMessage = false;
 
         (async () => {
-            const { data, error } = await supabase.auth.getSession();
+            const { data, error } = await spacetime.auth.getSession();
             if (!isMounted) return;
 
             if (error) {
@@ -423,12 +424,12 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                 // Show welcome message for logged-out users
                 if (!hasShownInitialMessage) {
                     hasShownInitialMessage = true;
-                    appendLine(createSystemLine('Welcome to the Arkyv.\n\nType \'login\' to access the network, \'register\' to create a new account, or \'forgot\' to reset your password.\n\n'));
+                    appendLine(createSystemLine('Welcome to Arkyv.\n\nOpen the saved-world picker to create or resume a world.\n\n'));
                 }
             }
         })();
 
-        const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+        const { data: listener } = spacetime.auth.onAuthStateChange((_event, newSession) => {
             if (!isMounted) return;
             setSession(newSession);
 
@@ -438,7 +439,6 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                 onboardingRef.current = false;
                 setActiveCharacter(null);
                 setCharacters([]);
-                setAuthFlow(null);
                 setProfile(null);
                 profileRef.current = null;
                 // Reset all initialization flags so next login works properly
@@ -457,7 +457,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
             isMounted = false;
             listener.subscription.unsubscribe();
         };
-    }, [appendLine, supabase, unsubscribeFromRoom]);
+    }, [appendLine, spacetime, unsubscribeFromRoom]);
 
     const loadAvailableExits = useCallback(async (roomId) => {
         if (!roomId) {
@@ -466,7 +466,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
         }
 
         try {
-            const { data, error } = await supabase
+            const { data, error } = await spacetime
                 .from('exits')
                 .select('verb')
                 .eq('from_room', roomId);
@@ -495,7 +495,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
             console.error('Error loading exits for autocomplete:', error);
             setAvailableExits([]);
         }
-    }, [supabase]);
+    }, [spacetime]);
 
     const loadRoomNPCs = useCallback(async (roomId) => {
         if (!roomId) {
@@ -504,7 +504,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
         }
 
         try {
-            const { data, error } = await supabase
+            const { data, error } = await spacetime
                 .from('npcs')
                 .select('name, alias, description, portrait_url')
                 .eq('current_room', roomId);
@@ -520,7 +520,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
             console.error('Failed to load NPCs for autocomplete:', error);
             setRoomNPCs([]);
         }
-    }, [supabase]);
+    }, [spacetime]);
 
     const loadRoomCharacters = useCallback(async (roomId) => {
         if (!roomId) {
@@ -531,7 +531,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
         try {
             // Fetch from room_messages to get all character names in the room
             // This bypasses RLS issues with the characters table
-            const { data: messages, error } = await supabase
+            const { data: messages, error } = await spacetime
                 .from('room_messages')
                 .select('character_name, character_id')
                 .eq('room_id', roomId)
@@ -563,7 +563,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
             console.error('Failed to load room characters for autocomplete:', error);
             setRoomCharacters([]);
         }
-    }, [supabase]);
+    }, [spacetime]);
 
     const addToConversationHistory = useCallback((role, content) => {
         setConversationHistory(prev => {
@@ -596,7 +596,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
 
         console.log('🔥 Subscribing to room:', roomId);
 
-        const channel = supabase
+        const channel = spacetime
             .channel(`room-${roomId}`)
             .on(
                 'postgres_changes',
@@ -713,7 +713,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
             .subscribe();
 
         setRoomSubscription(channel);
-    }, [appendLine, getRegistry, supabase, unsubscribeFromRoom, activeCharacter, loadAvailableExits, loadRoomNPCs, loadRoomCharacters, conversationMode, addToConversationHistory]);
+    }, [appendLine, getRegistry, spacetime, unsubscribeFromRoom, activeCharacter, loadAvailableExits, loadRoomNPCs, loadRoomCharacters, conversationMode, addToConversationHistory]);
 
     // Keep active character ref in sync
     useEffect(() => {
@@ -736,7 +736,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
         }
 
         try {
-            const { data, error } = await supabase
+            const { data, error } = await spacetime
                 .from('rooms')
                 .select('id, name, description, region, region_name, image_url, regions!rooms_region_name_fkey(display_name)')
                 .eq('id', roomId)
@@ -756,7 +756,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
             appendLine(createErrorLine(`Connection issue loading room: ${formatError(error)}`));
             return null;
         }
-    }, [roomCache, supabase, setRoomCache]);
+    }, [roomCache, spacetime, setRoomCache]);
 
     const getAutocompleteMatches = useCallback((input) => {
         if (!input.trim()) return [];
@@ -968,7 +968,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
         const activeCharId = activeCharacter?.id;
         console.log('🔍 Loading recent messages for room:', roomId, 'with active character:', activeCharId);
 
-        let query = supabase
+        let query = spacetime
             .from('room_messages')
             .select('id, room_id, character_id, character_name, target_character_id, kind, body, created_at')
             .eq('room_id', roomId);
@@ -999,7 +999,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
         if (data?.length) {
             appendLines(data.map(msg => createMessageLine(msg, activeCharacter, roomNPCs)));
         }
-    }, [appendLines, supabase, activeCharacter, roomNPCs]);
+    }, [appendLines, spacetime, activeCharacter, roomNPCs]);
 
     const hasLoadedCharacters = useRef(false);
 
@@ -1026,7 +1026,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
 
         console.log('📡 Fetching characters from database...');
         try {
-            const { data, error } = await supabase
+            const { data, error } = await spacetime
                 .from('characters')
                 .select('id, name, current_room, created_at, rooms!characters_current_room_fkey(id, name, region_name, regions!rooms_region_name_fkey(display_name))')
                 .order('created_at', { ascending: true });
@@ -1073,7 +1073,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
             console.error('Network error loading characters:', error);
             return [];
         }
-    }, [activeCharacter, appendLine, appendLines, session, supabase, roomCache, loadRoomDetails]);
+    }, [activeCharacter, appendLine, appendLines, session, spacetime, roomCache, loadRoomDetails]);
 
     const hasInitializedProfile = useRef(false);
     const hasGreetedUser = useRef(false);
@@ -1081,27 +1081,27 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
     useEffect(() => {
         console.log('🎯 Greeting effect triggered:', {
             hasSession: !!session,
-            hasEmail: !!session?.user?.email,
+            hasSavedWorld: !!session?.user,
             welcomeRefValue: welcomeRef.current,
             hasInitializedProfile: hasInitializedProfile.current
         });
 
         // Wait for profile to be initialized (which happens after auth listener resets welcomeRef)
-        if (session?.user?.email && hasInitializedProfile.current && !hasGreetedUser.current) {
+        if (session?.user && hasInitializedProfile.current && !hasGreetedUser.current) {
             console.log('✅ Greeting and refreshing characters...');
             hasGreetedUser.current = true;
-            greetUser(session.user.email);
+            greetUser(savedWorldName);
             // Ensure characters are refreshed asynchronously
             (async () => {
                 await refreshCharacters();
             })();
         } else {
             console.log('❌ Skipping greeting:', {
-                reason: !session?.user?.email ? 'no session/email' : 
+                reason: !session?.user ? 'no saved world' :
                        !hasInitializedProfile.current ? 'profile not initialized' : 'already greeted'
             });
         }
-    }, [session, greetUser, refreshCharacters]);
+    }, [session, savedWorldName, greetUser, refreshCharacters]);
 
     // Separate effect for profile initialization - only runs once when session is established
     useEffect(() => {
@@ -1133,9 +1133,9 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                 try {
                     await sleep(50);
                     const [exitsResult, npcsResult, charsResult] = await Promise.all([
-                        supabase.from('exits').select('verb, to_room, rooms!exits_to_room_fkey(name)').eq('from_room', prof.current_room),
-                        supabase.from('npcs').select('name, alias').eq('current_room', prof.current_room),
-                        supabase.from('characters').select('name').eq('current_room', prof.current_room)
+                        spacetime.from('exits').select('verb, to_room, rooms!exits_to_room_fkey(name)').eq('from_room', prof.current_room),
+                        spacetime.from('npcs').select('name, alias').eq('current_room', prof.current_room),
+                        spacetime.from('characters').select('name').eq('current_room', prof.current_room)
                     ]);
                     
                     let envData = '';
@@ -1189,7 +1189,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                     hasShownPersonaList.current = true;
                     
                     // Fetch characters directly from database to avoid rate limiting issues
-                    const { data: loadedCharacters, error: charsError } = await supabase
+                    const { data: loadedCharacters, error: charsError } = await spacetime
                         .from('characters')
                         .select('id, name, user_id, current_room, rooms(name, region_name, regions(display_name))')
                         .eq('user_id', session.user.id)
@@ -1253,7 +1253,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                 }
             }
         })();
-    }, [session, activeCharacter, ensureProfile, subscribeToRoom, loadRecentMessages, loadRoomDetails, onRoomChange, onRoomMessage, appendLine, getRegistry, supabase, roomCache, appendLines]);
+    }, [session, activeCharacter, ensureProfile, subscribeToRoom, loadRecentMessages, loadRoomDetails, onRoomChange, onRoomMessage, appendLine, getRegistry, spacetime, roomCache, appendLines]);
 
     // Flag to track if persona list has been shown in current session
     const hasShownPersonaList = useRef(false);
@@ -1264,7 +1264,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
 
             let data, error;
             if (isProfile) {
-                const result = await supabase
+                const result = await spacetime
                     .from('profiles')
                     .select('id, handle, current_room')
                     .eq('id', actorId)
@@ -1275,7 +1275,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                     data.name = data.handle; // Normalize to match character structure
                 }
             } else {
-                const result = await supabase
+                const result = await spacetime
                     .from('characters')
                     .select('id, name, current_room')
                     .eq('id', actorId)
@@ -1324,11 +1324,11 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
             // Fetch environment data directly for the new room
             try {
                 const [exitsResult, npcsResult, charsResult] = await Promise.all([
-                    supabase.from('exits').select('verb, to_room, rooms!exits_to_room_fkey(name)').eq('from_room', data.current_room),
-                    supabase.from('npcs').select('name, alias').eq('current_room', data.current_room),
+                    spacetime.from('exits').select('verb, to_room, rooms!exits_to_room_fkey(name)').eq('from_room', data.current_room),
+                    spacetime.from('npcs').select('name, alias').eq('current_room', data.current_room),
                     isProfile 
-                        ? supabase.from('characters').select('name').eq('current_room', data.current_room)
-                        : supabase.from('characters').select('name').eq('current_room', data.current_room).neq('id', actorId)
+                        ? spacetime.from('characters').select('name').eq('current_room', data.current_room)
+                        : spacetime.from('characters').select('name').eq('current_room', data.current_room).neq('id', actorId)
                 ]);
                 
                 let envData = '';
@@ -1356,7 +1356,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                 hasShownPersonaList.current = true;
                 
                 // Fetch fresh characters from database
-                const { data: loadedCharacters, error: charsError } = await supabase
+                const { data: loadedCharacters, error: charsError } = await spacetime
                     .from('characters')
                     .select('id, name, user_id, current_room, rooms(name, region_name, regions(display_name))')
                     .eq('user_id', session.user.id)
@@ -1430,7 +1430,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
         }
 
         return null;
-    }, [appendLine, appendLines, getRegistry, loadRecentMessages, loadRoomDetails, subscribeToRoom, supabase, unsubscribeFromRoom, onRoomChange, onRoomMessage, setProfile, roomCache, session]);
+    }, [appendLine, appendLines, getRegistry, loadRecentMessages, loadRoomDetails, subscribeToRoom, spacetime, unsubscribeFromRoom, onRoomChange, onRoomMessage, setProfile, roomCache, session]);
 
     const createCharacter = useCallback(async (name) => {
         if (!session) {
@@ -1453,7 +1453,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
             current_room: STARTING_ROOM_ID,
         };
 
-        const { data, error } = await supabase
+        const { data, error } = await spacetime
             .from('characters')
             .insert(insertPayload)
             .select('id, name, current_room')
@@ -1484,7 +1484,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
         ]);
 
         await refreshCharacters();
-    }, [appendLine, appendLines, refreshCharacters, session, supabase, roomCache]);
+    }, [appendLine, appendLines, refreshCharacters, session, spacetime, roomCache]);
 
     const enterCharacter = useCallback(async (identifier) => {
         // Use cached characters instead of refreshing
@@ -1522,7 +1522,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
             // Trigger NPC greetings immediately for room entry
             try {
                 console.log('👋 Inserting __GREET command for room:', target.current_room, 'character:', target.id);
-                const { data: greetData, error: greetError } = await supabase.from('commands').insert({
+                const { data: greetData, error: greetError } = await spacetime.from('commands').insert({
                     character_id: target.id,
                     room_id: target.current_room,
                     raw: '__GREET'
@@ -1545,9 +1545,9 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
             // Fetch environment data directly without showing a command
             try {
                 const [exitsResult, npcsResult, charsResult] = await Promise.all([
-                    supabase.from('exits').select('verb, to_room, rooms!exits_to_room_fkey(name)').eq('from_room', target.current_room),
-                    supabase.from('npcs').select('name, alias').eq('current_room', target.current_room),
-                    supabase.from('characters').select('name').eq('current_room', target.current_room).neq('id', target.id)
+                    spacetime.from('exits').select('verb, to_room, rooms!exits_to_room_fkey(name)').eq('from_room', target.current_room),
+                    spacetime.from('npcs').select('name, alias').eq('current_room', target.current_room),
+                    spacetime.from('characters').select('name').eq('current_room', target.current_room).neq('id', target.id)
                 ]);
                 
                 let envData = '';
@@ -1572,7 +1572,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
         } else {
             appendLine(createSystemLine('Character is not currently in a room. Use "go <verb>" to enter.'));
         }
-    }, [appendLine, characters, loadRoomDetails, loadRecentMessages, subscribeToRoom, onRoomChange, onRoomMessage, supabase]);
+    }, [appendLine, characters, loadRoomDetails, loadRecentMessages, subscribeToRoom, onRoomChange, onRoomMessage, spacetime]);
 
     const triggerCommandProcessor = useCallback(async () => {
         try {
@@ -1613,7 +1613,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
         
         console.log('Inserting command into database:', insertData);
         
-        const { data, error } = await supabase
+        const { data, error } = await spacetime
             .from('commands')
             .insert(insertData)
             .select();
@@ -1626,7 +1626,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
         console.log('Command inserted successfully:', data);
         console.log('Triggering command processor...');
         triggerCommandProcessor();
-    }, [supabase, triggerCommandProcessor, session, activeCharacter]);
+    }, [spacetime, triggerCommandProcessor, session, activeCharacter]);
 
     const getActor = useCallback(() => {
         if (activeCharacter) {
@@ -1696,7 +1696,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
             return;
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await spacetime
             .from('exits')
             .select('verb, to_room')
             .eq('from_room', actor.current_room);
@@ -1722,7 +1722,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
         }
 
         appendLines(exitLines);
-    }, [appendLine, appendLines, loadRoomDetails, supabase, ensureActor]);
+    }, [appendLine, appendLines, loadRoomDetails, spacetime, ensureActor]);
 
     const handleMovement = useCallback(async (verb) => {
         const actor = await ensureActor();
@@ -1752,146 +1752,14 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
         }
     }, [appendLine, pollCharacterRoomChange, submitCommand, ensureActor]);
 
-    const handleAuthentication = useCallback(async ({ email, password, isSignup }) => {
-        const trimmedEmail = email.trim().toLowerCase();
-        if (!trimmedEmail || !password) {
-            appendLine(createErrorLine('Email and password are required.'));
-            return;
-        }
-
-        setIsProcessing(true);
-
-        try {
-            let authData, authError;
-
-            if (isSignup) {
-                // For signup, disable email confirmation by setting auto-confirm
-                const { data, error } = await supabase.auth.signUp({
-                    email: trimmedEmail,
-                    password,
-                    options: {
-                        emailRedirectTo: undefined, // Disable email redirect
-                        data: {
-                            email_confirmed: true // Auto-confirm the email
-                        }
-                    }
-                });
-                authData = data;
-                authError = error;
-            } else {
-                // For login, use normal sign in
-                const { data, error } = await supabase.auth.signInWithPassword({
-                    email: trimmedEmail,
-                    password
-                });
-                authData = data;
-                authError = error;
-            }   
-
-            if (authError) {
-                appendLine(createErrorLine(`Authentication failed: ${formatError(authError)}`));
-                return;
-            }
-
-            if (authData?.session) {
-                setSession(authData.session);
-                greetUser(trimmedEmail);
-                // Characters will be refreshed by the useEffect when session changes
-            } else if (isSignup) {
-                // Since we auto-confirmed the email, the user should be able to log in immediately
-                appendLine(createSystemLine('Registration complete! You can now log in with your credentials.'));
-            }
-        } finally {
-            setIsProcessing(false);
-        }
-    }, [appendLine, greetUser, refreshCharacters, supabase]);
-
     const executeCommand = useCallback(async (rawInput) => {
         if (disabled || isProcessing) return;
 
         const trimmed = rawInput.trim();
         if (!trimmed) return;
 
-        const isPasswordStep = authFlow?.step === 'password' || authFlow?.step === 'confirm';
-        const displayText = isPasswordStep ? '•'.repeat(trimmed.length || 6) : trimmed;
-
-        appendLine(createInputLine(displayText));
+        appendLine(createInputLine(trimmed));
         setInput('');
-
-        if (authFlow) {
-            if (trimmed.toLowerCase() === 'cancel') {
-                setAuthFlow(null);
-                appendLine(createSystemLine('Authentication cancelled.'));
-                return;
-            }
-
-            if (authFlow.step === 'email') {
-                // For forgot password, send reset email immediately
-                if (authFlow.mode === 'forgot') {
-                    setAuthFlow(null);
-                    setIsProcessing(true);
-                    
-                    try {
-                        const { error } = await supabase.auth.resetPasswordForEmail(trimmed, {
-                            redirectTo: `${window.location.origin}/auth?mode=resetPassword`,
-                        });
-                        
-                        if (error) {
-                            appendLine(createErrorLine(`Password reset failed: ${error.message}`));
-                        } else {
-                            appendLine(createSystemLine(`Password reset email sent to ${trimmed}. Check your inbox for the reset link.`));
-                        }
-                    } catch (err) {
-                        appendLine(createErrorLine(`Password reset failed: ${err.message || 'Unknown error'}`));
-                    } finally {
-                        setIsProcessing(false);
-                    }
-                    return;
-                }
-                
-                // For login/register, proceed to password step
-                setAuthFlow((prev) => (prev ? { ...prev, email: trimmed, step: 'password' } : null));
-                appendLine(createSystemLine('Enter password:'));
-                return;
-            }
-
-            if (authFlow.step === 'password') {
-                // For registration, require password confirmation
-                if (authFlow.mode === 'register') {
-                    setAuthFlow((prev) => (prev ? { ...prev, password: trimmed, step: 'confirm' } : null));
-                    appendLine(createSystemLine('Confirm password:'));
-                    return;
-                } else {
-                    // For login, proceed directly
-                    const flow = authFlow;
-                    setAuthFlow(null);
-                    await handleAuthentication({
-                        email: flow.email,
-                        password: trimmed,
-                        isSignup: false,
-                    });
-                    return;
-                }
-            }
-
-            if (authFlow.step === 'confirm') {
-                // Validate password confirmation matches
-                if (trimmed !== authFlow.password) {
-                    setAuthFlow(null);
-                    appendLine(createErrorLine('Passwords do not match. Registration cancelled. Please try again with "register".'));
-                    return;
-                }
-                
-                const flow = authFlow;
-                setAuthFlow(null);
-                await handleAuthentication({
-                    email: flow.email,
-                    password: flow.password,
-                    isSignup: true,
-                });
-                return;
-            }
-        }
 
         setHistory((prev) => [...prev, trimmed]);
         setHistoryIndex(-1);
@@ -1942,47 +1810,25 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                 break;
 
             case 'login':
-                if (session) {
-                    appendLine(createSystemLine(`Already logged in as ${session.user.email}. Use 'logout' to switch accounts.`));
-                    break;
-                }
-                setAuthFlow({ mode: 'login', step: 'email', email: '' });
-                appendLine(createSystemLine('Login initiated. Enter email:'));
-                break;
-
             case 'register':
-                if (session) {
-                    appendLine(createSystemLine(`Already logged in as ${session.user.email}. Use 'logout' before registering.`));
-                    break;
-                }
-                setAuthFlow({ mode: 'register', step: 'email', email: '' });
-                appendLine(createSystemLine('Registration initiated. Enter email:'));
-                break;
-
             case 'forgot':
                 if (session) {
-                    appendLine(createSystemLine(`Already logged in as ${session.user.email}. Use 'logout' first if you want to reset a different account.`));
-                    break;
+                    appendLine(createSystemLine(`You are using ${savedWorldName}. Log out first to switch saved worlds.`));
+                } else {
+                    appendLine(createSystemLine('Opening the saved-world picker...'));
+                    window.location.assign('/auth');
                 }
-                setAuthFlow({ mode: 'forgot', step: 'email', email: '' });
-                appendLine(createSystemLine('Password reset initiated. Enter your email:'));
                 break;
 
             case 'cancel':
-                if (authFlow) {
-                    setAuthFlow(null);
-                    appendLine(createSystemLine('Authentication cancelled.'));
-                } else {
-                    appendLine(createSystemLine('Nothing to cancel.'));
-                }
+                appendLine(createSystemLine('Nothing to cancel.'));
                 break;
 
             case 'logout':
-                await supabase.auth.signOut();
+                await signOutSavedWorld();
                 setSession(null);
                 setActiveCharacter(null);
                 setCharacters([]);
-                setAuthFlow(null);
                 setProfile(null);
                 profileRef.current = null;
                 // Reset all initialization flags so next login works properly
@@ -1992,6 +1838,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                 hasShownPersonaList.current = false;
                 lastCharacterRefreshRef.current = 0; // Reset rate limit so refreshCharacters works on next login
                 unsubscribeFromRoom({ notifyRoomChange: false });
+                window.location.assign('/auth');
                 break;
 
             case 'disengage': {
@@ -2016,7 +1863,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                 const CHARACTER_CREATION_ROOM_ID = 'e58caed0-8268-419e-abe8-faa3833a1de6';
                 
                 // Update profile's current_room to Character Creation Chamber
-                const { data: updatedProfileData, error: updateError } = await supabase
+                const { data: updatedProfileData, error: updateError } = await spacetime
                     .from('profiles')
                     .update({ current_room: CHARACTER_CREATION_ROOM_ID })
                     .eq('id', session.user.id)
@@ -2054,9 +1901,9 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                     try {
                         await sleep(50);
                         const [exitsResult, npcsResult, charsResult] = await Promise.all([
-                            supabase.from('exits').select('verb, to_room, rooms!exits_to_room_fkey(name)').eq('from_room', updatedProfileData.current_room),
-                            supabase.from('npcs').select('name, alias').eq('current_room', updatedProfileData.current_room),
-                            supabase.from('characters').select('name').eq('current_room', updatedProfileData.current_room)
+                            spacetime.from('exits').select('verb, to_room, rooms!exits_to_room_fkey(name)').eq('from_room', updatedProfileData.current_room),
+                            spacetime.from('npcs').select('name, alias').eq('current_room', updatedProfileData.current_room),
+                            spacetime.from('characters').select('name').eq('current_room', updatedProfileData.current_room)
                         ]);
                         
                         let envData = '';
@@ -2094,7 +1941,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
 
             case 'whoami':
                 if (session) {
-                    appendLine(createSystemLine(`User: ${session.user.email}`));
+                    appendLine(createSystemLine(`Saved world: ${savedWorldName}\nIdentity: ${session.user.id}`));
                 } else {
                     appendLine(createSystemLine('You are not logged in.'));
                 }
@@ -2322,7 +2169,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                 }
                 break;
         }
-    }, [activeCharacter, appendLine, appendLines, authFlow, clearLines, createCharacter, disabled, enterCharacter, handleAuthentication, handleExits, handleLook, handleMovement, handleSay, isProcessing, refreshCharacters, session, submitCommand, supabase, unsubscribeFromRoom, isMovementCommand, expandDirectionAlias, conversationMode, exitConversationMode, enterConversationMode, addToConversationHistory, conversationHistory, profile, ensureProfile]);
+    }, [activeCharacter, appendLine, appendLines, clearLines, createCharacter, disabled, enterCharacter, handleExits, handleLook, handleMovement, handleSay, isProcessing, refreshCharacters, session, submitCommand, spacetime, unsubscribeFromRoom, isMovementCommand, expandDirectionAlias, conversationMode, exitConversationMode, enterConversationMode, addToConversationHistory, conversationHistory, profile, ensureProfile, savedWorldName, signOutSavedWorld]);
 
     // Pass executeCommand to parent component
     useEffect(() => {
@@ -2429,7 +2276,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                             </button>
                         )}
                         <div className="text-gray-500 font-terminal text-xs">
-                            {session ? `${session.user.email}` : 'Unauthenticated'}
+                            {session ? savedWorldName : 'No saved world'}
                         </div>
                     </div>
                 </div>
@@ -2468,8 +2315,8 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                                     <span className="text-xs">{isMusicEnabled ? '🔊' : '🔇'}</span>
                                 </button>
                             )}
-                            <div className="text-gray-500 font-terminal text-xs truncate max-w-[100px]" title={session ? session.user.email : 'Guest'}>
-                                {session ? session.user.email : 'Guest'}
+                            <div className="text-gray-500 font-terminal text-xs truncate max-w-[100px]" title={session ? savedWorldName : 'No saved world'}>
+                                {session ? savedWorldName : 'Guest'}
                             </div>
                         </div>
                     </div>
@@ -2541,9 +2388,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                                 }
                                 
                                 if (!session) {
-                                    if (authFlow?.step === 'email') return 'Type email';
-                                    if (authFlow?.step === 'password') return 'Type password';
-                                    return 'Enter command';
+                                    return 'Choose a saved world to continue';
                                 }
                                 
                                 return isMobile ? 'Enter command' : 'Enter command (press Enter to send)';
@@ -2577,9 +2422,6 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                     </div>
                 </div>
 
-                {authFlow && !disabled && (
-                    <div className="text-xs text-gray-500 font-terminal mt-1.5">Type &apos;cancel&apos; to abort the current authentication flow.</div>
-                )}
             </div>
 
             {/* Mobile-responsive footer */}

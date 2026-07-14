@@ -3,7 +3,8 @@ import Head from 'next/head';
 import dynamic from 'next/dynamic';
 import { Position } from '@xyflow/react';
 import { useRouter } from 'next/router';
-import getSupabaseClient from '@/lib/supabaseClient';
+import getSpacetimeClient from '@/lib/spacetimedbClient';
+import { useAuth } from '@/contexts/AuthContext';
 import Tooltip from '@/components/ui/Tooltip';
 import HamburgerIcon from '@/components/HamburgerIcon';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -418,7 +419,8 @@ const PRO_OPTIONS = {
 
 export default function ArkyvAdminPanel() {
     const router = useRouter();
-    const supabase = useMemo(() => getSupabaseClient(), []);
+    const spacetime = useMemo(() => getSpacetimeClient(), []);
+    const { session: savedWorldSession, profile: savedWorldProfile, loading: savedWorldLoading } = useAuth();
     const dialogContentRef = useRef(null);
     const [session, setSession] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -546,75 +548,18 @@ export default function ArkyvAdminPanel() {
     const [deleteNpcError, setDeleteNpcError] = useState('');
 
     useEffect(() => {
-        let isActive = true;
-
-        const guard = async () => {
-            try {
-                const { data, error } = await supabase.auth.getSession();
-                if (error) {
-                    throw error;
-                }
-
-                const currentSession = data?.session ?? null;
-                if (!isActive) {
-                    return;
-                }
-
-                setSession(currentSession);
-
-                const userId = currentSession?.user?.id ?? null;
-                console.log('🔍 Admin check - User ID:', userId);
-                
-                if (!userId) {
-                    console.warn('❌ No user ID found, redirecting to home');
-                    router.replace('/');
-                    return;
-                }
-
-                // Check if user is admin via database
-                console.log('🔍 Querying profiles table for id:', userId);
-                const { data: profile, error: profileError } = await supabase
-                    .from('profiles')
-                    .select('is_admin, user_id, id')
-                    .eq('id', userId)
-                    .single();
-
-                console.log('🔍 Profile query result:', { profile, profileError });
-
-                if (profileError) {
-                    console.error('❌ Profile query error:', profileError);
-                    router.replace('/');
-                    return;
-                }
-
-                if (!profile) {
-                    console.warn('❌ No profile found for user:', userId);
-                    router.replace('/');
-                    return;
-                }
-
-                if (!profile.is_admin) {
-                    console.warn('❌ User is not admin. is_admin value:', profile.is_admin);
-                    router.replace('/');
-                    return;
-                }
-
-                console.log('✅ Admin access granted for user:', userId);
-                setIsLoading(false);
-            } catch (err) {
-                console.error('Failed to validate admin session', err);
-                if (isActive) {
-                    router.replace('/');
-                }
-            }
-        };
-
-        guard();
-
-        return () => {
-            isActive = false;
-        };
-    }, [supabase, router]);
+        if (savedWorldLoading) return;
+        if (!savedWorldSession?.user?.id) {
+            router.replace('/auth');
+            return;
+        }
+        if (!savedWorldProfile?.is_admin) {
+            router.replace('/');
+            return;
+        }
+        setSession(savedWorldSession);
+        setIsLoading(false);
+    }, [router, savedWorldLoading, savedWorldProfile, savedWorldSession]);
 
     useEffect(() => {
         if (typeof document === 'undefined') {
@@ -670,7 +615,7 @@ export default function ArkyvAdminPanel() {
             return;
         }
         let isActive = true;
-        supabase
+        spacetime
             .from('regions')
             .select('*')
             .then(({ data, error }) => {
@@ -704,7 +649,7 @@ export default function ArkyvAdminPanel() {
         return () => {
             isActive = false;
         };
-    }, [session, supabase]);
+    }, [session, spacetime]);
 
     useEffect(() => {
         if (!session) {
@@ -713,7 +658,7 @@ export default function ArkyvAdminPanel() {
 
         const fetchRoomsAndExits = async () => {
             try {
-                const { data: rooms, error: roomsError } = await supabase
+                const { data: rooms, error: roomsError } = await spacetime
                     .from('rooms')
                     .select('id, name, description, region, region_name, height, image_url, regions(display_name)');
 
@@ -721,7 +666,7 @@ export default function ArkyvAdminPanel() {
                     throw roomsError;
                 }
 
-                const { data: exits, error: exitsError } = await supabase
+                const { data: exits, error: exitsError } = await spacetime
                     .from('exits')
                     .select('id, from_room, to_room, verb');
 
@@ -1029,7 +974,7 @@ export default function ArkyvAdminPanel() {
         };
 
         fetchRoomsAndExits();
-    }, [session, supabase, currentLayer, reloadCounter, customRoomPositions]);
+    }, [session, spacetime, currentLayer, reloadCounter, customRoomPositions]);
 
     // Load all rooms for NPC room selector
     useEffect(() => {
@@ -1037,7 +982,7 @@ export default function ArkyvAdminPanel() {
             return;
         }
         let isActive = true;
-        supabase
+        spacetime
             .from('rooms')
             .select('id, name, region_name, height, image_url')
             .order('name', { ascending: true })
@@ -1052,7 +997,7 @@ export default function ArkyvAdminPanel() {
         return () => {
             isActive = false;
         };
-    }, [session, supabase, reloadCounter]);
+    }, [session, spacetime, reloadCounter]);
 
     // Load NPCs
     useEffect(() => {
@@ -1060,7 +1005,7 @@ export default function ArkyvAdminPanel() {
             return;
         }
         let isActive = true;
-        supabase
+        spacetime
             .from('npcs')
             .select(`
                 id, 
@@ -1091,7 +1036,7 @@ export default function ArkyvAdminPanel() {
         return () => {
             isActive = false;
         };
-    }, [session, supabase, reloadCounter]);
+    }, [session, spacetime, reloadCounter]);
 
     const handleNodeClick = useCallback((event, node) => {
         // Don't open dialog if clicking on a handle
@@ -1256,7 +1201,7 @@ export default function ArkyvAdminPanel() {
                 region_name: regionObj ? regionObj.key : null
             };
             
-            const { error } = await supabase.from('rooms').update(payload).eq('id', editRoom.id);
+            const { error } = await spacetime.from('rooms').update(payload).eq('id', editRoom.id);
             if (error) throw error;
             // Update local and refresh graph
             setActiveRoom((prev) => prev ? { ...prev, ...payload } : prev);
@@ -1269,7 +1214,7 @@ export default function ArkyvAdminPanel() {
             setSaveError(err?.message ?? 'Failed to save changes');
             setSaving(false);
         }
-    }, [isDirty, editRoom, supabase, regionsList]);
+    }, [isDirty, editRoom, spacetime, regionsList]);
 
     const handleCreateExit = useCallback(async (direction, targetRoomId) => {
         if (!editRoom?.id || !targetRoomId || !direction) return;
@@ -1297,15 +1242,15 @@ export default function ArkyvAdminPanel() {
                 });
             }
             
-            const { error } = await supabase.from('exits').insert(exitsPayload);
+            const { error } = await spacetime.from('exits').insert(exitsPayload);
             if (error) throw error;
             
             // Fetch the updated room data with exits
-            const { data: roomsData } = await supabase
+            const { data: roomsData } = await spacetime
                 .from('rooms')
                 .select('id, name, description, region, region_name, height, regions(display_name)');
             
-            const { data: exitsData } = await supabase
+            const { data: exitsData } = await spacetime
                 .from('exits')
                 .select('id, from_room, to_room, verb');
             
@@ -1338,7 +1283,7 @@ export default function ArkyvAdminPanel() {
         } finally {
             setIsCreatingExit(false);
         }
-    }, [editRoom, supabase, isOneWayExit]);
+    }, [editRoom, spacetime, isOneWayExit]);
 
     const handleDeleteExit = useCallback(async (direction, targetRoomId, targetRoomName) => {
         if (!editRoom?.id || !targetRoomId || !direction) return;
@@ -1357,7 +1302,7 @@ export default function ArkyvAdminPanel() {
             
             if (isEdgeDelete) {
                 // Edge deletion - delete all exits between the two rooms
-                const { error } = await supabase
+                const { error } = await spacetime
                     .from('exits')
                     .delete()
                     .or(`and(from_room.eq.${sourceRoomId},to_room.eq.${targetRoomId}),and(from_room.eq.${targetRoomId},to_room.eq.${sourceRoomId})`);
@@ -1371,7 +1316,7 @@ export default function ArkyvAdminPanel() {
                 
                 if (deleteOnlyOneDirection) {
                     // Delete only the specified direction
-                    const { error } = await supabase
+                    const { error } = await spacetime
                         .from('exits')
                         .delete()
                         .eq('from_room', editRoom.id)
@@ -1381,7 +1326,7 @@ export default function ArkyvAdminPanel() {
                     if (error) throw error;
                 } else {
                     // Delete both directions (bidirectional)
-                    const { error } = await supabase
+                    const { error } = await spacetime
                         .from('exits')
                         .delete()
                         .or(`and(from_room.eq.${editRoom.id},to_room.eq.${targetRoomId},verb.eq.${direction}),and(from_room.eq.${targetRoomId},to_room.eq.${editRoom.id},verb.eq.${reverseDir})`);
@@ -1390,11 +1335,11 @@ export default function ArkyvAdminPanel() {
                 }
                 
                 // Update activeRoom with new exits
-                const { data: roomsData } = await supabase
+                const { data: roomsData } = await spacetime
                     .from('rooms')
                     .select('id, name, description, region, region_name, height, regions(display_name)');
                 
-                const { data: exitsData } = await supabase
+                const { data: exitsData } = await spacetime
                     .from('exits')
                     .select('id, from_room, to_room, verb');
                 
@@ -1425,7 +1370,7 @@ export default function ArkyvAdminPanel() {
         } finally {
             setIsDeletingExit(false);
         }
-    }, [deleteExitConfirm, deleteOnlyOneDirection, editRoom, supabase]);
+    }, [deleteExitConfirm, deleteOnlyOneDirection, editRoom, spacetime]);
 
     const openDeleteDialog = useCallback(() => {
         setIsDeleteDialogOpen(true);
@@ -1464,7 +1409,7 @@ export default function ArkyvAdminPanel() {
             setDeleteError('');
 
             // First delete all exits connected to this room
-            const { error: exitsError } = await supabase
+            const { error: exitsError } = await spacetime
                 .from('exits')
                 .delete()
                 .or(`from_room.eq.${editRoom.id},to_room.eq.${editRoom.id}`);
@@ -1472,7 +1417,7 @@ export default function ArkyvAdminPanel() {
             if (exitsError) throw exitsError;
 
             // Then delete the room itself
-            const { error: roomError } = await supabase
+            const { error: roomError } = await spacetime
                 .from('rooms')
                 .delete()
                 .eq('id', editRoom.id);
@@ -1492,7 +1437,7 @@ export default function ArkyvAdminPanel() {
             setDeleteError(err?.message ?? 'Failed to delete room');
             setIsDeleting(false);
         }
-    }, [editRoom, deleteConfirmText, supabase]);
+    }, [editRoom, deleteConfirmText, spacetime]);
 
     const handleCreateRoomFromHandle = useCallback((parentRoomId, handleId, parentRoomData) => {
         // Extract direction from handle ID
@@ -1560,7 +1505,7 @@ export default function ArkyvAdminPanel() {
                 });
             }
             
-            const { error } = await supabase.from('exits').insert(exitsPayload);
+            const { error } = await spacetime.from('exits').insert(exitsPayload);
             if (error) throw error;
             
             // Refresh the graph
@@ -1577,7 +1522,7 @@ export default function ArkyvAdminPanel() {
         } finally {
             setIsCreatingExit(false);
         }
-    }, [pendingRoomCreate, pendingVerticalExit, linkExistingSelection, supabase, isOneWayExit]);
+    }, [pendingRoomCreate, pendingVerticalExit, linkExistingSelection, spacetime, isOneWayExit]);
 
     const createBlankRoom = useCallback(async () => {
         const isVerticalExit = pendingVerticalExit !== null;
@@ -1599,7 +1544,7 @@ export default function ArkyvAdminPanel() {
         if (isVerticalExit) {
             console.log('🔍 Handling vertical exit, fetching parent room:', pendingVerticalExit.fromRoomId);
             // Fetch parent room data for vertical exit
-            const { data: roomData } = await supabase
+            const { data: roomData } = await spacetime
                 .from('rooms')
                 .select('region_name, region')
                 .eq('id', pendingVerticalExit.fromRoomId)
@@ -1627,7 +1572,7 @@ export default function ArkyvAdminPanel() {
             region: defaultRegion
         });
         setShowBlankRoomDialog(true);
-    }, [pendingRoomCreate, pendingVerticalExit, regionsList, supabase]);
+    }, [pendingRoomCreate, pendingVerticalExit, regionsList, spacetime]);
 
     // Ensure the region dropdown always reflects the intended default when dialog opens
     useEffect(() => {
@@ -1665,7 +1610,7 @@ export default function ArkyvAdminPanel() {
             // Get parent room height for vertical exits
             let parentHeight = 0;
             if (isVerticalExit || direction === 'up' || direction === 'down') {
-                const { data: parentRoom } = await supabase
+                const { data: parentRoom } = await spacetime
                     .from('rooms')
                     .select('height')
                     .eq('id', parentRoomId)
@@ -1685,7 +1630,7 @@ export default function ArkyvAdminPanel() {
             const normalizedRegion = blankRoom.region;
             
             // Fetch region display name
-            const { data: regionData } = await supabase
+            const { data: regionData } = await spacetime
                 .from('regions')
                 .select('display_name')
                 .eq('name', normalizedRegion)
@@ -1702,7 +1647,7 @@ export default function ArkyvAdminPanel() {
                 height: newRoomHeight
             };
             
-            const { data: newRoom, error: roomError} = await supabase
+            const { data: newRoom, error: roomError} = await spacetime
                 .from('rooms')
                 .insert([newRoomPayload])
                 .select()
@@ -1724,20 +1669,20 @@ export default function ArkyvAdminPanel() {
                 }
             ];
             
-            const { error: exitsError } = await supabase
+            const { error: exitsError } = await spacetime
                 .from('exits')
                 .insert(exitsPayload);
             
             if (exitsError) throw exitsError;
             
             // Fetch the newly created exits with target room data
-            const { data: newExitsData } = await supabase
+            const { data: newExitsData } = await spacetime
                 .from('exits')
                 .select('id, from_room, to_room, verb')
                 .eq('from_room', newRoom.id);
             
             // Fetch the parent room data for the exit
-            const { data: fetchedParentRoom } = await supabase
+            const { data: fetchedParentRoom } = await spacetime
                 .from('rooms')
                 .select('id, name, description, region, region_name, height, image_url')
                 .eq('id', parentRoomId)
@@ -1782,7 +1727,7 @@ export default function ArkyvAdminPanel() {
             setIsCreatingRoom(false);
             alert(`Failed to create room: ${err?.message || 'Unknown error'}`);
         }
-    }, [pendingRoomCreate, pendingVerticalExit, blankRoom, supabase]);
+    }, [pendingRoomCreate, pendingVerticalExit, blankRoom, spacetime]);
 
     const saveStandaloneRoom = useCallback(async () => {
         if (!blankRoom.name || !blankRoom.description || !blankRoom.region) return;
@@ -1795,7 +1740,7 @@ export default function ArkyvAdminPanel() {
             const normalizedRegion = blankRoom.region;
             
             // Fetch region display name
-            const { data: regionData } = await supabase
+            const { data: regionData } = await spacetime
                 .from('regions')
                 .select('display_name')
                 .eq('name', normalizedRegion)
@@ -1812,7 +1757,7 @@ export default function ArkyvAdminPanel() {
                 height: 0
             };
             
-            const { data: newRoom, error: roomError} = await supabase
+            const { data: newRoom, error: roomError} = await spacetime
                 .from('rooms')
                 .insert([newRoomPayload])
                 .select()
@@ -1866,7 +1811,7 @@ export default function ArkyvAdminPanel() {
             setIsStandaloneRoom(false);
             alert(`Failed to create standalone room: ${err?.message || 'Unknown error'}`);
         }
-    }, [blankRoom, supabase, contextMenu]);
+    }, [blankRoom, spacetime, contextMenu]);
 
     const handlePaneContextMenu = useCallback((event) => {
         event.preventDefault();
@@ -1942,7 +1887,7 @@ export default function ArkyvAdminPanel() {
             let actualParentData = parentRoomData;
             let parentHeight = 0;
             if (isVerticalExit) {
-                const { data: roomData } = await supabase
+                const { data: roomData } = await spacetime
                     .from('rooms')
                     .select('name, description, region, region_name, height')
                     .eq('id', parentRoomId)
@@ -1951,7 +1896,7 @@ export default function ArkyvAdminPanel() {
                 parentHeight = roomData?.height ?? 0;
             } else if (direction === 'up' || direction === 'down') {
                 // For vertical exits from regular pendingRoomCreate
-                const { data: roomData } = await supabase
+                const { data: roomData } = await spacetime
                     .from('rooms')
                     .select('height')
                     .eq('id', parentRoomId)
@@ -1971,7 +1916,7 @@ export default function ArkyvAdminPanel() {
             const region = normalizeRegionKey(rawRegion); // Normalize to match database format
             
             // Fetch region data for context
-            const { data: regionData, error: regionDataError } = await supabase
+            const { data: regionData, error: regionDataError } = await spacetime
                 .from('regions')
                 .select('name, display_name, description')
                 .eq('name', region)
@@ -1983,7 +1928,7 @@ export default function ArkyvAdminPanel() {
             }
             
             // Fetch all rooms in the same region for context
-            const { data: regionRooms, error: regionError } = await supabase
+            const { data: regionRooms, error: regionError } = await spacetime
                 .from('rooms')
                 .select('name, description')
                 .eq('region_name', region)
@@ -2031,7 +1976,7 @@ export default function ArkyvAdminPanel() {
                 height: newRoomHeight
             };
             
-            const { data: newRoom, error: roomError } = await supabase
+            const { data: newRoom, error: roomError } = await spacetime
                 .from('rooms')
                 .insert([newRoomPayload])
                 .select()
@@ -2053,20 +1998,20 @@ export default function ArkyvAdminPanel() {
                 }
             ];
             
-            const { error: exitsError } = await supabase
+            const { error: exitsError } = await spacetime
                 .from('exits')
                 .insert(exitsPayload);
             
             if (exitsError) throw exitsError;
             
             // Fetch the newly created exits with target room data
-            const { data: newExitsData } = await supabase
+            const { data: newExitsData } = await spacetime
                 .from('exits')
                 .select('id, from_room, to_room, verb')
                 .eq('from_room', newRoom.id);
             
             // Fetch the parent room data for the exit
-            const { data: fetchedParentRoom } = await supabase
+            const { data: fetchedParentRoom } = await spacetime
                 .from('rooms')
                 .select('id, name, description, region, region_name, height, image_url')
                 .eq('id', parentRoomId)
@@ -2105,7 +2050,7 @@ export default function ArkyvAdminPanel() {
             setPendingVerticalExit(null);
             alert(`Failed to create AI room: ${err?.message || 'Unknown error'}`);
         }
-    }, [pendingRoomCreate, pendingVerticalExit, supabase]);
+    }, [pendingRoomCreate, pendingVerticalExit, spacetime]);
 
     // Blank Room AI Handlers
     const handleGenerateRoomName = useCallback(async () => {
@@ -2125,7 +2070,7 @@ export default function ArkyvAdminPanel() {
                 rawRegion = blankRoom.region;
             } else if (pendingVerticalExit) {
                 // Get parent room data for vertical exit
-                const { data: roomData } = await supabase
+                const { data: roomData } = await spacetime
                     .from('rooms')
                     .select('name, description, region, region_name')
                     .eq('id', pendingVerticalExit.fromRoomId)
@@ -2142,14 +2087,14 @@ export default function ArkyvAdminPanel() {
             const region = normalizeRegionKey(rawRegion);
             
             // Get region data
-            const { data: regionData } = await supabase
+            const { data: regionData } = await spacetime
                 .from('regions')
                 .select('name, display_name, description')
                 .eq('name', region)
                 .single();
             
             // Get nearby rooms
-            const { data: nearbyRooms } = await supabase
+            const { data: nearbyRooms } = await spacetime
                 .from('rooms')
                 .select('name')
                 .eq('region_name', region)
@@ -2171,6 +2116,7 @@ export default function ArkyvAdminPanel() {
             if (!response.ok) throw new Error('Failed to generate room name');
             
             const data = await response.json();
+
             setBlankRoom(prev => ({ ...prev, name: data.name }));
             
         } catch (err) {
@@ -2179,7 +2125,7 @@ export default function ArkyvAdminPanel() {
         } finally {
             setIsGeneratingRoomName(false);
         }
-    }, [pendingRoomCreate, pendingVerticalExit, isStandaloneRoom, blankRoom, supabase]);
+    }, [pendingRoomCreate, pendingVerticalExit, isStandaloneRoom, blankRoom, spacetime]);
     
     const handleSuggestRoomDescription = useCallback(async () => {
         // Support both standalone rooms and rooms created from exits (including vertical)
@@ -2198,7 +2144,7 @@ export default function ArkyvAdminPanel() {
                 rawRegion = blankRoom.region;
             } else if (pendingVerticalExit) {
                 // Get parent room data for vertical exit
-                const { data: roomData } = await supabase
+                const { data: roomData } = await spacetime
                     .from('rooms')
                     .select('name, description, region, region_name')
                     .eq('id', pendingVerticalExit.fromRoomId)
@@ -2216,14 +2162,14 @@ export default function ArkyvAdminPanel() {
             const region = normalizeRegionKey(rawRegion);
             
             // Get region data
-            const { data: regionData } = await supabase
+            const { data: regionData } = await spacetime
                 .from('regions')
                 .select('name, display_name, description')
                 .eq('name', region)
                 .single();
             
             // Get nearby rooms for context
-            const { data: regionRooms } = await supabase
+            const { data: regionRooms } = await spacetime
                 .from('rooms')
                 .select('name, description')
                 .eq('region_name', region)
@@ -2244,6 +2190,7 @@ export default function ArkyvAdminPanel() {
             if (!response.ok) throw new Error('Failed to suggest description');
             
             const data = await response.json();
+
             setBlankRoom(prev => ({ ...prev, description: data.description }));
             
         } catch (err) {
@@ -2252,7 +2199,7 @@ export default function ArkyvAdminPanel() {
         } finally {
             setIsGeneratingRoomDescription(false);
         }
-    }, [pendingRoomCreate, pendingVerticalExit, isStandaloneRoom, blankRoom, supabase]);
+    }, [pendingRoomCreate, pendingVerticalExit, isStandaloneRoom, blankRoom, spacetime]);
     
     const handleRefineRoomDescription = useCallback(async () => {
         // Support both standalone rooms and rooms created from exits (including vertical)
@@ -2271,7 +2218,7 @@ export default function ArkyvAdminPanel() {
                 rawRegion = blankRoom.region;
             } else if (pendingVerticalExit) {
                 // Get parent room data for vertical exit
-                const { data: roomData } = await supabase
+                const { data: roomData } = await spacetime
                     .from('rooms')
                     .select('name, description, region, region_name')
                     .eq('id', pendingVerticalExit.fromRoomId)
@@ -2289,7 +2236,7 @@ export default function ArkyvAdminPanel() {
             const region = normalizeRegionKey(rawRegion);
             
             // Get region data
-            const { data: regionData } = await supabase
+            const { data: regionData } = await spacetime
                 .from('regions')
                 .select('name, display_name, description')
                 .eq('name', region)
@@ -2318,7 +2265,7 @@ export default function ArkyvAdminPanel() {
         } finally {
             setIsGeneratingRoomDescription(false);
         }
-    }, [pendingRoomCreate, pendingVerticalExit, isStandaloneRoom, blankRoom, supabase]);
+    }, [pendingRoomCreate, pendingVerticalExit, isStandaloneRoom, blankRoom, spacetime]);
 
     // Edit Room AI Handlers
     const handleEditGenerateRoomName = useCallback(async () => {
@@ -2331,21 +2278,21 @@ export default function ArkyvAdminPanel() {
             const region = normalizeRegionKey(rawRegion);
             
             // Get region data
-            const { data: regionData } = await supabase
+            const { data: regionData } = await spacetime
                 .from('regions')
                 .select('name, display_name, description')
                 .eq('name', region)
                 .single();
             
             // Get nearby rooms
-            const { data: nearbyRooms } = await supabase
+            const { data: nearbyRooms } = await spacetime
                 .from('rooms')
                 .select('name')
                 .eq('region_name', region)
                 .limit(10);
             
             // Get exits to determine context
-            const { data: exits } = await supabase
+            const { data: exits } = await spacetime
                 .from('exits')
                 .select('from_room, verb')
                 .eq('to_room', activeRoom.id)
@@ -2356,7 +2303,7 @@ export default function ArkyvAdminPanel() {
             let direction = null;
             
             if (parentExit) {
-                const { data: parentData } = await supabase
+                const { data: parentData } = await spacetime
                     .from('rooms')
                     .select('name')
                     .eq('id', parentExit.from_room)
@@ -2389,7 +2336,7 @@ export default function ArkyvAdminPanel() {
         } finally {
             setIsEditGeneratingRoomName(false);
         }
-    }, [activeRoom, editRoom, supabase, updateEditField]);
+    }, [activeRoom, editRoom, spacetime, updateEditField]);
     
     const handleEditSuggestRoomDescription = useCallback(async () => {
         if (!activeRoom || !editRoom) return;
@@ -2401,21 +2348,21 @@ export default function ArkyvAdminPanel() {
             const region = normalizeRegionKey(rawRegion);
             
             // Get region data
-            const { data: regionData } = await supabase
+            const { data: regionData } = await spacetime
                 .from('regions')
                 .select('name, display_name, description')
                 .eq('name', region)
                 .single();
             
             // Get nearby rooms for context
-            const { data: regionRooms } = await supabase
+            const { data: regionRooms } = await spacetime
                 .from('rooms')
                 .select('name, description')
                 .eq('region_name', region)
                 .limit(20);
             
             // Get exits to determine context
-            const { data: exits } = await supabase
+            const { data: exits } = await spacetime
                 .from('exits')
                 .select('from_room, verb')
                 .eq('to_room', activeRoom.id)
@@ -2426,7 +2373,7 @@ export default function ArkyvAdminPanel() {
             let direction = null;
             
             if (parentExit) {
-                const { data: parentData } = await supabase
+                const { data: parentData } = await spacetime
                     .from('rooms')
                     .select('name')
                     .eq('id', parentExit.from_room)
@@ -2458,7 +2405,7 @@ export default function ArkyvAdminPanel() {
         } finally {
             setEditDescriptionOperation(null);
         }
-    }, [activeRoom, editRoom, supabase, updateEditField]);
+    }, [activeRoom, editRoom, spacetime, updateEditField]);
     
     const handleEditRefineRoomDescription = useCallback(async () => {
         if (!activeRoom || !editRoom) return;
@@ -2470,14 +2417,14 @@ export default function ArkyvAdminPanel() {
             const region = normalizeRegionKey(rawRegion);
             
             // Get region data
-            const { data: regionData } = await supabase
+            const { data: regionData } = await spacetime
                 .from('regions')
                 .select('name, display_name, description')
                 .eq('name', region)
                 .single();
             
             // Get exits to determine context
-            const { data: exits } = await supabase
+            const { data: exits } = await spacetime
                 .from('exits')
                 .select('from_room, verb')
                 .eq('to_room', activeRoom.id)
@@ -2488,7 +2435,7 @@ export default function ArkyvAdminPanel() {
             let direction = null;
             
             if (parentExit) {
-                const { data: parentData } = await supabase
+                const { data: parentData } = await spacetime
                     .from('rooms')
                     .select('name')
                     .eq('id', parentExit.from_room)
@@ -2520,7 +2467,7 @@ export default function ArkyvAdminPanel() {
         } finally {
             setEditDescriptionOperation(null);
         }
-    }, [activeRoom, editRoom, supabase, updateEditField]);
+    }, [activeRoom, editRoom, spacetime, updateEditField]);
 
     const handleGenerateRoomImage = useCallback(async () => {
         if (!activeRoom || !editRoom?.description) return;
@@ -2538,7 +2485,7 @@ export default function ArkyvAdminPanel() {
                 const rawRegion = activeRoom?.region || activeRoom?.region_name || 'Unknown';
                 const region = normalizeRegionKey(rawRegion);
                 
-                const { data: regionData } = await supabase
+                const { data: regionData } = await spacetime
                     .from('regions')
                     .select('description')
                     .eq('name', region)
@@ -2567,6 +2514,12 @@ export default function ArkyvAdminPanel() {
             }
             
             const data = await response.json();
+
+            const { error: imageUpdateError } = await spacetime
+                .from('rooms')
+                .update({ image_url: data.imageUrl })
+                .eq('id', roomId);
+            if (imageUpdateError) throw imageUpdateError;
             
             // Update credits
             if (data.creditsRemaining !== undefined) {
@@ -2598,7 +2551,7 @@ export default function ArkyvAdminPanel() {
         } finally {
             setGeneratingRoomImages(prev => ({ ...prev, [roomId]: false }));
         }
-    }, [activeRoom, editRoom, includeRegionInPrompt, supabase]);
+    }, [activeRoom, editRoom, includeRegionInPrompt, spacetime]);
 
     const handleGenerateNpcPortrait = useCallback(async () => {
         if (!activeNpc || !editNpc?.description) return;
@@ -2614,7 +2567,7 @@ export default function ArkyvAdminPanel() {
             let regionDescription = null;
             if (includeRegionInNpcPortrait && editNpc.current_room) {
                 // Get the room to find its region
-                const { data: roomData } = await supabase
+                const { data: roomData } = await spacetime
                     .from('rooms')
                     .select('region_name')
                     .eq('id', editNpc.current_room)
@@ -2623,7 +2576,7 @@ export default function ArkyvAdminPanel() {
                 if (roomData?.region_name) {
                     const region = normalizeRegionKey(roomData.region_name);
                     
-                    const { data: regionData } = await supabase
+                    const { data: regionData } = await spacetime
                         .from('regions')
                         .select('description')
                         .eq('name', region)
@@ -2653,6 +2606,12 @@ export default function ArkyvAdminPanel() {
             }
             
             const data = await response.json();
+
+            const { error: portraitUpdateError } = await spacetime
+                .from('npcs')
+                .update({ portrait_url: data.portraitUrl })
+                .eq('id', npcId);
+            if (portraitUpdateError) throw portraitUpdateError;
             
             // Update credits
             if (data.creditsRemaining !== undefined) {
@@ -2684,7 +2643,7 @@ export default function ArkyvAdminPanel() {
         } finally {
             setGeneratingNpcPortraits(prev => ({ ...prev, [npcId]: false }));
         }
-    }, [activeNpc, editNpc, includeRegionInNpcPortrait, supabase]);
+    }, [activeNpc, editNpc, includeRegionInNpcPortrait, spacetime]);
 
     // Region Dialog Handlers
     const handleCreateRegion = useCallback(async () => {
@@ -2708,7 +2667,7 @@ export default function ArkyvAdminPanel() {
                 accent: newRegion.accent
             };
 
-            const { data, error } = await supabase
+            const { data, error } = await spacetime
                 .from('regions')
                 .insert([{
                     name: regionName,
@@ -2751,7 +2710,7 @@ export default function ArkyvAdminPanel() {
         } finally {
             setIsCreatingRegion(false);
         }
-    }, [newRegion, supabase]);
+    }, [newRegion, spacetime]);
 
     const handleGenerateColors = useCallback(async (mode = 'complementary') => {
         try {
@@ -2792,7 +2751,7 @@ export default function ArkyvAdminPanel() {
             setIsGeneratingRegionName(true);
             
             // Fetch all existing region names
-            const { data: regions, error: regionsError } = await supabase
+            const { data: regions, error: regionsError } = await spacetime
                 .from('regions')
                 .select('display_name, name')
                 .order('created_at', { ascending: false });
@@ -2822,7 +2781,7 @@ export default function ArkyvAdminPanel() {
         } finally {
             setIsGeneratingRegionName(false);
         }
-    }, [supabase]);
+    }, [spacetime]);
 
     const handleGenerateDescription = useCallback(async (mode = 'refine') => {
         try {
@@ -2859,7 +2818,7 @@ export default function ArkyvAdminPanel() {
             setIsGeneratingDescription('suggest');
             
             // Fetch all existing region descriptions for context
-            const { data: regions, error: regionsError } = await supabase
+            const { data: regions, error: regionsError } = await spacetime
                 .from('regions')
                 .select('display_name, name, description')
                 .order('created_at', { ascending: false });
@@ -2890,7 +2849,7 @@ export default function ArkyvAdminPanel() {
         } finally {
             setIsGeneratingDescription(null);
         }
-    }, [newRegion.display_name, supabase]);
+    }, [newRegion.display_name, spacetime]);
 
     // Region Editing Handlers
     const openRegionDialog = useCallback((region) => {
@@ -2939,7 +2898,7 @@ export default function ArkyvAdminPanel() {
                 accent: editRegion.accent
             };
 
-            const { data, error } = await supabase
+            const { data, error } = await spacetime
                 .from('regions')
                 .update({
                     name: regionName,
@@ -2991,7 +2950,7 @@ export default function ArkyvAdminPanel() {
         } finally {
             setIsUpdatingRegion(false);
         }
-    }, [editRegion, activeRegion, supabase, closeRegionDialog]);
+    }, [editRegion, activeRegion, spacetime, closeRegionDialog]);
 
     const handleGenerateColorsForEdit = useCallback(async (mode = 'complementary') => {
         if (!editRegion) return;
@@ -3067,7 +3026,7 @@ export default function ArkyvAdminPanel() {
         try {
             setIsGeneratingDescription('suggest');
             
-            const { data: regions, error: regionsError } = await supabase
+            const { data: regions, error: regionsError } = await spacetime
                 .from('regions')
                 .select('display_name, name, description')
                 .order('created_at', { ascending: false });
@@ -3098,7 +3057,7 @@ export default function ArkyvAdminPanel() {
         } finally {
             setIsGeneratingDescription(null);
         }
-    }, [editRegion, supabase]);
+    }, [editRegion, spacetime]);
 
     // NPC Dialog Handlers
     const openNpcDialog = useCallback((npc) => {
@@ -3164,7 +3123,7 @@ export default function ArkyvAdminPanel() {
                 greeting_behavior: editNpc.greeting_behavior || null,
                 current_room: editNpc.current_room || null
             };
-            const { error } = await supabase.from('npcs').update(payload).eq('id', editNpc.id);
+            const { error } = await spacetime.from('npcs').update(payload).eq('id', editNpc.id);
             if (error) throw error;
             setActiveNpc((prev) => prev ? { ...prev, ...payload } : prev);
             setIsNpcDirty(false);
@@ -3176,7 +3135,7 @@ export default function ArkyvAdminPanel() {
             setNpcSaveError(err?.message ?? 'Failed to save changes');
             setNpcSaving(false);
         }
-    }, [isNpcDirty, editNpc, supabase]);
+    }, [isNpcDirty, editNpc, spacetime]);
 
     const openDeleteNpcDialog = useCallback(() => {
         setDeleteNpcConfirmText('');
@@ -3199,7 +3158,7 @@ export default function ArkyvAdminPanel() {
             setIsDeletingNpc(true);
             setDeleteNpcError('');
 
-            const { error } = await supabase
+            const { error } = await spacetime
                 .from('npcs')
                 .delete()
                 .eq('id', editNpc.id);
@@ -3216,7 +3175,7 @@ export default function ArkyvAdminPanel() {
         } finally {
             setIsDeletingNpc(false);
         }
-    }, [editNpc, deleteNpcConfirmText, supabase, closeNpcDialog]);
+    }, [editNpc, deleteNpcConfirmText, spacetime, closeNpcDialog]);
 
     // Create NPC Handlers
     const handleAddNpcToRoom = useCallback((roomId) => {
@@ -3256,7 +3215,7 @@ export default function ArkyvAdminPanel() {
                 }
             };
 
-            const { error } = await supabase
+            const { error } = await spacetime
                 .from('npcs')
                 .insert([payload]);
 
@@ -3284,7 +3243,7 @@ export default function ArkyvAdminPanel() {
         } finally {
             setIsCreatingNpc(false);
         }
-    }, [newNpc, supabase]);
+    }, [newNpc, spacetime]);
 
     const handleGenerateNpcName = useCallback(async () => {
         try {
@@ -6941,7 +6900,7 @@ export default function ArkyvAdminPanel() {
                                         <p><strong className="text-purple-300">Room Images:</strong> In the room editor, click "Generate Image (2 Credits)" to create 16:9 pixel art based on the room description.</p>
                                         <p><strong className="text-purple-300">Region Mood/Style:</strong> Check "Include region mood/style" to add the region's atmosphere description to the image prompt for better thematic consistency.</p>
                                         <p><strong className="text-purple-300">NPC Portraits:</strong> In the NPC editor, generate pixel art portraits for your characters.</p>
-                                        <p><strong className="text-amber-300">Cost:</strong> Each image costs 2 RetroDiffusion API credits. Images are automatically saved to Supabase Storage.</p>
+                                        <p><strong className="text-amber-300">Cost:</strong> Each image costs 2 RetroDiffusion API credits. Generated data URLs are saved on the room or NPC row in SpacetimeDB.</p>
                                         <p><strong className="text-green-300">Regeneration:</strong> You can regenerate images anytime - the button will show "Regenerate Image (2 Credits)" if an image already exists.</p>
                                     </div>
                                 </section>
@@ -6965,10 +6924,9 @@ export default function ArkyvAdminPanel() {
                                                 # Choose your AI provider: "openai" or "grok"<br />
                                                 AI_PROVIDER=<br />
                                                 <br />
-                                                # Supabase Configuration<br />
-                                                NEXT_PUBLIC_SUPABASE_URL=<br />
-                                                NEXT_PUBLIC_SUPABASE_ANON_KEY=<br />
-                                                SUPABASE_SERVICE_ROLE_KEY=<br />
+                                                # SpacetimeDB Configuration<br />
+                                                NEXT_PUBLIC_SPACETIMEDB_URI=http://127.0.0.1:3000<br />
+                                                NEXT_PUBLIC_SPACETIMEDB_DB_NAME=arkyv-engine<br />
                                                 <br />
                                                 # Retro Diffusion<br />
                                                 RETRO_DIFFUSION_API_KEY=
@@ -6987,10 +6945,10 @@ export default function ArkyvAdminPanel() {
                                             <p><strong className="text-purple-300">RetroDiffusion API Key:</strong> Required for image generation. Sign up at <a href="https://retrodiffusion.ai" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300 underline">retrodiffusion.ai</a> to get your API key and credits.</p>
                                         </div>
                                         <div>
-                                            <p><strong className="text-green-300">Supabase Configuration:</strong> Required for database and storage. Create a free project at <a href="https://supabase.com/" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300 underline">supabase.com</a> and get your keys from your project dashboard.</p>
+                                            <p><strong className="text-green-300">SpacetimeDB Configuration:</strong> Start SpacetimeDB locally, then run <code className="text-xs bg-slate-900 px-1.5 py-0.5 rounded">npm run spacetime:deploy</code>. See the setup guide for hosted deployment.</p>
                                         </div>
                                         <div className="pt-2 border-t border-amber-400/20">
-                                            <p><strong className="text-amber-300">Production Deployment:</strong> When deploying to Vercel, Railway, or other hosting platforms, add these environment variables to your project settings. Don't forget to run the database migration (see QUICK-START.md).</p>
+                                            <p><strong className="text-amber-300">Production Deployment:</strong> Publish the module to your hosted SpacetimeDB database and set its URI and database name in the frontend environment.</p>
                                         </div>
                                     </div>
                                 </section>

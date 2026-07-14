@@ -1,5 +1,3 @@
-import { createClient } from '@supabase/supabase-js';
-
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
@@ -68,70 +66,11 @@ export default async function handler(req, res) {
             return res.status(500).json({ error: 'No image generated' });
         }
 
-        const base64Image = rdData.base64_images[0];
-        
-        // Initialize Supabase client with service role key for admin operations
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-        const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-        
-        console.log('Supabase URL:', supabaseUrl ? 'Set' : 'MISSING');
-        console.log('Service Role Key:', supabaseServiceKey ? 'Set (length: ' + supabaseServiceKey.length + ')' : 'MISSING');
-        
-        if (!supabaseUrl || !supabaseServiceKey) {
-            return res.status(500).json({ error: 'Supabase configuration missing' });
-        }
-
-        const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-        // Convert base64 to buffer
-        const imageBuffer = Buffer.from(base64Image, 'base64');
-        
-        // Upload to Supabase Storage
-        const fileName = `room-${roomId}-${Date.now()}.png`;
-        const { data: uploadData, error: uploadError } = await supabase.storage
-            .from('room-images')
-            .upload(fileName, imageBuffer, {
-                contentType: 'image/png',
-                upsert: false
-            });
-
-        if (uploadError) {
-            console.error('Supabase upload error:', uploadError);
-            return res.status(500).json({ 
-                error: 'Failed to upload image to storage',
-                details: uploadError.message 
-            });
-        }
-
-        // Get public URL
-        const { data: { publicUrl } } = supabase.storage
-            .from('room-images')
-            .getPublicUrl(fileName);
-
-        // Update room record with image URL
-        const { error: updateError } = await supabase
-            .from('rooms')
-            .update({ image_url: publicUrl })
-            .eq('id', roomId);
-
-        if (updateError) {
-            console.error('Database update error:', updateError);
-            console.error('Full error object:', JSON.stringify(updateError, null, 2));
-            console.error('Room ID:', roomId);
-            console.error('Public URL:', publicUrl);
-            return res.status(500).json({ 
-                error: 'Failed to update room record',
-                details: updateError.message,
-                code: updateError.code,
-                hint: updateError.hint
-            });
-        }
-
-        console.log('Image generated and saved successfully:', publicUrl);
+        const imageUrl = `data:image/png;base64,${rdData.base64_images[0]}`;
 
         return res.status(200).json({ 
             success: true,
-            imageUrl: publicUrl,
+            imageUrl,
             creditsRemaining: rdData.remaining_credits
         });
 

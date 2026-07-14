@@ -23,5 +23,5 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "components/ArkyvTerminal.js"],
-  "exclude": ["node_modules", "supabase/functions"]
+  "exclude": ["node_modules", "spacetimedb/target"]
 }

@@ -8,10 +8,9 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # Supabase Configuration
-      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
-      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      # The SpacetimeDB node runs separately. On Docker Desktop, expose it via the host.
+      NEXT_PUBLIC_SPACETIMEDB_URI: ${NEXT_PUBLIC_SPACETIMEDB_URI:-http://host.docker.internal:3000}
+      NEXT_PUBLIC_SPACETIMEDB_DB_NAME: ${NEXT_PUBLIC_SPACETIMEDB_DB_NAME:-arkyv-engine}
       
       # AI Provider Configuration
       AI_PROVIDER: ${AI_PROVIDER:-openai}

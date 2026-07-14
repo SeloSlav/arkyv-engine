@@ -125,6 +125,13 @@ export default function HomePage() {
           
           {/* CTA Buttons */}
           <div className="flex flex-col items-center gap-4 mb-8">
+            <button
+              onClick={() => router.push(user ? '/play' : '/auth')}
+              className="px-10 py-4 bg-gradient-to-r from-pink-500 to-purple-500 text-white font-bold rounded-lg hover:from-pink-400 hover:to-purple-400 transition-all text-lg shadow-lg shadow-pink-500/30 hover:scale-105 transform uppercase tracking-[0.15em]"
+            >
+              {user ? 'Enter Arkyv' : 'Choose Saved World'}
+            </button>
+
             <a
               href="https://www.babushkabook.com/arkyv"
               target="_blank"

@@ -1,4 +1,3 @@
-import { createClient } from '@supabase/supabase-js';
 import { createChatCompletion } from '@/lib/aiProvider';
 
 // Helper function to classify entity type using AI
@@ -119,62 +118,11 @@ export default async function handler(req, res) {
             return res.status(500).json({ error: 'No portrait generated' });
         }
 
-        const base64Image = rdData.base64_images[0];
-        
-        // Initialize Supabase client with service role key for admin operations
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-        const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-        
-        if (!supabaseUrl || !supabaseServiceKey) {
-            return res.status(500).json({ error: 'Supabase configuration missing' });
-        }
-
-        const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-        // Convert base64 to buffer
-        const imageBuffer = Buffer.from(base64Image, 'base64');
-        
-        // Upload to Supabase Storage
-        const fileName = `npc-${npcId}-${Date.now()}.png`;
-        const { data: uploadData, error: uploadError } = await supabase.storage
-            .from('npc-portraits')
-            .upload(fileName, imageBuffer, {
-                contentType: 'image/png',
-                upsert: false
-            });
-
-        if (uploadError) {
-            console.error('Supabase upload error:', uploadError);
-            return res.status(500).json({ 
-                error: 'Failed to upload portrait to storage',
-                details: uploadError.message 
-            });
-        }
-
-        // Get public URL
-        const { data: { publicUrl } } = supabase.storage
-            .from('npc-portraits')
-            .getPublicUrl(fileName);
-
-        // Update NPC record with portrait URL
-        const { error: updateError } = await supabase
-            .from('npcs')
-            .update({ portrait_url: publicUrl })
-            .eq('id', npcId);
-
-        if (updateError) {
-            console.error('Database update error:', updateError);
-            return res.status(500).json({ 
-                error: 'Failed to update NPC record',
-                details: updateError.message 
-            });
-        }
-
-        console.log('Portrait generated and saved successfully:', publicUrl);
+        const portraitUrl = `data:image/png;base64,${rdData.base64_images[0]}`;
 
         return res.status(200).json({ 
             success: true,
-            portraitUrl: publicUrl,
+            portraitUrl,
             creditsRemaining: rdData.remaining_credits
         });
 

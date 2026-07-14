@@ -107,7 +107,7 @@ export default function HamburgerIcon() {
                     <span>Play</span>
                   </button>
                   
-                  {/* Profile */}
+                  {/* Saved World */}
                   <button
                     onClick={() => {
                       router.push('/profile');
@@ -116,7 +116,7 @@ export default function HamburgerIcon() {
                     className="flex items-center gap-3 w-full text-left px-4 py-3 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all font-terminal uppercase tracking-[0.1em] text-sm"
                   >
                     <FontAwesomeIcon icon={faUser} className="w-4 h-4 text-slate-400" />
-                    <span>Profile</span>
+                    <span>Saved World</span>
                   </button>
                   
                   {/* Admin - Only show for admins */}
@@ -135,15 +135,28 @@ export default function HamburgerIcon() {
                   
                   <div className="my-2 border-t border-slate-700"></div>
                   
-                  {/* Sign Out */}
+                  {/* Log Out */}
                   <button
                     onClick={handleSignOut}
                     className="flex items-center gap-3 w-full text-left px-4 py-3 text-red-400 hover:text-red-300 hover:bg-slate-800 rounded-lg transition-all font-terminal uppercase tracking-[0.1em] text-sm"
                   >
                     <FontAwesomeIcon icon={faRightFromBracket} className="w-4 h-4" />
-                    <span>Sign Out</span>
+                    <span>Log Out</span>
                   </button>
                 </>
+              )}
+
+              {!user && (
+                <button
+                  onClick={() => {
+                    router.push('/auth');
+                    setIsOpen(false);
+                  }}
+                  className="flex items-center gap-3 w-full text-left px-4 py-3 text-cyan-400 hover:text-cyan-300 hover:bg-slate-800 rounded-lg transition-all font-terminal uppercase tracking-[0.1em] text-sm"
+                >
+                  <FontAwesomeIcon icon={faRightToBracket} className="w-4 h-4" />
+                  <span>Choose Saved World</span>
+                </button>
               )}
             </nav>
             
