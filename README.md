@@ -4,7 +4,7 @@
 
 Arkyv Engine is an open-source text-based multi-user dungeon built with Next.js, SpacetimeDB, and AI. Players explore connected regions, create multiple characters, chat in real time, and converse with AI-driven NPCs. Administrators build the world through a visual room editor.
 
-This repository now uses **SpacetimeDB 2.0.1** for its authoritative backend—the same client and CLI version used by `medieval-road-system`. The previous hosted database, authentication, storage, and edge-function dependencies have been removed.
+This repository uses **SpacetimeDB 2.0.1** for its authoritative backend. The previous hosted database, authentication, storage, and edge-function dependencies have been removed.
 
 ## Features
 
