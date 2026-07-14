@@ -81,13 +81,12 @@ const DIRECTION_ALIASES = {
 
 export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, onRoomChange = null, onRoomMessage = null, onExecuteCommand = null, onConversationChange = null, className = '' }) {
     const spacetime = useMemo(() => getSpacetimeClient(), []);
-    const { activeWorld, signOut: signOutSavedWorld } = useAuth();
+    const { activeWorld, session, loading: savedWorldLoading, signOut: signOutSavedWorld } = useAuth();
 
     const [lines, setLines] = useState([]);
     const [input, setInput] = useState('');
     const [history, setHistory] = useState([]);
     const [historyIndex, setHistoryIndex] = useState(-1);
-    const [session, setSession] = useState(null);
     const savedWorldName = activeWorld?.name || session?.user?.user_metadata?.world_name
         || (session?.user?.id ? `World ${session.user.id.slice(0, 8)}` : 'Saved World');
     const [characters, setCharacters] = useState([]);
@@ -143,6 +142,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
     const currentRoomRef = useRef(null);
     const roomEntryTimesRef = useRef(new Map());
     const onboardingRef = useRef(false);
+    const hasShownSignedOutMessageRef = useRef(false);
     const lastCharacterRefreshRef = useRef(0);
     const initialMessageShownRef = useRef(false);
 
@@ -388,7 +388,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
 
         if (roomSubscription) {
             const previousRoom = currentRoomRef.current;
-            spacetime.removeChannel(roomSubscription);
+            spacetime.removeSubscription(roomSubscription);
             setRoomSubscription(null);
             if (previousRoom) {
                 roomEntryTimesRef.current.delete(previousRoom);
@@ -406,58 +406,28 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
     }, [roomSubscription, spacetime, onRoomChange, activeCharacter]);
 
     useEffect(() => {
-        let isMounted = true;
-        let hasShownInitialMessage = false;
+        if (savedWorldLoading) return;
+        if (session) {
+            hasShownSignedOutMessageRef.current = false;
+            return;
+        }
 
-        (async () => {
-            const { data, error } = await spacetime.auth.getSession();
-            if (!isMounted) return;
-
-            if (error) {
-                appendLine(createErrorLine(formatError(error)));
-                return;
-            }
-
-            if (data?.session) {
-                setSession(data.session);
-            } else {
-                // Show welcome message for logged-out users
-                if (!hasShownInitialMessage) {
-                    hasShownInitialMessage = true;
-                    appendLine(createSystemLine('Welcome to Arkyv.\n\nOpen the saved-world picker to create or resume a world.\n\n'));
-                }
-            }
-        })();
-
-        const { data: listener } = spacetime.auth.onAuthStateChange((_event, newSession) => {
-            if (!isMounted) return;
-            setSession(newSession);
-
-            if (!newSession) {
-                console.log('🔄 Auth listener: Logout detected, resetting welcomeRef');
-                welcomeRef.current = false;
-                onboardingRef.current = false;
-                setActiveCharacter(null);
-                setCharacters([]);
-                setProfile(null);
-                profileRef.current = null;
-                // Reset all initialization flags so next login works properly
-                hasInitializedProfile.current = false;
-                hasLoadedCharacters.current = false;
-                hasShownPersonaList.current = false;
-                lastCharacterRefreshRef.current = 0; // Reset rate limit so refreshCharacters works on next login
-                unsubscribeFromRoom();
-                // Don't show logout message here - it's already shown in the logout command
-            } else {
-                console.log('🔄 Auth listener: Login detected, welcomeRef should be false:', welcomeRef.current);
-            }
-        });
-
-        return () => {
-            isMounted = false;
-            listener.subscription.unsubscribe();
-        };
-    }, [appendLine, spacetime, unsubscribeFromRoom]);
+        if (!hasShownSignedOutMessageRef.current) {
+            hasShownSignedOutMessageRef.current = true;
+            appendLine(createSystemLine('Welcome to Arkyv.\n\nOpen the saved-world picker to create or resume a world.\n\n'));
+        }
+        welcomeRef.current = false;
+        onboardingRef.current = false;
+        setActiveCharacter(null);
+        setCharacters([]);
+        setProfile(null);
+        profileRef.current = null;
+        hasInitializedProfile.current = false;
+        hasLoadedCharacters.current = false;
+        hasShownPersonaList.current = false;
+        lastCharacterRefreshRef.current = 0;
+        unsubscribeFromRoom();
+    }, [appendLine, savedWorldLoading, session, setActiveCharacter, unsubscribeFromRoom]);
 
     const loadAvailableExits = useCallback(async (roomId) => {
         if (!roomId) {
@@ -596,16 +566,8 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
 
         console.log('🔥 Subscribing to room:', roomId);
 
-        const channel = spacetime
-            .channel(`room-${roomId}`)
-            .on(
-                'postgres_changes',
-                {
-                    event: 'INSERT',
-                    schema: 'public',
-                    table: 'room_messages',
-                    filter: `room_id=eq.${roomId}`
-                },
+        const subscription = spacetime.onInsert(
+                'room_messages',
                 (payload) => {
                     console.log('🔥 SUBSCRIPTION TRIGGERED - Raw payload:', payload);
 
@@ -694,25 +656,12 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                     } else if (currentConversationMode) {
                         // console.log('💬 NOT adding to conversation history - kind:', payload.new?.kind, 'expected: npc_speech');
                     }
-                }
-            )
-            .on('subscribe', (status, err) => {
-                console.log('🔥 Subscription status:', status);
-                if (err) console.error('🔥 Subscription error:', err);
-                if (status === 'SUBSCRIBED') {
-                    console.log('🔥 Successfully subscribed to room messages!');
-                } else if (status === 'CHANNEL_ERROR') {
-                    console.error('🔥 Channel error - real-time might not be enabled');
-                } else if (status === 'TIMED_OUT') {
-                    console.error('🔥 Subscription timed out');
-                }
-            })
-            .on('error', (err) => {
-                console.error('🔥 Real-time error:', err);
-            })
-            .subscribe();
+                },
+                (message) => message.room_id === roomId,
+                (error) => console.error('Room-message subscription failed:', error),
+            );
 
-        setRoomSubscription(channel);
+        setRoomSubscription(subscription);
     }, [appendLine, getRegistry, spacetime, unsubscribeFromRoom, activeCharacter, loadAvailableExits, loadRoomNPCs, loadRoomCharacters, conversationMode, addToConversationHistory]);
 
     // Keep active character ref in sync
@@ -1086,7 +1035,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
             hasInitializedProfile: hasInitializedProfile.current
         });
 
-        // Wait for profile to be initialized (which happens after auth listener resets welcomeRef)
+        // Wait for the active saved-world profile to finish initializing.
         if (session?.user && hasInitializedProfile.current && !hasGreetedUser.current) {
             console.log('✅ Greeting and refreshing characters...');
             hasGreetedUser.current = true;
@@ -1160,26 +1109,13 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                 
                 // Trigger NPC greetings for profile mode
                 try {
-                    console.log('🎯 Triggering profile greetings for room:', prof.current_room);
-                    // Call the process-commands API directly with the greeting data
-                    const response = await fetch('/api/process-commands', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            raw: '__GREET',
-                            character_id: null, // Profile mode
-                            room_id: prof.current_room
-                        })
+                    const { error: greetError } = await spacetime.from('commands').insert({
+                        raw: '__GREET',
+                        character_id: null,
+                        room_id: prof.current_room,
+                        user_id: session.user.id,
                     });
-                    
-                    if (!response.ok) {
-                        const errorText = await response.text();
-                        console.error('Profile greeting API error:', response.status, errorText);
-                    } else {
-                        console.log('✅ Profile greeting API success');
-                    }
+                    if (greetError) console.error('Failed to trigger profile greetings:', greetError);
                 } catch (err) {
                     console.error('Failed to trigger profile greetings:', err);
                 }
@@ -1521,25 +1457,14 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
             
             // Trigger NPC greetings immediately for room entry
             try {
-                console.log('👋 Inserting __GREET command for room:', target.current_room, 'character:', target.id);
-                const { data: greetData, error: greetError } = await spacetime.from('commands').insert({
+                const { error: greetError } = await spacetime.from('commands').insert({
                     character_id: target.id,
                     room_id: target.current_room,
                     raw: '__GREET'
                 });
-                if (greetError) {
-                    console.error('❌ Failed to insert __GREET command:', greetError);
-                } else {
-                    console.log('✅ __GREET command inserted successfully, triggering processor...');
-                    // Manually trigger the command processor
-                    await fetch('/api/process-commands', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' }
-                    });
-                    console.log('✅ Command processor triggered for __GREET');
-                }
+                if (greetError) console.error('Failed to trigger NPC greetings:', greetError);
             } catch (greetErr) {
-                console.error('❌ Exception with __GREET command:', greetErr);
+                console.error('Failed to trigger NPC greetings:', greetErr);
             }
             
             // Fetch environment data directly without showing a command
@@ -1574,29 +1499,6 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
         }
     }, [appendLine, characters, loadRoomDetails, loadRecentMessages, subscribeToRoom, onRoomChange, onRoomMessage, spacetime]);
 
-    const triggerCommandProcessor = useCallback(async () => {
-        try {
-            console.log('Triggering command processor API...');
-            const response = await fetch('/api/process-commands', {
-                method: 'POST',
-            });
-
-            console.log('API response status:', response.status);
-            
-            if (!response.ok) {
-                const text = await response.text();
-                console.error('API error response:', text);
-                appendLine(createErrorLine(`Processor invoke failed: ${text || response.status}`));
-            } else {
-                const result = await response.json();
-                console.log('API success response:', result);
-            }
-        } catch (err) {
-            console.error('API call failed:', err);
-            appendLine(createErrorLine(`Processor invoke failed: ${formatError(err)}`));
-        }
-    }, [appendLine]);
-
     const submitCommand = useCallback(async ({ raw, characterId, roomId, conversationHistory = null }) => {
         console.log('Current session:', session);
         console.log('Current user ID:', session?.user?.id);
@@ -1623,10 +1525,8 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
             throw error;
         }
 
-        console.log('Command inserted successfully:', data);
-        console.log('Triggering command processor...');
-        triggerCommandProcessor();
-    }, [spacetime, triggerCommandProcessor, session, activeCharacter]);
+        console.log('Command processed successfully:', data);
+    }, [spacetime, session, activeCharacter]);
 
     const getActor = useCallback(() => {
         if (activeCharacter) {
@@ -1826,7 +1726,6 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
 
             case 'logout':
                 await signOutSavedWorld();
-                setSession(null);
                 setActiveCharacter(null);
                 setCharacters([]);
                 setProfile(null);

@@ -119,7 +119,7 @@ Arkyv does not use email addresses or passwords. A saved world is a local label 
 - **Create**: connect without a token; SpacetimeDB issues a new signed token and identity.
 - **Log out**: disconnect and return to the saved-world picker without deleting anything.
 - **Switch**: reconnect with another saved token and load that identity's profile and characters.
-- **Delete**: call the authenticated deletion reducer, remove the identity's profile/characters/commands, then remove its token from localStorage.
+- **Delete**: call the identity-authorized deletion reducer, remove the profile, characters, private commands, and actor-owned chat/messages, then remove its token from localStorage.
 
 Tokens exist only in the browser profile where they were created. Back up browser storage if a local identity must be preserved. Anyone who obtains a token can act as that identity, so do not publish tokens or include them in screenshots and logs.
 
@@ -137,13 +137,13 @@ The Rust module in `spacetimedb/src/lib.rs` defines these public replicated tabl
 | `npc` | NPC placement, personality, behavior, and portraits |
 | `profile` | One identity-owned saved-world profile |
 | `character` | Identity-owned player characters |
-| `command` | Command audit/pending AI work |
+| `command` | Private command audit and pending AI work |
 | `room_message` | Realtime terminal messages |
 | `region_chat` | Realtime regional chat |
 
 Reducers are the only write path. They validate identity ownership for profiles and characters, require admin status for world editing, process deterministic commands server-side, and complete AI NPC responses returned by the stateless Next.js AI route.
 
-The frontend consumes generated bindings in `generated/`. A compatibility query layer in `lib/spacetimedbClient.js` preserves the existing world-builder and terminal behavior while using SpacetimeDB tables, subscriptions, and reducers underneath.
+The frontend consumes generated bindings in `generated/`. The client data layer in `lib/spacetimedbClient.js` reads the subscribed SpacetimeDB cache, invokes reducers for every mutation, and attaches native table insert listeners for realtime UI updates.
 
 ## Development commands
 
@@ -171,13 +171,13 @@ RetroDiffusion returns base64 PNGs. Arkyv stores them as data URLs in `room.imag
 
 ## Docker
 
-The included Dockerfile and Compose service run the Next.js application. Run SpacetimeDB separately and publish the module before starting the app container. Docker Desktop defaults to:
+The included Dockerfile and Compose service run Next.js on [http://localhost:3005](http://localhost:3005), leaving host port `3000` available for SpacetimeDB. Run the database node separately and publish the module before starting the app container. The default browser-facing database URI is:
 
 ```env
-NEXT_PUBLIC_SPACETIMEDB_URI=http://host.docker.internal:3000
+NEXT_PUBLIC_SPACETIMEDB_URI=http://127.0.0.1:3000
 ```
 
-For Linux containers, point this variable at a reachable SpacetimeDB host or place both services on an explicit Docker network.
+`NEXT_PUBLIC_` values are embedded during `docker compose build`. For a hosted deployment, set this variable to the public browser-reachable SpacetimeDB endpoint and rebuild the image.
 
 ## Project structure
 

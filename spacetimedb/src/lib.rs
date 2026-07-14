@@ -90,7 +90,7 @@ pub struct Exit {
     pub verb: String,
 }
 
-#[spacetimedb::table(accessor = command, public, index(accessor = owner, btree(columns = [owner])))]
+#[spacetimedb::table(accessor = command, index(accessor = owner, btree(columns = [owner])))]
 #[derive(Clone)]
 pub struct Command {
     #[primary_key]
@@ -594,11 +594,23 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
 #[reducer]
 pub fn delete_current_account(ctx: &ReducerContext) -> Result<(), String> {
     let owned_characters = ctx.db.character().iter().filter(|row| row.owner == ctx.sender()).map(|row| row.id).collect::<Vec<_>>();
+    let profile = profile_for(ctx, ctx.sender());
+    let mut owned_actor_ids = owned_characters.clone();
+    if let Some(profile) = profile.as_ref() { owned_actor_ids.push(profile.id.clone()); }
+    let owned_messages = ctx.db.room_message().iter().filter(|row| {
+        row.character_id.as_ref().map(|id| owned_actor_ids.contains(id)).unwrap_or(false)
+            || row.target_character_id.as_ref().map(|id| owned_actor_ids.contains(id)).unwrap_or(false)
+    }).map(|row| row.id).collect::<Vec<_>>();
+    for id in owned_messages { ctx.db.room_message().id().delete(id); }
+    let owned_chats = ctx.db.region_chat().iter().filter(|row| {
+        row.character_id.as_ref().map(|id| owned_actor_ids.contains(id)).unwrap_or(false)
+    }).map(|row| row.id).collect::<Vec<_>>();
+    for id in owned_chats { ctx.db.region_chat().id().delete(&id); }
     for id in owned_characters { ctx.db.character().id().delete(&id); }
     let owned_commands = ctx.db.command().iter().filter(|row| row.owner == ctx.sender()).map(|row| row.id).collect::<Vec<_>>();
     for id in owned_commands { ctx.db.command().id().delete(&id); }
-    let deleted_admin = profile_for(ctx, ctx.sender()).map(|profile| profile.is_admin).unwrap_or(false);
-    if let Some(profile) = profile_for(ctx, ctx.sender()) {
+    let deleted_admin = profile.as_ref().map(|profile| profile.is_admin).unwrap_or(false);
+    if let Some(profile) = profile {
         ctx.db.profile().id().delete(&profile.id);
     }
     if deleted_admin {
@@ -646,14 +658,14 @@ pub fn submit_command(
     });
 
     if raw == "help" {
-        add_message(ctx, Some(room_id), None, None, None, "system", "[AVAILABLE COMMANDS]\n\n• say <message> - Speak to everyone in the room\n• whisper <name> <message> - Send a private message\n• look - Examine your current location\n• talk <npc> <message> - Speak to an AI-powered NPC\n• who - See who is nearby\n• inspect <name> - Inspect a character\n• set handle <name> - Set your saved-world handle\n• <direction> - Move through an exit".to_string(), None, None);
+        add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", "[AVAILABLE COMMANDS]\n\n• say <message> - Speak to everyone in the room\n• whisper <name> <message> - Send a private message\n• look - Examine your current location\n• talk <npc> <message> - Speak to an AI-powered NPC\n• who - See who is nearby\n• inspect <name> - Inspect a character\n• set handle <name> - Set your saved-world handle\n• <direction> - Move through an exit".to_string(), None, None);
     } else if let Some(handle) = raw.strip_prefix("set handle ") {
         let handle = handle.trim();
         if !is_profile || handle.is_empty() || handle.len() > 30 {
-            add_message(ctx, Some(room_id), None, None, None, "error", "Use `set handle <name>` in profile mode (maximum 30 characters).".to_string(), None, None);
+            add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "error", "Use `set handle <name>` in profile mode (maximum 30 characters).".to_string(), None, None);
         } else if let Some(profile) = ctx.db.profile().id().find(&actor_id) {
             ctx.db.profile().id().update(Profile { handle: Some(handle.to_string()), ..profile });
-            add_message(ctx, Some(room_id), None, None, None, "system", format!("Your handle has been set to: {handle}"), None, None);
+            add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", format!("Your handle has been set to: {handle}"), None, None);
         }
     } else if let Some(body) = raw.strip_prefix("say ") {
         let body = body.trim();
@@ -661,11 +673,11 @@ pub fn submit_command(
             let room = ctx.db.room().id().find(&room_id);
             let region_name = room.as_ref().and_then(|room| room.region_name.clone());
             let region = room.as_ref().map(|room| room.region.clone());
-            add_message(ctx, Some(room_id.clone()), character_id.clone(), Some(actor_name.clone()), None, "say", body.to_string(), region.clone(), region_name.clone());
+            add_message(ctx, Some(room_id.clone()), Some(actor_id.clone()), Some(actor_name.clone()), None, "say", body.to_string(), region.clone(), region_name.clone());
             if let Some(region_name) = region_name {
                 ctx.db.region_chat().insert(RegionChat {
                     id: format!("chat-{command_id}"), region: region.unwrap_or_else(|| region_name.clone()), room_id: Some(room_id),
-                    character_id, character_name: actor_name, body: body.to_string(), kind: "say".to_string(), created_at: ctx.timestamp,
+                    character_id: Some(actor_id.clone()), character_name: actor_name, body: body.to_string(), kind: "say".to_string(), created_at: ctx.timestamp,
                     region_name: Some(region_name),
                 });
             }
@@ -685,7 +697,7 @@ pub fn submit_command(
                 format!("• {} → {}", row.verb, destination)
             }).collect::<Vec<_>>();
             if !exits.is_empty() { body.push_str(&format!("\n\n[EXITS]\n{}", exits.join("\n"))); }
-            add_message(ctx, Some(room_id), None, None, None, "system", body, None, None);
+            add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", body, None, None);
         }
     } else if raw == "who" {
         let mut lines = Vec::new();
@@ -693,33 +705,33 @@ pub fn submit_command(
         if !characters.is_empty() { lines.push(format!("[CHARACTERS]\n{}", characters.join("\n"))); }
         let npcs = ctx.db.npc().iter().filter(|row| row.current_room.as_deref() == Some(room_id.as_str())).map(|row| format!("• {} (talk {})", row.name, row.alias.unwrap_or_default())).collect::<Vec<_>>();
         if !npcs.is_empty() { lines.push(format!("[NPCs]\n{}", npcs.join("\n"))); }
-        add_message(ctx, Some(room_id), None, None, None, "system", if lines.is_empty() { "You are alone here.".to_string() } else { lines.join("\n\n") }, None, None);
+        add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", if lines.is_empty() { "You are alone here.".to_string() } else { lines.join("\n\n") }, None, None);
     } else if let Some(target) = raw.strip_prefix("inspect ") {
         let target = target.trim();
         let result = ctx.db.character().iter().find(|row| row.current_room.as_deref() == Some(room_id.as_str()) && row.name.eq_ignore_ascii_case(target));
         let body = result.map(|row| format!("[{}]\n{}", row.name.to_uppercase(), row.description.unwrap_or_else(|| "A persona inhabiting the Arkyv.".to_string()))).unwrap_or_else(|| "No one by that name is here.".to_string());
-        add_message(ctx, Some(room_id), None, None, None, "system", body, None, None);
+        add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", body, None, None);
     } else if let Some(rest) = raw.strip_prefix("whisper ") {
         let mut parts = rest.trim().splitn(2, ' ');
         let target = parts.next().unwrap_or_default();
         let body = parts.next().unwrap_or_default();
         if let Some(target_character) = ctx.db.character().iter().find(|row| row.current_room.as_deref() == Some(room_id.as_str()) && row.name.eq_ignore_ascii_case(target) && row.id != actor_id) {
-            add_message(ctx, Some(room_id.clone()), character_id.clone(), Some(actor_name.clone()), Some(target_character.id.clone()), "whisper", format!("{actor_name} whispers to you: \"{body}\""), None, None);
-            add_message(ctx, Some(room_id), character_id, Some(actor_name), Some(actor_id), "system", format!("You whisper to {}: \"{body}\"", target_character.name), None, None);
+            add_message(ctx, Some(room_id.clone()), Some(actor_id.clone()), Some(actor_name.clone()), Some(target_character.id.clone()), "whisper", format!("{actor_name} whispers to you: \"{body}\""), None, None);
+            add_message(ctx, Some(room_id), Some(actor_id.clone()), Some(actor_name), Some(actor_id), "system", format!("You whisper to {}: \"{body}\"", target_character.name), None, None);
         } else {
-            add_message(ctx, Some(room_id), None, None, None, "system", format!("There is no one named \"{target}\" here to whisper to."), None, None);
+            add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", format!("There is no one named \"{target}\" here to whisper to."), None, None);
         }
     } else if let Some(rest) = raw.strip_prefix("talk ") {
         let alias = rest.split_whitespace().next().unwrap_or_default();
         if let Some(npc) = ctx.db.npc().iter().find(|npc| npc.current_room.as_deref() == Some(room_id.as_str()) && npc.alias.as_deref().map(|value| value.eq_ignore_ascii_case(alias)).unwrap_or(false)) {
-            add_message(ctx, Some(room_id), None, None, None, "npc_typing", format!("{} is thinking...", npc.name), None, None);
+            add_message(ctx, Some(room_id), Some(actor_id), None, None, "npc_typing", format!("{} is thinking...", npc.name), None, None);
             return Ok(());
         }
-        add_message(ctx, Some(room_id), None, None, None, "system", format!("There is no one named \"{alias}\" here to talk to. Use 'who' to see who's present."), None, None);
+        add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", format!("There is no one named \"{alias}\" here to talk to. Use 'who' to see who's present."), None, None);
     } else if raw == "__GREET" {
         for npc in ctx.db.npc().iter().filter(|npc| npc.current_room.as_deref() == Some(room_id.as_str()) && npc.greeting_behavior != "none") {
             let private = !is_profile && npc.greeting_behavior == "private";
-            add_message(ctx, Some(room_id.clone()), None, None, if private { character_id.clone() } else { None }, if private { "npc_whisper" } else { "npc_speech" }, if private { format!("{} whispers to you: \"Welcome, {}.\"", npc.name, actor_name) } else { format!("{}: \"Welcome, {}.\"", npc.name, actor_name) }, None, None);
+            add_message(ctx, Some(room_id.clone()), Some(actor_id.clone()), None, if private { character_id.clone() } else { None }, if private { "npc_whisper" } else { "npc_speech" }, if private { format!("{} whispers to you: \"Welcome, {}.\"", npc.name, actor_name) } else { format!("{}: \"Welcome, {}.\"", npc.name, actor_name) }, None, None);
         }
     } else if let Some(exit) = ctx.db.exit().iter().find(|exit| exit.from_room.as_deref() == Some(room_id.as_str()) && exit.verb.eq_ignore_ascii_case(&raw)) {
         if let Some(destination) = exit.to_room {
@@ -728,10 +740,10 @@ pub fn submit_command(
             } else if let Some(character) = ctx.db.character().id().find(&actor_id) {
                 ctx.db.character().id().update(Character { current_room: Some(destination.clone()), ..character });
             }
-            add_message(ctx, Some(destination), character_id, Some(actor_name.clone()), None, "system", format!("{actor_name} arrives."), None, None);
+            add_message(ctx, Some(destination), Some(actor_id), Some(actor_name.clone()), None, "system", format!("{actor_name} arrives."), None, None);
         }
     } else {
-        add_message(ctx, Some(room_id), None, None, None, "system", format!("You cannot go \"{raw}\" from here. Type \"exits\" to see available directions."), None, None);
+        add_message(ctx, Some(room_id), Some(actor_id), None, None, "system", format!("You cannot go \"{raw}\" from here. Type \"exits\" to see available directions."), None, None);
     }
     finish_command(ctx, &command_id);
     Ok(())
@@ -746,7 +758,8 @@ pub fn complete_npc_command(ctx: &ReducerContext, command_id: String, response: 
     let npc = ctx.db.npc().iter().find(|npc| npc.current_room.as_deref() == Some(room_id.as_str()) && npc.alias.as_deref().map(|value| value.eq_ignore_ascii_case(alias)).unwrap_or(false)).ok_or_else(|| "NPC is no longer present.".to_string())?;
     let typing_ids = ctx.db.room_message().iter().filter(|message| message.room_id.as_deref() == Some(room_id.as_str()) && message.kind == "npc_typing" && message.body.starts_with(&npc.name)).map(|message| message.id).collect::<Vec<_>>();
     for id in typing_ids { ctx.db.room_message().id().delete(id); }
-    add_message(ctx, Some(room_id), None, None, None, "npc_speech", format!("{}: {}", npc.name, response.trim()), None, None);
+    let actor_id = command.character_id.clone().or(command.user_id.clone());
+    add_message(ctx, Some(room_id), actor_id, None, None, "npc_speech", format!("{}: {}", npc.name, response.trim()), None, None);
     finish_command(ctx, &command_id);
     Ok(())
 }

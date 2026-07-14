@@ -104,7 +104,7 @@ export function AuthProvider({ children }) {
     if (!world) return;
     const previousWorld = activeWorld?.id && activeWorld.id !== id ? activeWorld : null;
     if (activeWorld?.id !== id || !getSpacetimeConnection()) await activate(world);
-    const { error } = await spacetime.rpc('delete_user_account');
+    const { error } = await spacetime.deleteCurrentAccount();
     if (error) throw error;
     disconnectSpacetime();
     const worlds = removeSavedWorld(id);

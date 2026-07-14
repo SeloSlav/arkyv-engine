@@ -34,14 +34,6 @@ const normalizeRegionName = (value) => {
     return value.trim();
 };
 
-const buildRealtimeFilter = (regionName) => {
-    const normalized = normalizeRegionName(regionName);
-    if (!normalized) {
-        return null;
-    }
-    return `region_name=eq.${normalized}`;
-};
-
 const formatTimestamp = (timestamp) => {
     if (!timestamp) {
         return '';
@@ -223,17 +215,8 @@ const RoomChatWindow = ({
             return undefined;
         }
 
-        const filter = buildRealtimeFilter(normalizedRegion);
-        const channel = spacetime
-            .channel(`region-chat-${normalizedRegion}`)
-            .on(
-                'postgres_changes',
-                {
-                    event: 'INSERT',
-                    schema: 'public',
-                    table: 'region_chats',
-                    filter: filter || undefined
-                },
+        const subscription = spacetime.onInsert(
+                'region_chats',
                 (payload) => {
                     const newMessage = payload.new;
                     if (!newMessage || normalizeRegionName(newMessage.region_name) !== normalizedRegion) {
@@ -246,14 +229,15 @@ const RoomChatWindow = ({
                         }
                         return [...prev, newMessage];
                     });
-                }
-            )
-            .subscribe();
+                },
+                (message) => normalizeRegionName(message.region_name) === normalizedRegion,
+                (error) => console.error('Region-chat subscription failed:', error),
+            );
 
         return () => {
-            spacetime.removeChannel(channel);
+            spacetime.removeSubscription(subscription);
         };
-    }, [regionName, spacetime, fetchRegionMessages]);
+    }, [regionName, spacetime]);
 
     const formatMessage = useCallback((message) => {
         const type = message.kind || message.type || 'system';

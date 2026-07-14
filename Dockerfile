@@ -16,6 +16,12 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
+# NEXT_PUBLIC values are embedded into the browser bundle at build time.
+ARG NEXT_PUBLIC_SPACETIMEDB_URI=http://127.0.0.1:3000
+ARG NEXT_PUBLIC_SPACETIMEDB_DB_NAME=arkyv-engine
+ENV NEXT_PUBLIC_SPACETIMEDB_URI=$NEXT_PUBLIC_SPACETIMEDB_URI
+ENV NEXT_PUBLIC_SPACETIMEDB_DB_NAME=$NEXT_PUBLIC_SPACETIMEDB_DB_NAME
+
 # Set environment to production
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

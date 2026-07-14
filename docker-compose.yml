@@ -1,15 +1,16 @@
-version: '3.8'
-
 services:
   arkyv-engine:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # This URI is used by the browser, not by the application container.
+        NEXT_PUBLIC_SPACETIMEDB_URI: ${NEXT_PUBLIC_SPACETIMEDB_URI:-http://127.0.0.1:3000}
+        NEXT_PUBLIC_SPACETIMEDB_DB_NAME: ${NEXT_PUBLIC_SPACETIMEDB_DB_NAME:-arkyv-engine}
     ports:
-      - "3000:3000"
+      - "3005:3000"
     environment:
-      # The SpacetimeDB node runs separately. On Docker Desktop, expose it via the host.
-      NEXT_PUBLIC_SPACETIMEDB_URI: ${NEXT_PUBLIC_SPACETIMEDB_URI:-http://host.docker.internal:3000}
+      NEXT_PUBLIC_SPACETIMEDB_URI: ${NEXT_PUBLIC_SPACETIMEDB_URI:-http://127.0.0.1:3000}
       NEXT_PUBLIC_SPACETIMEDB_DB_NAME: ${NEXT_PUBLIC_SPACETIMEDB_DB_NAME:-arkyv-engine}
       
       # AI Provider Configuration
@@ -20,7 +21,8 @@ services:
       # RetroDiffusion (optional)
       RETRO_DIFFUSION_API_KEY: ${RETRO_DIFFUSION_API_KEY}
     env_file:
-      - .env.local
+      - path: .env.local
+        required: false
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]

@@ -46,7 +46,7 @@ export default function SetupPage() {
 
           <section className="space-y-4">
             <h2 className="text-2xl font-semibold text-cyan-300">Saved worlds and identities</h2>
-            <p>There are no email accounts. SpacetimeDB issues a signed token for every saved world; Arkyv stores it in this browser&apos;s localStorage. Logging out returns to the picker, switching selects another token, and deleting a save removes its server-owned profile and characters before deleting the local token.</p>
+            <p>There are no email accounts. SpacetimeDB issues a signed token for every saved world; Arkyv stores it in this browser&apos;s localStorage. Logging out returns to the picker, switching selects another token, and deleting a save removes its profile, characters, private commands, and actor-owned messages before deleting the local token.</p>
           </section>
 
           <section className="space-y-4">
@@ -64,4 +64,3 @@ export default function SetupPage() {
     </>
   );
 }
-
