@@ -35,6 +35,8 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
     const [definitions, setDefinitions] = useState(new Map());
     const [objects, setObjects] = useState([]);
     const [stats, setStats] = useState([]);
+    const [zone, setZone] = useState({ pvpEnabled: false, name: '' });
+    const [nearbyNpcs, setNearbyNpcs] = useState([]);
 
     const run = useCallback((command) => onExecuteCommand?.(command), [onExecuteCommand]);
 
@@ -42,15 +44,19 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
         if (!actor?.id) {
             setObjects([]);
             setStats([]);
+            setNearbyNpcs([]);
             return;
         }
-        const [definitionsResult, objectsResult, statDefinitionsResult, actorStatsResult] = await Promise.all([
+        const [definitionsResult, objectsResult, statDefinitionsResult, actorStatsResult, roomsResult, regionsResult, npcsResult] = await Promise.all([
             spacetime.from('object_definitions').select('*'),
             spacetime.from('world_objects').select('*').eq('location_id', actor.id),
             spacetime.from('stat_definitions').select('*'),
             spacetime.from('actor_stats').select('*').eq('actor_id', actor.id),
+            spacetime.from('rooms').select('*'),
+            spacetime.from('regions').select('*'),
+            spacetime.from('npcs').select('*'),
         ]);
-        if (definitionsResult.error || objectsResult.error || statDefinitionsResult.error || actorStatsResult.error) return;
+        if (definitionsResult.error || objectsResult.error || statDefinitionsResult.error || actorStatsResult.error || roomsResult.error || regionsResult.error || npcsResult.error) return;
         const nextDefinitions = new Map((definitionsResult.data || []).map((definition) => [definition.id, definition]));
         const overrides = new Map((actorStatsResult.data || []).map((row) => [row.stat_definition_id, row]));
         const equipped = (objectsResult.data || []).filter((object) => object.location_kind === 'equipped');
@@ -66,7 +72,11 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
             const bonus = equipmentBonus(definition.id);
             return { ...definition, value: rawValue + bonus, rawValue, bonus };
         }));
-    }, [actor?.id, spacetime]);
+        const room = (roomsResult.data || []).find((candidate) => candidate.id === actor.current_room);
+        const region = (regionsResult.data || []).find((candidate) => candidate.name === room?.region_name);
+        setZone({ pvpEnabled: Boolean(region?.pvp_enabled), name: region?.display_name || region?.name || room?.region || '' });
+        setNearbyNpcs((npcsResult.data || []).filter((npc) => npc.current_room === actor.current_room));
+    }, [actor?.current_room, actor?.id, spacetime]);
 
     useEffect(() => {
         refresh();
@@ -77,9 +87,11 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
 
     const inventory = objects.filter((object) => object.location_kind === 'inventory');
     const equipped = objects.filter((object) => object.location_kind === 'equipped');
-    const targets = [...(environmentData.characters || []), ...(environmentData.npcs || [])]
-        .map(cleanTargetName)
-        .filter(Boolean);
+    const playerTargets = zone.pvpEnabled ? (environmentData.characters || []).map((name) => ({ name: cleanTargetName(name), kind: 'Player' })) : [];
+    const npcTargets = nearbyNpcs
+        .filter((npc) => (npc.disposition || 'neutral') !== 'friendly')
+        .map((npc) => ({ name: npc.name, kind: (npc.disposition || 'neutral') === 'hostile' ? 'Enemy NPC' : 'Neutral NPC' }));
+    const targets = [...npcTargets, ...playerTargets].filter((target) => target.name);
 
     return (
         <section className={`arkyv-panel flex min-h-0 flex-col overflow-hidden ${className}`} aria-label="Character status and actions">
@@ -187,18 +199,19 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
                         <div className="rounded-xl border border-fuchsia-400/15 bg-fuchsia-400/[0.04] p-3">
                             <p className="text-xs font-semibold text-slate-100">Choose a target</p>
                             <p className="mt-1 text-[0.68rem] leading-5 text-slate-500">Attacks use your equipped weapon, strength scaling, and the target&apos;s defense.</p>
+                            <p className={`mt-2 text-[0.65rem] font-semibold uppercase tracking-wider ${zone.pvpEnabled ? 'text-rose-300' : 'text-emerald-300'}`}>{zone.name || 'Current region'} · PvP {zone.pvpEnabled ? 'enabled' : 'disabled'}</p>
                         </div>
                         <div className="space-y-2">
                             {targets.length === 0 && <p className="rounded-lg border border-dashed border-slate-800 p-5 text-center text-xs text-slate-600">No attackable characters or NPCs are visible here. Try <span className="text-slate-400">look</span>.</p>}
                             {targets.map((target) => (
-                                <div key={target} className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-black/20 p-3">
-                                    <div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-100">{target}</p><p className="text-[0.62rem] uppercase tracking-wider text-slate-600">Nearby target</p></div>
-                                    <button type="button" onClick={() => run(`attack ${target}`)} className="min-h-10 rounded-lg border border-rose-400/30 bg-rose-500/10 px-4 text-xs font-semibold uppercase tracking-wider text-rose-200 hover:bg-rose-500/20">Attack</button>
+                                <div key={`${target.kind}-${target.name}`} className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-black/20 p-3">
+                                    <div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-100">{target.name}</p><p className="text-[0.62rem] uppercase tracking-wider text-slate-600">{target.kind}</p></div>
+                                    <button type="button" onClick={() => run(`attack ${target.name}`)} className="min-h-10 rounded-lg border border-rose-400/30 bg-rose-500/10 px-4 text-xs font-semibold uppercase tracking-wider text-rose-200 hover:bg-rose-500/20">Attack</button>
                                 </div>
                             ))}
                         </div>
                         <div className="flex flex-wrap gap-2 border-t border-slate-800 pt-3">
-                            {['look', 'inventory', 'stats'].map((command) => <button key={command} type="button" onClick={() => run(command)} className="arkyv-chip">/{command}</button>)}
+                            {['look', 'combat', 'loot', 'rest', 'wait'].map((command) => <button key={command} type="button" onClick={() => run(command)} className="arkyv-chip">/{command}</button>)}
                         </div>
                     </div>
                 )}

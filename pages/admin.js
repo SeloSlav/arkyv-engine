@@ -418,6 +418,57 @@ const PRO_OPTIONS = {
     hideAttribution: true
 };
 
+function PatrolRouteEditor({ rooms, value, onChange }) {
+    const route = Array.isArray(value) ? value : [];
+    const roomById = new Map(rooms.map((room) => [room.id, room]));
+    const move = (index, offset) => {
+        const target = index + offset;
+        if (target < 0 || target >= route.length) return;
+        const next = [...route];
+        [next[index], next[target]] = [next[target], next[index]];
+        onChange(next);
+    };
+    return (
+        <div className="space-y-3 rounded-lg border border-slate-700/60 bg-slate-950/30 p-3">
+            <div className="flex items-start justify-between gap-3"><div><p className="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-cyan-200">Ordered patrol stops</p><p className="mt-1 text-[0.68rem] normal-case leading-5 tracking-normal text-slate-500">Stops must be connected by authored exits. The NPC follows this order and loops back to the first stop.</p></div><span className="text-xs text-slate-500">{route.length} stops</span></div>
+            <div className="space-y-2">
+                {route.map((roomId, index) => <div key={`${roomId}-${index}`} className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-900/70 px-3 py-2 text-xs normal-case tracking-normal"><span className="min-w-0 flex-1 truncate text-slate-200">{index + 1}. {roomById.get(roomId)?.name || roomId}</span><button type="button" onClick={() => move(index, -1)} disabled={index === 0} className="rounded px-2 py-1 text-slate-400 hover:bg-white/5 hover:text-white disabled:opacity-25" aria-label="Move stop earlier">↑</button><button type="button" onClick={() => move(index, 1)} disabled={index === route.length - 1} className="rounded px-2 py-1 text-slate-400 hover:bg-white/5 hover:text-white disabled:opacity-25" aria-label="Move stop later">↓</button><button type="button" onClick={() => onChange(route.filter((_, routeIndex) => routeIndex !== index))} className="rounded px-2 py-1 text-rose-300 hover:bg-rose-500/10" aria-label="Remove patrol stop">Remove</button></div>)}
+                {route.length === 0 && <p className="rounded-md border border-dashed border-slate-700 px-3 py-4 text-center text-xs normal-case tracking-normal text-slate-600">No patrol stops yet.</p>}
+            </div>
+            <select value="" onChange={(event) => { if (event.target.value) onChange([...route, event.target.value]); }} className="w-full rounded-md border border-slate-600/60 bg-slate-800/70 px-3 py-2 text-xs normal-case tracking-normal text-slate-100"><option value="">Add a room to the route…</option>{rooms.filter((room) => !route.includes(room.id)).map((room) => <option key={room.id} value={room.id}>{room.name} ({room.region_name || room.region || 'Unknown'})</option>)}</select>
+        </div>
+    );
+}
+
+function NpcBehaviorEditor({ value, rooms, onChange }) {
+    const set = (key, nextValue) => onChange(key, nextValue);
+    const isPatrolling = value?.behavior_type === 'patrol' || value?.behavior_type === 'patrol_hostile';
+    return (
+        <div className="space-y-4 rounded-xl border border-amber-400/20 bg-amber-500/[0.035] p-4 md:col-span-2">
+            <div><h4 className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-200">World behavior</h4><p className="mt-1 text-xs normal-case leading-5 tracking-normal text-slate-500">These rules run on the authoritative world state during play.</p></div>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <label className="flex flex-col gap-2 text-[0.65rem] uppercase tracking-[0.2em] text-slate-400">Disposition<select value={value?.disposition || 'neutral'} onChange={(event) => set('disposition', event.target.value)} className="rounded-md border border-slate-600/60 bg-slate-800/70 px-3 py-2 text-sm normal-case tracking-normal text-slate-100"><option value="friendly">Friendly · cannot be attacked</option><option value="neutral">Neutral · retaliates</option><option value="hostile">Hostile · enemy</option></select></label>
+                <label className="flex flex-col gap-2 text-[0.65rem] uppercase tracking-[0.2em] text-slate-400">Movement<select value={value?.behavior_type || 'static'} onChange={(event) => set('behavior_type', event.target.value)} className="rounded-md border border-slate-600/60 bg-slate-800/70 px-3 py-2 text-sm normal-case tracking-normal text-slate-100"><option value="static">Stay in spawn room</option><option value="patrol">Patrol an ordered route</option><option value="patrol_hostile">Patrol route · hostile role</option></select></label>
+                <label className="flex items-center gap-3 self-end rounded-md border border-slate-700 bg-slate-900/60 px-3 py-2.5 text-xs normal-case tracking-normal text-slate-300"><input type="checkbox" checked={Boolean(value?.attack_on_sight)} disabled={(value?.disposition || 'neutral') !== 'hostile'} onChange={(event) => set('attack_on_sight', event.target.checked)} className="accent-rose-400" />Attack players on sight</label>
+                <label className="flex flex-col gap-2 text-[0.65rem] uppercase tracking-[0.2em] text-slate-400">Attack cadence (seconds)<input type="number" min="1" value={value?.attack_interval_seconds ?? 6} onChange={(event) => set('attack_interval_seconds', event.target.value)} className="rounded-md border border-slate-600/60 bg-slate-800/70 px-3 py-2 text-sm normal-case tracking-normal text-slate-100" /></label>
+                <label className="flex flex-col gap-2 text-[0.65rem] uppercase tracking-[0.2em] text-slate-400">Respawn after seconds<input type="number" min="0" value={value?.respawn_seconds ?? 60} onChange={(event) => set('respawn_seconds', event.target.value)} className="rounded-md border border-slate-600/60 bg-slate-800/70 px-3 py-2 text-sm normal-case tracking-normal text-slate-100" /><span className="normal-case tracking-normal text-slate-600">Use 0 to keep defeated permanently.</span></label>
+                <label className="flex flex-col gap-2 text-[0.65rem] uppercase tracking-[0.2em] text-slate-400">Spawn / respawn room<select value={value?.spawn_room || value?.current_room || ''} onChange={(event) => set('spawn_room', event.target.value)} className="rounded-md border border-slate-600/60 bg-slate-800/70 px-3 py-2 text-sm normal-case tracking-normal text-slate-100"><option value="">Use current room</option>{rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}</select></label>
+            </div>
+            {isPatrolling && <><label className="flex max-w-xs flex-col gap-2 text-[0.65rem] uppercase tracking-[0.2em] text-slate-400">Patrol cadence (seconds)<input type="number" min="1" value={value?.patrol_interval_seconds ?? 20} onChange={(event) => set('patrol_interval_seconds', event.target.value)} className="rounded-md border border-slate-600/60 bg-slate-800/70 px-3 py-2 text-sm normal-case tracking-normal text-slate-100" /></label><PatrolRouteEditor rooms={rooms} value={value?.patrol_route} onChange={(route) => set('patrol_route', route)} /></>}
+        </div>
+    );
+}
+
+function RegionCombatRulesEditor({ value, rooms, onChange }) {
+    return (
+        <div className="space-y-4 rounded-xl border border-rose-400/20 bg-rose-500/[0.035] p-4">
+            <div><h4 className="text-xs font-semibold uppercase tracking-[0.24em] text-rose-200">Exploration and combat rules</h4><p className="mt-1 text-xs normal-case leading-5 tracking-normal text-slate-500">A region is a PvP zone only when enabled here. NPC combat is controlled separately on each NPC.</p></div>
+            <label className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-3 text-sm normal-case tracking-normal text-slate-200"><input type="checkbox" checked={Boolean(value?.pvp_enabled)} onChange={(event) => onChange('pvp_enabled', event.target.checked)} className="accent-rose-400" /><span><span className="block font-semibold">Enable player-versus-player combat</span><span className="mt-0.5 block text-xs text-slate-500">Players can target one another anywhere inside this region.</span></span></label>
+            <label className="flex flex-col gap-2 text-[0.65rem] uppercase tracking-[0.2em] text-slate-400">Defeat recovery room<select value={value?.respawn_room_id || ''} onChange={(event) => onChange('respawn_room_id', event.target.value)} className="rounded-md border border-slate-600/60 bg-slate-800/70 px-3 py-2 text-sm normal-case tracking-normal text-slate-100"><option value="">Use the world starting room</option>{rooms.map((room) => <option key={room.id} value={room.id}>{room.name} ({room.region_name || room.region || 'Unknown'})</option>)}</select><span className="normal-case leading-5 tracking-normal text-slate-600">Defeated players keep their inventory and recover here with their authored base health.</span></label>
+        </div>
+    );
+}
+
 export default function ArkyvAdminPanel() {
     const router = useRouter();
     const spacetime = useMemo(() => getSpacetimeClient(), []);
@@ -481,7 +532,9 @@ export default function ArkyvAdminPanel() {
         description: '',
         borderColor: '#38bdf8',
         fontColor: '#e0f2fe',
-        accent: 'rgba(56, 189, 248, 0.14)'
+        accent: 'rgba(56, 189, 248, 0.14)',
+        pvp_enabled: false,
+        respawn_room_id: ''
     });
     const [isCreatingRegion, setIsCreatingRegion] = useState(false);
     const [isGeneratingColors, setIsGeneratingColors] = useState(null); // 'random', 'complementary', or null
@@ -532,6 +585,13 @@ export default function ArkyvAdminPanel() {
         faction: '',
         behavior_type: 'static',
         greeting_behavior: 'none',
+        disposition: 'neutral',
+        attack_on_sight: false,
+        patrol_route: [],
+        patrol_interval_seconds: 20,
+        attack_interval_seconds: 6,
+        respawn_seconds: 60,
+        spawn_room: '',
         personality: ''
     });
     const [isCreatingNpc, setIsCreatingNpc] = useState(false);
@@ -1067,6 +1127,13 @@ export default function ArkyvAdminPanel() {
                 alias, 
                 greeting_behavior,
                 portrait_url,
+                disposition,
+                attack_on_sight,
+                patrol_route,
+                patrol_interval_seconds,
+                attack_interval_seconds,
+                respawn_seconds,
+                spawn_room,
                 rooms:current_room (
                     id,
                     name,
@@ -2723,7 +2790,9 @@ export default function ArkyvAdminPanel() {
                     name: regionName,
                     display_name: newRegion.display_name,
                     description: newRegion.description,
-                    color_scheme: colorScheme
+                    color_scheme: colorScheme,
+                    pvp_enabled: Boolean(newRegion.pvp_enabled),
+                    respawn_room_id: newRegion.respawn_room_id || null
                 }])
                 .select()
                 .single();
@@ -2748,7 +2817,9 @@ export default function ArkyvAdminPanel() {
                 description: '',
                 borderColor: '#38bdf8',
                 fontColor: '#e0f2fe',
-                accent: 'rgba(56, 189, 248, 0.14)'
+                accent: 'rgba(56, 189, 248, 0.14)',
+                pvp_enabled: false,
+                respawn_room_id: ''
             });
 
             setShowNewRegionDialog(false);
@@ -2912,7 +2983,9 @@ export default function ArkyvAdminPanel() {
             description: region.description || '',
             borderColor: colorScheme.borderColor || '#38bdf8',
             fontColor: colorScheme.fontColor || '#e0f2fe',
-            accent: colorScheme.accent || 'rgba(56, 189, 248, 0.14)'
+            accent: colorScheme.accent || 'rgba(56, 189, 248, 0.14)',
+            pvp_enabled: Boolean(region.pvp_enabled),
+            respawn_room_id: region.respawn_room_id || ''
         });
         setRegionError('');
         setShowEditRegionDialog(true);
@@ -2954,7 +3027,9 @@ export default function ArkyvAdminPanel() {
                     name: regionName,
                     display_name: editRegion.display_name,
                     description: editRegion.description,
-                    color_scheme: colorScheme
+                    color_scheme: colorScheme,
+                    pvp_enabled: Boolean(editRegion.pvp_enabled),
+                    respawn_room_id: editRegion.respawn_room_id || null
                 })
                 .eq('name', activeRegion.name)
                 .select()
@@ -3121,7 +3196,14 @@ export default function ArkyvAdminPanel() {
             behavior_type: npc.behavior_type ?? 'static',
             alias: npc.alias ?? '',
             greeting_behavior: npc.greeting_behavior ?? null,
-            current_room: npc.current_room ?? null
+            current_room: npc.current_room ?? null,
+            disposition: npc.disposition || 'neutral',
+            attack_on_sight: Boolean(npc.attack_on_sight),
+            patrol_route: Array.isArray(npc.patrol_route) ? npc.patrol_route : [],
+            patrol_interval_seconds: npc.patrol_interval_seconds ?? 20,
+            attack_interval_seconds: npc.attack_interval_seconds ?? 6,
+            respawn_seconds: npc.respawn_seconds ?? 60,
+            spawn_room: npc.spawn_room || npc.current_room || null
         });
         setIsNpcDirty(false);
         setNpcSaveError('');
@@ -3150,7 +3232,14 @@ export default function ArkyvAdminPanel() {
                 (next.behavior_type ?? '') !== (activeNpc.behavior_type ?? '') ||
                 (next.alias ?? '') !== (activeNpc.alias ?? '') ||
                 (next.greeting_behavior ?? '') !== (activeNpc.greeting_behavior ?? '') ||
-                (next.current_room ?? null) !== (activeNpc.current_room ?? null)
+                (next.current_room ?? null) !== (activeNpc.current_room ?? null) ||
+                (next.disposition ?? 'neutral') !== (activeNpc.disposition || 'neutral') ||
+                Boolean(next.attack_on_sight) !== Boolean(activeNpc.attack_on_sight) ||
+                JSON.stringify(next.patrol_route ?? []) !== JSON.stringify(activeNpc.patrol_route ?? []) ||
+                Number(next.patrol_interval_seconds ?? 20) !== Number(activeNpc.patrol_interval_seconds ?? 20) ||
+                Number(next.attack_interval_seconds ?? 6) !== Number(activeNpc.attack_interval_seconds ?? 6) ||
+                Number(next.respawn_seconds ?? 60) !== Number(activeNpc.respawn_seconds ?? 60) ||
+                (next.spawn_room ?? null) !== (activeNpc.spawn_room ?? activeNpc.current_room ?? null)
             );
             setIsNpcDirty(dirty);
             return next;
@@ -3171,7 +3260,14 @@ export default function ArkyvAdminPanel() {
                 behavior_type: editNpc.behavior_type ?? 'static',
                 alias: editNpc.alias?.trim() || null,
                 greeting_behavior: editNpc.greeting_behavior || null,
-                current_room: editNpc.current_room || null
+                current_room: editNpc.current_room || null,
+                disposition: editNpc.disposition || 'neutral',
+                attack_on_sight: Boolean(editNpc.attack_on_sight),
+                patrol_route: editNpc.patrol_route || [],
+                patrol_interval_seconds: Math.max(1, Number(editNpc.patrol_interval_seconds) || 20),
+                attack_interval_seconds: Math.max(1, Number(editNpc.attack_interval_seconds) || 6),
+                respawn_seconds: Math.max(0, Number(editNpc.respawn_seconds) || 0),
+                spawn_room: editNpc.spawn_room || editNpc.current_room || null
             };
             const { error } = await spacetime.from('npcs').update(payload).eq('id', editNpc.id);
             if (error) throw error;
@@ -3237,6 +3333,13 @@ export default function ArkyvAdminPanel() {
             faction: '',
             behavior_type: 'static',
             greeting_behavior: 'none',
+            disposition: 'neutral',
+            attack_on_sight: false,
+            patrol_route: [],
+            patrol_interval_seconds: 20,
+            attack_interval_seconds: 6,
+            respawn_seconds: 60,
+            spawn_room: roomId,
             personality: ''
         });
         setNpcRoomSearch('');
@@ -3260,6 +3363,13 @@ export default function ArkyvAdminPanel() {
                 faction: newNpc.faction?.trim() || null,
                 behavior_type: newNpc.behavior_type || 'static',
                 greeting_behavior: newNpc.greeting_behavior || 'none',
+                disposition: newNpc.disposition || 'neutral',
+                attack_on_sight: Boolean(newNpc.attack_on_sight),
+                patrol_route: newNpc.patrol_route || [],
+                patrol_interval_seconds: Math.max(1, Number(newNpc.patrol_interval_seconds) || 20),
+                attack_interval_seconds: Math.max(1, Number(newNpc.attack_interval_seconds) || 6),
+                respawn_seconds: Math.max(0, Number(newNpc.respawn_seconds) || 0),
+                spawn_room: newNpc.spawn_room || newNpc.current_room || null,
                 dialogue_tree: {
                     personality: newNpc.personality?.trim() || ''
                 }
@@ -3280,6 +3390,13 @@ export default function ArkyvAdminPanel() {
                 faction: '',
                 behavior_type: 'static',
                 greeting_behavior: 'none',
+                disposition: 'neutral',
+                attack_on_sight: false,
+                patrol_route: [],
+                patrol_interval_seconds: 20,
+                attack_interval_seconds: 6,
+                respawn_seconds: 60,
+                spawn_room: '',
                 personality: ''
             });
             setNpcRoomSearch('');
@@ -4850,6 +4967,8 @@ export default function ArkyvAdminPanel() {
                                         {newRegion.description.length}/3500 characters (~500 words)
                                     </span>
                                 </label>
+
+                                <RegionCombatRulesEditor value={newRegion} rooms={allRooms} onChange={(key, nextValue) => setNewRegion((previous) => ({ ...previous, [key]: nextValue }))} />
                                 
                                 {/* Color Scheme */}
                                 <div className="pt-4 border-t border-slate-700/50">
@@ -5134,6 +5253,8 @@ export default function ArkyvAdminPanel() {
                                         {editRegion.description.length}/3500 characters (~500 words)
                                     </span>
                                 </label>
+
+                                <RegionCombatRulesEditor value={editRegion} rooms={allRooms} onChange={(key, nextValue) => setEditRegion((previous) => ({ ...previous, [key]: nextValue }))} />
                                 
                                 {/* Color Scheme */}
                                 <div className="pt-4 border-t border-slate-700/50">
@@ -6205,6 +6326,8 @@ export default function ArkyvAdminPanel() {
                                     </div>
                                 </label>
 
+                                <NpcBehaviorEditor value={editNpc} rooms={allRooms} onChange={updateNpcField} />
+
                                 <label className="flex flex-col gap-2 text-xs uppercase tracking-[0.25em] text-slate-400 md:col-span-2">
                                     <span className="flex items-center justify-between">
                                         <span className="flex items-center gap-2">
@@ -6600,6 +6723,8 @@ export default function ArkyvAdminPanel() {
                                         ))}
                                     </select>
                                 </label>
+
+                                <NpcBehaviorEditor value={newNpc} rooms={allRooms} onChange={(key, nextValue) => setNewNpc((previous) => ({ ...previous, [key]: nextValue }))} />
 
                                 <label className="flex flex-col gap-2 text-xs uppercase tracking-[0.25em] text-slate-400 md:col-span-2">
                                     <span className="flex items-center justify-between">

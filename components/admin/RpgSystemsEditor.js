@@ -14,6 +14,7 @@ const TAB_OPTIONS = [
     { id: 'objects', label: 'Object primitives' },
     { id: 'stats', label: 'Hero stats' },
     { id: 'instances', label: 'Placed objects' },
+    { id: 'loot', label: 'Enemy loot' },
     { id: 'actors', label: 'Actor values' },
 ];
 
@@ -31,6 +32,7 @@ const emptyDefinition = () => ({
 const emptyStat = () => ({ id: '', name: '', description: '', role: '', minimum: 0, maximum: 100, default_value: 10, visible: true });
 const emptyInstance = () => ({ id: '', definition_id: '', location_kind: 'room', location_id: '', quantity: 1, equipped_slot: '', durability: 100, fuel_remaining: 0, is_active: false, state_json: '{}' });
 const emptyActorStat = () => ({ id: '', actor_id: '', stat_definition_id: '', base_value: 0, current_value: 0 });
+const emptyLootEntry = () => ({ id: '', npc_id: '', definition_id: '', minimum_quantity: 1, maximum_quantity: 1, chance_percent: 100 });
 
 function csvToArray(value) {
     return String(value || '').split(',').map((part) => part.trim()).filter(Boolean);
@@ -116,14 +118,17 @@ export default function RpgSystemsEditor({ enabled }) {
     const [characters, setCharacters] = useState([]);
     const [npcs, setNpcs] = useState([]);
     const [actorStats, setActorStats] = useState([]);
+    const [lootEntries, setLootEntries] = useState([]);
     const [definitionForm, setDefinitionForm] = useState(emptyDefinition);
     const [statForm, setStatForm] = useState(emptyStat);
     const [instanceForm, setInstanceForm] = useState(emptyInstance);
     const [actorStatForm, setActorStatForm] = useState(emptyActorStat);
+    const [lootForm, setLootForm] = useState(emptyLootEntry);
     const [editingDefinition, setEditingDefinition] = useState(null);
     const [editingStat, setEditingStat] = useState(null);
     const [editingInstance, setEditingInstance] = useState(null);
     const [editingActorStat, setEditingActorStat] = useState(null);
+    const [editingLootEntry, setEditingLootEntry] = useState(null);
     const [busy, setBusy] = useState(false);
     const [generatingImage, setGeneratingImage] = useState(false);
     const [message, setMessage] = useState(null);
@@ -148,6 +153,7 @@ export default function RpgSystemsEditor({ enabled }) {
             spacetime.from('characters').select('id, name').order('name'),
             spacetime.from('npcs').select('id, name').order('name'),
             spacetime.from('actor_stats').select('*'),
+            spacetime.from('loot_table_entries').select('*'),
         ]);
         const firstError = results.find((result) => result.error)?.error;
         if (firstError) throw firstError;
@@ -158,6 +164,7 @@ export default function RpgSystemsEditor({ enabled }) {
         setCharacters(results[4].data || []);
         setNpcs(results[5].data || []);
         setActorStats(results[6].data || []);
+        setLootEntries(results[7].data || []);
     }, [enabled, spacetime]);
 
     useEffect(() => {
@@ -291,6 +298,26 @@ export default function RpgSystemsEditor({ enabled }) {
         if (ok) { setEditingActorStat(null); setActorStatForm(emptyActorStat()); }
     };
 
+    const saveLootEntry = async () => {
+        const minimum = Math.max(1, Number(lootForm.minimum_quantity) || 1);
+        const payload = {
+            id: lootForm.id || crypto.randomUUID(),
+            npc_id: lootForm.npc_id,
+            definition_id: lootForm.definition_id,
+            minimum_quantity: minimum,
+            maximum_quantity: Math.max(minimum, Number(lootForm.maximum_quantity) || minimum),
+            chance_percent: Math.min(100, Math.max(0, Number(lootForm.chance_percent) || 0)),
+        };
+        if (!payload.npc_id || !payload.definition_id) { setMessage({ type: 'error', text: 'Choose an enemy NPC and an object definition.' }); return; }
+        const ok = await run(
+            () => editingLootEntry
+                ? spacetime.from('loot_table_entries').update(payload).eq('id', editingLootEntry).select()
+                : spacetime.from('loot_table_entries').insert(payload).select(),
+            editingLootEntry ? 'Enemy drop updated.' : 'Enemy drop added.',
+        );
+        if (ok) { setEditingLootEntry(null); setLootForm(emptyLootEntry()); }
+    };
+
     const remove = (table, id, label) => run(() => spacetime.from(table).delete().eq('id', id), `${label} deleted.`);
 
     const installStarterKit = () => run(() => spacetime.installRpgStarterKit(), 'Starter primitives installed. Existing definitions were preserved.');
@@ -309,7 +336,7 @@ export default function RpgSystemsEditor({ enabled }) {
             <div className="flex flex-col gap-4 border-b border-purple-400/20 p-4 sm:p-6 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                     <h2 className="font-terminal text-sm uppercase tracking-[0.24em] text-purple-200 sm:text-base sm:tracking-[0.35em]">RPG Systems Studio</h2>
-                    <p className="mt-1 max-w-3xl text-[0.65rem] uppercase leading-5 tracking-[0.14em] text-slate-400 sm:text-xs sm:tracking-[0.18em]">Definition-driven inventory, containers, fuel, equipment, hero stats, consumables, and combat</p>
+                    <p className="mt-1 max-w-3xl text-[0.65rem] uppercase leading-5 tracking-[0.14em] text-slate-400 sm:text-xs sm:tracking-[0.18em]">Definition-driven inventory, containers, chests, enemy drops, equipment, hero stats, consumables, and combat</p>
                 </div>
                 <button type="button" onClick={installStarterKit} disabled={busy} className={buttonClass}>Install starter kit</button>
             </div>
@@ -411,6 +438,36 @@ export default function RpgSystemsEditor({ enabled }) {
                 <div className="grid gap-6 p-4 sm:p-6 xl:grid-cols-[1fr_420px]">
                     <div className="overflow-x-auto rounded-xl border border-slate-700/70"><div className="grid min-w-[680px] grid-cols-[1.2fr_1fr_1fr_auto] gap-3 border-b border-slate-700 bg-slate-950/60 px-4 py-3 text-[0.62rem] uppercase tracking-[0.16em] text-slate-500"><span>Object</span><span>Location</span><span>State</span><span /></div><div className="max-h-[560px] min-w-[680px] overflow-y-auto">{instances.map((instance) => { const definition = definitionsById.get(instance.definition_id); return <button key={instance.id} type="button" aria-pressed={editingInstance === instance.id} onClick={() => { setEditingInstance(instance.id); setInstanceForm({ ...emptyInstance(), ...instance, state_json: JSON.stringify(jsonObject(instance.state_json), null, 2), equipped_slot: instance.equipped_slot || '' }); }} className={`grid w-full grid-cols-[1.2fr_1fr_1fr_auto] gap-3 border-b border-slate-800 px-4 py-3 text-left text-xs ${editingInstance === instance.id ? 'bg-purple-500/15' : 'hover:bg-slate-800/50'}`}><span className="text-slate-100">{definition?.icon} {definition?.name || instance.definition_id} {instance.quantity > 1 ? `×${instance.quantity}` : ''}</span><span className="text-slate-400">{instance.location_kind} · {locationLabel(instance)}</span><span className="text-slate-400">{instance.is_active ? 'active' : 'idle'}{instance.fuel_remaining > 0 ? ` · fuel ${instance.fuel_remaining}` : ''}</span><span className="text-purple-300">Edit</span></button>; })}</div></div>
                     <div className="space-y-4 rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5"><div className="flex items-center justify-between"><h3 className="text-sm uppercase tracking-[0.22em] text-purple-200">{editingInstance ? 'Edit instance' : 'Place object'}</h3>{editingInstance && <button type="button" onClick={() => { setEditingInstance(null); setInstanceForm(emptyInstance()); }} className="text-xs text-slate-400">New</button>}</div><Field label="Definition"><select className={inputClass} value={instanceForm.definition_id} onChange={(e) => setInstanceForm((value) => ({ ...value, definition_id: e.target.value }))}><option value="">Choose primitive…</option>{definitions.map((definition) => <option key={definition.id} value={definition.id}>{definition.icon} {definition.name}</option>)}</select></Field><div className="grid gap-4 sm:grid-cols-2"><Field label="Location type"><select className={inputClass} value={instanceForm.location_kind} onChange={(e) => setInstanceForm((value) => ({ ...value, location_kind: e.target.value, location_id: '' }))}><option value="room">Room</option><option value="inventory">Actor inventory</option><option value="equipped">Equipped by actor</option><option value="container">Inside container</option></select></Field><Field label="Location"><select className={inputClass} value={instanceForm.location_id} onChange={(e) => setInstanceForm((value) => ({ ...value, location_id: e.target.value }))}><option value="">Choose…</option>{validLocationTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</select></Field></div><div className="grid gap-4 sm:grid-cols-3"><Field label="Quantity"><input type="number" min="1" className={inputClass} value={instanceForm.quantity} onChange={(e) => setInstanceForm((value) => ({ ...value, quantity: e.target.value }))} /></Field><Field label="Durability"><input type="number" min="0" className={inputClass} value={instanceForm.durability} onChange={(e) => setInstanceForm((value) => ({ ...value, durability: e.target.value }))} /></Field><Field label="Fuel"><input type="number" min="0" className={inputClass} value={instanceForm.fuel_remaining} onChange={(e) => setInstanceForm((value) => ({ ...value, fuel_remaining: e.target.value }))} /></Field></div>{instanceForm.location_kind === 'equipped' && <Field label="Equipment slot"><input className={inputClass} value={instanceForm.equipped_slot} onChange={(e) => setInstanceForm((value) => ({ ...value, equipped_slot: e.target.value }))} /></Field>}<Check label="Active / burning" checked={instanceForm.is_active} onChange={(is_active) => setInstanceForm((value) => ({ ...value, is_active }))} /><Field label="Custom state (JSON)"><textarea className={`${inputClass} min-h-24 font-mono text-xs`} value={instanceForm.state_json} onChange={(e) => setInstanceForm((value) => ({ ...value, state_json: e.target.value }))} /></Field><div className="flex justify-end gap-3">{editingInstance && <button type="button" disabled={busy} onClick={() => remove('world_objects', editingInstance, 'Object instance').then(() => { setEditingInstance(null); setInstanceForm(emptyInstance()); })} className="rounded-md border border-rose-400/50 px-4 py-2 text-xs uppercase tracking-[0.18em] text-rose-200">Delete</button>}<button type="button" disabled={busy} onClick={saveInstance} className={buttonClass}>Save placement</button></div></div>
+                </div>
+            )}
+
+            {activeTab === 'loot' && (
+                <div className="grid gap-6 p-4 sm:p-6 xl:grid-cols-[1fr_420px]">
+                    <div className="space-y-3">
+                        <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.04] p-4 text-xs leading-5 text-slate-400">
+                            Each entry rolls independently when its NPC is defeated. Successful drops appear in the room and use the normal <span className="text-amber-200">loot</span> and <span className="text-amber-200">take</span> commands. For chests, place a container in a room, then place objects inside that container from the Placed objects tab.
+                        </div>
+                        {lootEntries.length === 0 && <p className="rounded-xl border border-dashed border-slate-800 p-6 text-center text-xs text-slate-600">No enemy drops authored yet.</p>}
+                        {lootEntries.map((entry) => {
+                            const npc = actorsById.get(entry.npc_id);
+                            const definition = definitionsById.get(entry.definition_id);
+                            return (
+                                <button key={entry.id} type="button" aria-pressed={editingLootEntry === entry.id} onClick={() => { setEditingLootEntry(entry.id); setLootForm({ ...emptyLootEntry(), ...entry }); }} className={`grid w-full gap-2 rounded-xl border p-4 text-left sm:grid-cols-[1fr_1fr_auto] sm:items-center ${editingLootEntry === entry.id ? 'border-amber-300 bg-amber-500/10' : 'border-slate-700/70 bg-slate-950/40 hover:border-amber-400/40'}`}>
+                                    <span><span className="block text-sm text-slate-100">{npc?.name || entry.npc_id}</span><span className="text-[0.62rem] uppercase tracking-wider text-slate-600">Enemy source</span></span>
+                                    <span><span className="block text-sm text-slate-200">{definition?.icon} {definition?.name || entry.definition_id}</span><span className="text-[0.62rem] uppercase tracking-wider text-slate-600">{entry.minimum_quantity}–{entry.maximum_quantity} quantity</span></span>
+                                    <span className="text-sm font-semibold text-amber-200 sm:text-right">{entry.chance_percent}%</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                    <div className="space-y-4 rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5">
+                        <div className="flex items-center justify-between"><h3 className="text-sm uppercase tracking-[0.22em] text-amber-200">{editingLootEntry ? 'Edit enemy drop' : 'Add enemy drop'}</h3>{editingLootEntry && <button type="button" onClick={() => { setEditingLootEntry(null); setLootForm(emptyLootEntry()); }} className="text-xs text-slate-400 hover:text-white">New</button>}</div>
+                        <Field label="Enemy NPC"><select className={inputClass} value={lootForm.npc_id} onChange={(event) => setLootForm((value) => ({ ...value, npc_id: event.target.value }))}><option value="">Choose NPC…</option>{npcs.map((npc) => <option key={npc.id} value={npc.id}>{npc.name}{npc.disposition === 'hostile' ? ' · Hostile' : ''}</option>)}</select></Field>
+                        <Field label="Dropped object"><select className={inputClass} value={lootForm.definition_id} onChange={(event) => setLootForm((value) => ({ ...value, definition_id: event.target.value }))}><option value="">Choose object…</option>{definitions.filter((definition) => definition.portable).map((definition) => <option key={definition.id} value={definition.id}>{definition.icon} {definition.name}</option>)}</select></Field>
+                        <div className="grid grid-cols-3 gap-3"><Field label="Minimum"><input type="number" min="1" className={inputClass} value={lootForm.minimum_quantity} onChange={(event) => setLootForm((value) => ({ ...value, minimum_quantity: event.target.value }))} /></Field><Field label="Maximum"><input type="number" min="1" className={inputClass} value={lootForm.maximum_quantity} onChange={(event) => setLootForm((value) => ({ ...value, maximum_quantity: event.target.value }))} /></Field><Field label="Chance %"><input type="number" min="0" max="100" className={inputClass} value={lootForm.chance_percent} onChange={(event) => setLootForm((value) => ({ ...value, chance_percent: event.target.value }))} /></Field></div>
+                        <p className="text-xs leading-5 text-slate-500">Add multiple entries for multiple possible drops. A 100% entry is guaranteed; lower percentages are rolled independently on each defeat.</p>
+                        <div className="flex justify-end gap-3">{editingLootEntry && <button type="button" disabled={busy} onClick={() => remove('loot_table_entries', editingLootEntry, 'Enemy drop').then(() => { setEditingLootEntry(null); setLootForm(emptyLootEntry()); })} className="rounded-md border border-rose-400/50 px-4 py-2 text-xs uppercase tracking-[0.18em] text-rose-200">Delete</button>}<button type="button" disabled={busy} onClick={saveLootEntry} className={buttonClass}>Save drop</button></div>
+                    </div>
                 </div>
             )}
 

@@ -19,6 +19,10 @@ pub struct Region {
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
     pub color_scheme: String,
+    #[default(false)]
+    pub pvp_enabled: bool,
+    #[default(None::<String>)]
+    pub respawn_room_id: Option<String>,
 }
 
 #[spacetimedb::table(accessor = room, public)]
@@ -78,6 +82,28 @@ pub struct Npc {
     pub alias: Option<String>,
     pub greeting_behavior: String,
     pub portrait_url: Option<String>,
+    #[default(None::<String>)]
+    pub disposition: Option<String>,
+    #[default(false)]
+    pub attack_on_sight: bool,
+    #[default(None::<String>)]
+    pub patrol_route: Option<String>,
+    #[default(20)]
+    pub patrol_interval_seconds: u32,
+    #[default(0)]
+    pub patrol_index: u32,
+    #[default(None::<Timestamp>)]
+    pub last_patrol_at: Option<Timestamp>,
+    #[default(6)]
+    pub attack_interval_seconds: u32,
+    #[default(None::<Timestamp>)]
+    pub last_attack_at: Option<Timestamp>,
+    #[default(60)]
+    pub respawn_seconds: u32,
+    #[default(None::<String>)]
+    pub spawn_room: Option<String>,
+    #[default(None::<Timestamp>)]
+    pub defeated_at: Option<Timestamp>,
 }
 
 #[spacetimedb::table(accessor = exit, public)]
@@ -218,6 +244,23 @@ pub struct ActorStat {
     pub stat_definition_id: String,
     pub base_value: i32,
     pub current_value: i32,
+    pub updated_at: Timestamp,
+}
+
+/// An independently rolled drop authored for an enemy NPC. Chests use regular
+/// world objects placed inside container instances, while these rows create
+/// fresh room loot whenever their NPC is defeated.
+#[spacetimedb::table(accessor = loot_table_entry, public)]
+#[derive(Clone)]
+pub struct LootTableEntry {
+    #[primary_key]
+    pub id: String,
+    pub npc_id: String,
+    pub definition_id: String,
+    pub minimum_quantity: u32,
+    pub maximum_quantity: u32,
+    pub chance_percent: u32,
+    pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
 
@@ -454,6 +497,8 @@ fn seed_world(ctx: &ReducerContext) {
             created_at: ctx.timestamp,
             updated_at: ctx.timestamp,
             color_scheme: r##"{"accent":"rgba(137, 207, 240, 0.14)","fontColor":"#e0f2fe","borderColor":"#89CFF0"}"##.to_string(),
+            pvp_enabled: false,
+            respawn_room_id: Some(CREATION_ROOM_ID.to_string()),
         });
     }
     if ctx.db.region().name().find(&creation_region).is_none() {
@@ -464,6 +509,8 @@ fn seed_world(ctx: &ReducerContext) {
             created_at: ctx.timestamp,
             updated_at: ctx.timestamp,
             color_scheme: r##"{"accent":"rgba(137, 207, 240, 0.14)","fontColor":"#e0f2fe","borderColor":"#89CFF0"}"##.to_string(),
+            pvp_enabled: false,
+            respawn_room_id: Some(CREATION_ROOM_ID.to_string()),
         });
     }
     if ctx.db.region().name().find(&starting_region).is_none() {
@@ -474,6 +521,8 @@ fn seed_world(ctx: &ReducerContext) {
             created_at: ctx.timestamp,
             updated_at: ctx.timestamp,
             color_scheme: r##"{"accent":"rgba(34, 197, 94, 0.14)","fontColor":"#dcfce7","borderColor":"#22c55e"}"##.to_string(),
+            pvp_enabled: false,
+            respawn_room_id: Some(STARTING_ROOM_ID.to_string()),
         });
     }
     if ctx.db.room().id().find(&creation_room_id).is_none() {
@@ -513,6 +562,17 @@ fn seed_world(ctx: &ReducerContext) {
             alias: Some("archie".to_string()),
             greeting_behavior: "public".to_string(),
             portrait_url: Some("/starter-images/archie-portrait.png".to_string()),
+            disposition: Some("friendly".to_string()),
+            attack_on_sight: false,
+            patrol_route: Some("[]".to_string()),
+            patrol_interval_seconds: 20,
+            patrol_index: 0,
+            last_patrol_at: None,
+            attack_interval_seconds: 6,
+            last_attack_at: None,
+            respawn_seconds: 60,
+            spawn_room: Some(CREATION_ROOM_ID.to_string()),
+            defeated_at: None,
         });
     }
 }
@@ -582,6 +642,8 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                     created_at: ctx.timestamp,
                     updated_at: ctx.timestamp,
                     color_scheme: json_string(row.get("color_scheme"), r##"{"accent":"rgba(56, 189, 248, 0.14)","fontColor":"#e0f2fe","borderColor":"#38bdf8"}"##),
+                    pvp_enabled: bool_value(&row, "pvp_enabled", false),
+                    respawn_room_id: optional_string(&row, "respawn_room_id"),
                 });
             }
         }
@@ -696,6 +758,35 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                 ctx.db.actor_stat().insert(ActorStat { id, actor_id, stat_definition_id, base_value, current_value, updated_at: ctx.timestamp });
             }
         }
+        "loot_table_entries" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = string(&row, "id", "");
+                let npc_id = string(&row, "npc_id", "");
+                let definition_id = string(&row, "definition_id", "");
+                if id.is_empty() || ctx.db.loot_table_entry().id().find(&id).is_some() {
+                    return Err("Loot entry id is missing or already exists.".to_string());
+                }
+                if ctx.db.npc().id().find(&npc_id).is_none() {
+                    return Err("Loot entry NPC does not exist.".to_string());
+                }
+                if ctx.db.object_definition().id().find(&definition_id).is_none() {
+                    return Err("Loot entry object definition does not exist.".to_string());
+                }
+                let minimum_quantity = u32_value(&row, "minimum_quantity", 1).max(1);
+                let maximum_quantity = u32_value(&row, "maximum_quantity", minimum_quantity).max(minimum_quantity);
+                ctx.db.loot_table_entry().insert(LootTableEntry {
+                    id,
+                    npc_id,
+                    definition_id,
+                    minimum_quantity,
+                    maximum_quantity,
+                    chance_percent: u32_value(&row, "chance_percent", 100).min(100),
+                    created_at: ctx.timestamp,
+                    updated_at: ctx.timestamp,
+                });
+            }
+        }
         "rooms" => {
             require_admin(ctx)?;
             for row in rows {
@@ -733,6 +824,17 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                     alias: optional_string(&row, "alias"),
                     greeting_behavior: string(&row, "greeting_behavior", "none"),
                     portrait_url: optional_string(&row, "portrait_url"),
+                    disposition: Some(string(&row, "disposition", "neutral")),
+                    attack_on_sight: bool_value(&row, "attack_on_sight", false),
+                    patrol_route: Some(json_string(row.get("patrol_route"), "[]")),
+                    patrol_interval_seconds: u32_value(&row, "patrol_interval_seconds", 20).max(1),
+                    patrol_index: 0,
+                    last_patrol_at: None,
+                    attack_interval_seconds: u32_value(&row, "attack_interval_seconds", 6).max(1),
+                    last_attack_at: None,
+                    respawn_seconds: u32_value(&row, "respawn_seconds", 60),
+                    spawn_room: optional_string(&row, "spawn_room").or_else(|| optional_string(&row, "current_room")),
+                    defeated_at: None,
                 });
             }
         }
@@ -812,6 +914,8 @@ pub fn update_rows(
                     created_at: existing.created_at,
                     updated_at: ctx.timestamp,
                     color_scheme: payload.get("color_scheme").map(|value| json_string(Some(value), &existing.color_scheme)).unwrap_or(existing.color_scheme),
+                    pvp_enabled: payload.get("pvp_enabled").and_then(Value::as_bool).unwrap_or(existing.pvp_enabled),
+                    respawn_room_id: payload.get("respawn_room_id").map(|_| optional_string(&payload, "respawn_room_id")).unwrap_or(existing.respawn_room_id),
                 };
                 if new_name == id {
                     ctx.db.region().name().update(updated);
@@ -915,6 +1019,31 @@ pub fn update_rows(
                 ctx.db.actor_stat().id().update(ActorStat { base_value, current_value, updated_at: ctx.timestamp, ..existing });
             }
         }
+        "loot_table_entries" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.loot_table_entry().id().find(&id) else { continue };
+                let npc_id = payload.get("npc_id").and_then(Value::as_str).unwrap_or(&existing.npc_id).to_string();
+                let definition_id = payload.get("definition_id").and_then(Value::as_str).unwrap_or(&existing.definition_id).to_string();
+                if ctx.db.npc().id().find(&npc_id).is_none() {
+                    return Err("Loot entry NPC does not exist.".to_string());
+                }
+                if ctx.db.object_definition().id().find(&definition_id).is_none() {
+                    return Err("Loot entry object definition does not exist.".to_string());
+                }
+                let minimum_quantity = payload.get("minimum_quantity").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.minimum_quantity).max(1);
+                let maximum_quantity = payload.get("maximum_quantity").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.maximum_quantity).max(minimum_quantity);
+                ctx.db.loot_table_entry().id().update(LootTableEntry {
+                    npc_id,
+                    definition_id,
+                    minimum_quantity,
+                    maximum_quantity,
+                    chance_percent: payload.get("chance_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.chance_percent).min(100),
+                    updated_at: ctx.timestamp,
+                    ..existing
+                });
+            }
+        }
         "rooms" => {
             require_admin(ctx)?;
             for id in ids {
@@ -944,6 +1073,13 @@ pub fn update_rows(
                     alias: payload.get("alias").map(|_| optional_string(&payload, "alias")).unwrap_or(existing.alias),
                     greeting_behavior: payload.get("greeting_behavior").and_then(Value::as_str).unwrap_or(&existing.greeting_behavior).to_string(),
                     portrait_url: payload.get("portrait_url").map(|_| optional_string(&payload, "portrait_url")).unwrap_or(existing.portrait_url),
+                    disposition: payload.get("disposition").map(|_| optional_string(&payload, "disposition")).unwrap_or(existing.disposition),
+                    attack_on_sight: payload.get("attack_on_sight").and_then(Value::as_bool).unwrap_or(existing.attack_on_sight),
+                    patrol_route: payload.get("patrol_route").map(|value| Some(json_string(Some(value), "[]"))).unwrap_or(existing.patrol_route),
+                    patrol_interval_seconds: payload.get("patrol_interval_seconds").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.patrol_interval_seconds).max(1),
+                    attack_interval_seconds: payload.get("attack_interval_seconds").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.attack_interval_seconds).max(1),
+                    respawn_seconds: payload.get("respawn_seconds").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.respawn_seconds),
+                    spawn_room: payload.get("spawn_room").map(|_| optional_string(&payload, "spawn_room")).unwrap_or(existing.spawn_room),
                     ..existing
                 });
             }
@@ -1017,6 +1153,8 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
         "object_definitions" => {
             require_admin(ctx)?;
             for id in ids {
+                let loot_ids = ctx.db.loot_table_entry().iter().filter(|entry| entry.definition_id == id).map(|entry| entry.id).collect::<Vec<_>>();
+                for loot_id in loot_ids { ctx.db.loot_table_entry().id().delete(&loot_id); }
                 let object_ids = ctx.db.world_object().iter().filter(|object| object.definition_id == id).map(|object| object.id).collect::<Vec<_>>();
                 for object_id in object_ids { delete_world_object_tree(ctx, &object_id); }
                 ctx.db.object_definition().id().delete(&id);
@@ -1030,6 +1168,10 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
             require_admin(ctx)?;
             for id in ids { ctx.db.actor_stat().id().delete(&id); }
         }
+        "loot_table_entries" => {
+            require_admin(ctx)?;
+            for id in ids { ctx.db.loot_table_entry().id().delete(&id); }
+        }
         "rooms" => {
             require_admin(ctx)?;
             for id in ids {
@@ -1041,6 +1183,8 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
         "npcs" => {
             require_admin(ctx)?;
             for id in ids {
+                let loot_ids = ctx.db.loot_table_entry().iter().filter(|entry| entry.npc_id == id).map(|entry| entry.id).collect::<Vec<_>>();
+                for loot_id in loot_ids { ctx.db.loot_table_entry().id().delete(&loot_id); }
                 delete_actor_rpg_state(ctx, &id);
                 ctx.db.npc().id().delete(&id);
             }
@@ -1267,15 +1411,228 @@ fn describe_object(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &
     rpg_message(ctx, room_id, actor_id, "system", lines.join("\n\n"));
 }
 
-fn target_actor_in_room(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &str) -> Option<(String, String)> {
+fn target_actor_in_room(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &str) -> Option<(String, String, bool)> {
     let query = query.trim();
     ctx.db.npc().iter()
         .find(|npc| npc.current_room.as_deref() == Some(room_id)
             && (npc.name.eq_ignore_ascii_case(query) || npc.alias.as_deref().map(|alias| alias.eq_ignore_ascii_case(query)).unwrap_or(false)))
-        .map(|npc| (npc.id, npc.name))
+        .map(|npc| (npc.id, npc.name, true))
         .or_else(|| ctx.db.character().iter()
             .find(|character| character.id != actor_id && character.current_room.as_deref() == Some(room_id) && character.name.eq_ignore_ascii_case(query))
-            .map(|character| (character.id, character.name)))
+            .map(|character| (character.id, character.name, false)))
+}
+
+fn npc_disposition(npc: &Npc) -> &str {
+    npc.disposition.as_deref().filter(|value| !value.trim().is_empty()).unwrap_or("neutral")
+}
+
+fn region_for_room(ctx: &ReducerContext, room_id: &str) -> Option<Region> {
+    let room = ctx.db.room().id().find(&room_id.to_string())?;
+    room.region_name
+        .and_then(|name| ctx.db.region().name().find(&name))
+        .or_else(|| ctx.db.region().iter().find(|region| {
+            region.display_name.as_deref().map(|name| name.eq_ignore_ascii_case(&room.region)).unwrap_or(false)
+                || region.name.eq_ignore_ascii_case(&room.region)
+        }))
+}
+
+fn actor_current_room(ctx: &ReducerContext, actor_id: &str) -> Option<String> {
+    let actor_id = actor_id.to_string();
+    ctx.db.character().id().find(&actor_id).and_then(|actor| actor.current_room)
+        .or_else(|| ctx.db.profile().id().find(&actor_id).and_then(|actor| actor.current_room))
+}
+
+fn actor_health_max(ctx: &ReducerContext, actor_id: &str, definition: &StatDefinition) -> i32 {
+    actor_stat_row(ctx, actor_id, definition).base_value.clamp(definition.minimum, definition.maximum)
+}
+
+fn combat_damage(ctx: &ReducerContext, attacker_id: &str, target_id: &str) -> (i32, String) {
+    let equipped_weapon = ctx.db.world_object().iter()
+        .filter(|object| object.location_kind == "equipped" && object.location_id == attacker_id)
+        .filter_map(|object| object_definition_for(ctx, &object))
+        .find(|definition| definition.weapon_damage > 0);
+    let mut attack = equipped_weapon.as_ref().map(|weapon| weapon.weapon_damage).unwrap_or(1);
+    if let Some(stat_id) = equipped_weapon.as_ref().and_then(|weapon| weapon.scales_with_stat.clone()) {
+        if let Some(definition) = ctx.db.stat_definition().id().find(&stat_id) {
+            attack = attack.saturating_add(actor_stat_value(ctx, attacker_id, &definition));
+        }
+    } else if let Some(power) = stat_definition_by_role(ctx, "power") {
+        attack = attack.saturating_add(actor_stat_value(ctx, attacker_id, &power));
+    }
+    let innate_defense = stat_definition_by_role(ctx, "defense")
+        .map(|definition| actor_stat_value(ctx, target_id, &definition))
+        .unwrap_or(0);
+    let armor = ctx.db.world_object().iter()
+        .filter(|object| object.location_kind == "equipped" && object.location_id == target_id)
+        .filter_map(|object| object_definition_for(ctx, &object))
+        .map(|definition| definition.armor_value)
+        .sum::<i32>();
+    (
+        attack.saturating_sub(innate_defense.saturating_add(armor)).max(1),
+        equipped_weapon.map(|weapon| weapon.name).unwrap_or_else(|| "bare hands".to_string()),
+    )
+}
+
+fn deterministic_roll(seed: &str) -> u32 {
+    seed.as_bytes().iter().fold(2_166_136_261u32, |hash, byte| {
+        hash.wrapping_mul(16_777_619) ^ u32::from(*byte)
+    })
+}
+
+fn drop_enemy_loot(ctx: &ReducerContext, npc: &Npc, room_id: &str) -> Vec<String> {
+    let entries = ctx.db.loot_table_entry().iter()
+        .filter(|entry| entry.npc_id == npc.id)
+        .collect::<Vec<_>>();
+    let timestamp = ctx.timestamp.to_micros_since_unix_epoch();
+    let mut drops = Vec::new();
+    for entry in entries {
+        let roll_seed = format!("{}:{}:{timestamp}:chance", npc.id, entry.id);
+        if deterministic_roll(&roll_seed) % 100 >= entry.chance_percent {
+            continue;
+        }
+        let Some(definition) = ctx.db.object_definition().id().find(&entry.definition_id) else { continue };
+        let range = entry.maximum_quantity.saturating_sub(entry.minimum_quantity).saturating_add(1);
+        let quantity = entry.minimum_quantity.saturating_add(deterministic_roll(&format!("{}:{timestamp}:quantity", entry.id)) % range.max(1));
+        let id = format!("drop-{}-{}-{timestamp}", npc.id, entry.id);
+        ctx.db.world_object().insert(WorldObject {
+            id,
+            definition_id: entry.definition_id,
+            location_kind: "room".to_string(),
+            location_id: room_id.to_string(),
+            quantity,
+            equipped_slot: None,
+            durability: 100,
+            fuel_remaining: 0,
+            is_active: false,
+            state_json: format!(r#"{{"dropped_by":"{}"}}"#, npc.id),
+            created_at: ctx.timestamp,
+            updated_at: ctx.timestamp,
+        });
+        drops.push(if quantity > 1 { format!("{} x{quantity}", definition.name) } else { definition.name });
+    }
+    drops
+}
+
+fn defeat_npc(ctx: &ReducerContext, npc: Npc, room_id: &str) -> Vec<String> {
+    let drops = drop_enemy_loot(ctx, &npc, room_id);
+    let spawn_room = npc.spawn_room.clone().or_else(|| npc.current_room.clone());
+    ctx.db.npc().id().update(Npc {
+        current_room: None,
+        spawn_room,
+        defeated_at: Some(ctx.timestamp),
+        last_attack_at: Some(ctx.timestamp),
+        ..npc
+    });
+    drops
+}
+
+fn respawn_player(ctx: &ReducerContext, actor_id: &str, origin_room: &str, actor_name: &str, health: &StatDefinition) {
+    let fallback = if ctx.db.room().id().find(&STARTING_ROOM_ID.to_string()).is_some() {
+        STARTING_ROOM_ID.to_string()
+    } else {
+        origin_room.to_string()
+    };
+    let destination = region_for_room(ctx, origin_room)
+        .and_then(|region| region.respawn_room_id)
+        .filter(|room_id| ctx.db.room().id().find(room_id).is_some())
+        .unwrap_or(fallback);
+    let actor_key = actor_id.to_string();
+    if let Some(character) = ctx.db.character().id().find(&actor_key) {
+        ctx.db.character().id().update(Character { current_room: Some(destination.clone()), ..character });
+    } else if let Some(profile) = ctx.db.profile().id().find(&actor_key) {
+        ctx.db.profile().id().update(Profile { current_room: Some(destination.clone()), ..profile });
+    }
+    let restored = actor_health_max(ctx, actor_id, health);
+    set_actor_stat_current(ctx, actor_id, health, restored);
+    add_message(ctx, Some(origin_room.to_string()), Some(actor_id.to_string()), None, None, "combat", format!("{actor_name} is defeated and vanishes from the fight."), None, None);
+    add_message(ctx, Some(destination), Some(actor_id.to_string()), None, Some(actor_id.to_string()), "system", format!("You recover at a safe haven with {restored} {}.", health.name), None, None);
+}
+
+fn npc_attack_player(ctx: &ReducerContext, npc: Npc, room_id: &str, actor_id: &str, actor_name: &str, health: &StatDefinition) {
+    let current_health = actor_stat_row(ctx, actor_id, health).current_value;
+    if current_health <= health.minimum { return; }
+    let (damage, weapon_name) = combat_damage(ctx, &npc.id, actor_id);
+    let next_health = current_health.saturating_sub(damage).max(health.minimum);
+    set_actor_stat_current(ctx, actor_id, health, next_health);
+    ctx.db.npc().id().update(Npc { last_attack_at: Some(ctx.timestamp), ..npc.clone() });
+    let result = if next_health <= health.minimum {
+        format!(" {actor_name} is defeated.")
+    } else {
+        format!(" {actor_name} has {next_health} {} remaining.", health.name)
+    };
+    add_message(ctx, Some(room_id.to_string()), Some(npc.id.clone()), Some(npc.name.clone()), None, "combat",
+        format!("{} attacks {actor_name} with {weapon_name} for {damage} damage.{result}", npc.name), None, None);
+    if next_health <= health.minimum {
+        respawn_player(ctx, actor_id, room_id, actor_name, health);
+    }
+}
+
+fn action_is_due(ctx: &ReducerContext, last_at: Option<Timestamp>, interval_seconds: u32) -> bool {
+    last_at.map(|timestamp| {
+        ctx.timestamp.to_micros_since_unix_epoch().saturating_sub(timestamp.to_micros_since_unix_epoch())
+            >= i64::from(interval_seconds.max(1)) * 1_000_000
+    }).unwrap_or(true)
+}
+
+fn advance_world(ctx: &ReducerContext, actor_id: &str, actor_name: &str) {
+    let now = ctx.timestamp.to_micros_since_unix_epoch();
+    let defeated = ctx.db.npc().iter().filter(|npc| npc.defeated_at.is_some()).collect::<Vec<_>>();
+    for npc in defeated {
+        if npc.respawn_seconds == 0 { continue; }
+        let elapsed = npc.defeated_at.map(|at| now.saturating_sub(at.to_micros_since_unix_epoch())).unwrap_or(0);
+        if elapsed < i64::from(npc.respawn_seconds) * 1_000_000 { continue; }
+        let Some(spawn_room) = npc.spawn_room.clone().filter(|room_id| ctx.db.room().id().find(room_id).is_some()) else { continue };
+        if let Some(health) = stat_definition_by_role(ctx, "health") {
+            let restored = actor_health_max(ctx, &npc.id, &health);
+            set_actor_stat_current(ctx, &npc.id, &health, restored);
+        }
+        ctx.db.npc().id().update(Npc {
+            current_room: Some(spawn_room.clone()),
+            defeated_at: None,
+            last_patrol_at: Some(ctx.timestamp),
+            last_attack_at: Some(ctx.timestamp),
+            ..npc.clone()
+        });
+        add_message(ctx, Some(spawn_room), Some(npc.id), Some(npc.name.clone()), None, "system", format!("{} returns.", npc.name), None, None);
+    }
+
+    let patrollers = ctx.db.npc().iter()
+        .filter(|npc| npc.defeated_at.is_none() && matches!(npc.behavior_type.as_str(), "patrol" | "patrol_hostile"))
+        .collect::<Vec<_>>();
+    for npc in patrollers {
+        if !action_is_due(ctx, npc.last_patrol_at, npc.patrol_interval_seconds) { continue; }
+        let route = npc.patrol_route.as_deref().and_then(|route| serde_json::from_str::<Vec<String>>(route).ok()).unwrap_or_default();
+        let Some(current_room) = npc.current_room.clone() else { continue };
+        if route.len() < 2 { continue; }
+        let current_index = route.iter().position(|room| room == &current_room).unwrap_or(npc.patrol_index as usize % route.len());
+        let next_index = (current_index + 1) % route.len();
+        let next_room = route[next_index].clone();
+        let connected = ctx.db.exit().iter().any(|exit| exit.from_room.as_deref() == Some(current_room.as_str()) && exit.to_room.as_deref() == Some(next_room.as_str()));
+        if !connected {
+            ctx.db.npc().id().update(Npc { last_patrol_at: Some(ctx.timestamp), ..npc });
+            continue;
+        }
+        ctx.db.npc().id().update(Npc {
+            current_room: Some(next_room.clone()),
+            patrol_index: next_index as u32,
+            last_patrol_at: Some(ctx.timestamp),
+            ..npc.clone()
+        });
+        add_message(ctx, Some(current_room), Some(npc.id.clone()), Some(npc.name.clone()), None, "system", format!("{} leaves on patrol.", npc.name), None, None);
+        add_message(ctx, Some(next_room), Some(npc.id), Some(npc.name.clone()), None, "system", format!("{} arrives on patrol.", npc.name), None, None);
+    }
+
+    let Some(room_id) = actor_current_room(ctx, actor_id) else { return };
+    let Some(health) = stat_definition_by_role(ctx, "health") else { return };
+    let hostiles = ctx.db.npc().iter()
+        .filter(|npc| npc.current_room.as_deref() == Some(room_id.as_str()) && npc.defeated_at.is_none() && npc_disposition(npc) == "hostile" && npc.attack_on_sight)
+        .collect::<Vec<_>>();
+    for npc in hostiles {
+        if actor_current_room(ctx, actor_id).as_deref() != Some(room_id.as_str()) { break; }
+        if action_is_due(ctx, npc.last_attack_at, npc.attack_interval_seconds) {
+            npc_attack_player(ctx, npc, &room_id, actor_id, actor_name, &health);
+        }
+    }
 }
 
 fn fuel_is_accepted(fuel: &ObjectDefinition, burner: &ObjectDefinition) -> bool {
@@ -1303,6 +1660,47 @@ fn handle_rpg_command(
         list_stats(ctx, room_id, actor_id);
         return Ok(true);
     }
+    if matches!(lower.as_str(), "wait" | "pass") {
+        rpg_message(ctx, room_id, actor_id, "system", "You wait and watch the world move around you.".to_string());
+        return Ok(true);
+    }
+    if matches!(lower.as_str(), "combat" | "danger" | "consider") {
+        let pvp_enabled = region_for_room(ctx, room_id).map(|region| region.pvp_enabled).unwrap_or(false);
+        let enemies = ctx.db.npc().iter()
+            .filter(|npc| npc.current_room.as_deref() == Some(room_id) && npc.defeated_at.is_none() && npc_disposition(npc) == "hostile")
+            .map(|npc| format!("• {}", npc.name))
+            .collect::<Vec<_>>();
+        let mut body = format!("[COMBAT RULES]\n• Player versus player: {}", if pvp_enabled { "enabled in this region" } else { "disabled in this region" });
+        body.push_str(if enemies.is_empty() { "\n\n[ENEMIES]\n• None visible" } else { "\n\n[ENEMIES]\n" });
+        if !enemies.is_empty() { body.push_str(&enemies.join("\n")); }
+        rpg_message(ctx, room_id, actor_id, "system", body);
+        return Ok(true);
+    }
+    if lower == "rest" {
+        let threatened = ctx.db.npc().iter().any(|npc| npc.current_room.as_deref() == Some(room_id) && npc.defeated_at.is_none() && npc_disposition(&npc) == "hostile");
+        if threatened {
+            rpg_message(ctx, room_id, actor_id, "error", "You cannot rest while a hostile enemy is present.".to_string());
+        } else if let Some(health) = stat_definition_by_role(ctx, "health") {
+            let restored = actor_health_max(ctx, actor_id, &health);
+            set_actor_stat_current(ctx, actor_id, &health, restored);
+            rpg_message(ctx, room_id, actor_id, "system", format!("You rest and recover to {restored} {}.", health.name));
+        } else {
+            rpg_message(ctx, room_id, actor_id, "error", "Rest requires a stat with the Health role.".to_string());
+        }
+        return Ok(true);
+    }
+    if lower == "loot" {
+        let loot = ctx.db.world_object().iter()
+            .filter(|object| object.location_kind == "room" && object.location_id == room_id)
+            .filter_map(|object| object_definition_for(ctx, &object).filter(|definition| definition.portable).map(|definition| format!("• {} {} x{}", definition.icon, definition.name, object.quantity)))
+            .collect::<Vec<_>>();
+        rpg_message(ctx, room_id, actor_id, "system", if loot.is_empty() { "There is no portable loot here.".to_string() } else { format!("[LOOT]\n{}\n\nUse `take <item>` to collect it.", loot.join("\n")) });
+        return Ok(true);
+    }
+    if let Some(query) = lower.strip_prefix("loot ") {
+        describe_object(ctx, room_id, actor_id, query.trim());
+        return Ok(true);
+    }
     if let Some(query) = lower.strip_prefix("examine ").or_else(|| lower.strip_prefix("open ")) {
         describe_object(ctx, room_id, actor_id, query.trim());
         return Ok(true);
@@ -1318,6 +1716,23 @@ fn handle_rpg_command(
             };
             if container_definition.capacity == 0 {
                 rpg_message(ctx, room_id, actor_id, "error", format!("{} is not a container.", container_definition.name));
+                return Ok(true);
+            }
+            if item_query.trim() == "all" {
+                let contents = ctx.db.world_object().iter()
+                    .filter(|object| object.location_kind == "container" && object.location_id == container.id)
+                    .collect::<Vec<_>>();
+                let mut taken = Vec::new();
+                for object in contents {
+                    let Some(definition) = object_definition_for(ctx, &object) else { continue };
+                    if !definition.portable { continue; }
+                    ctx.db.world_object().id().update(WorldObject {
+                        location_kind: "inventory".to_string(), location_id: actor_id.to_string(), equipped_slot: None,
+                        updated_at: ctx.timestamp, ..object
+                    });
+                    taken.push(definition.name);
+                }
+                rpg_message(ctx, room_id, actor_id, "system", if taken.is_empty() { format!("{} contains nothing you can carry.", container_definition.name) } else { format!("You take {} from {}.", taken.join(", "), container_definition.name) });
                 return Ok(true);
             }
             let Some((object, definition)) = find_object_at(ctx, "container", &container.id, item_query.trim()) else {
@@ -1515,29 +1930,25 @@ fn handle_rpg_command(
             rpg_message(ctx, room_id, actor_id, "error", "Combat is not configured: create a stat with the Health role.".to_string());
             return Ok(true);
         };
-        let Some((target_id, target_name)) = target_actor_in_room(ctx, room_id, actor_id, query.trim()) else {
+        let Some((target_id, target_name, target_is_npc)) = target_actor_in_room(ctx, room_id, actor_id, query.trim()) else {
             rpg_message(ctx, room_id, actor_id, "error", format!("There is no attackable target named \"{}\" here.", query.trim()));
             return Ok(true);
         };
-        let equipped_weapon = ctx.db.world_object().iter()
-            .filter(|object| object.location_kind == "equipped" && object.location_id == actor_id)
-            .filter_map(|object| object_definition_for(ctx, &object))
-            .find(|definition| definition.weapon_damage > 0);
-        let mut attack = equipped_weapon.as_ref().map(|weapon| weapon.weapon_damage).unwrap_or(1);
-        if let Some(stat_id) = equipped_weapon.as_ref().and_then(|weapon| weapon.scales_with_stat.clone()) {
-            if let Some(definition) = ctx.db.stat_definition().id().find(&stat_id) {
-                attack = attack.saturating_add(actor_stat_value(ctx, actor_id, &definition));
-            }
-        } else if let Some(power) = stat_definition_by_role(ctx, "power") {
-            attack = attack.saturating_add(actor_stat_value(ctx, actor_id, &power));
+        let target_npc = if target_is_npc { ctx.db.npc().id().find(&target_id) } else { None };
+        if target_npc.as_ref().map(|npc| npc_disposition(npc) == "friendly").unwrap_or(false) {
+            rpg_message(ctx, room_id, actor_id, "error", format!("{target_name} is friendly and cannot be attacked."));
+            return Ok(true);
         }
-        let innate_defense = stat_definition_by_role(ctx, "defense").map(|definition| actor_stat_value(ctx, &target_id, &definition)).unwrap_or(0);
-        let armor = ctx.db.world_object().iter()
-            .filter(|object| object.location_kind == "equipped" && object.location_id == target_id)
-            .filter_map(|object| object_definition_for(ctx, &object))
-            .map(|definition| definition.armor_value)
-            .sum::<i32>();
-        let damage = attack.saturating_sub(innate_defense.saturating_add(armor)).max(1);
+        if !target_is_npc && !region_for_room(ctx, room_id).map(|region| region.pvp_enabled).unwrap_or(false) {
+            rpg_message(ctx, room_id, actor_id, "error", "Player combat is disabled in this region. Find a region marked for PvP.".to_string());
+            return Ok(true);
+        }
+        let attacker_health = actor_stat_row(ctx, actor_id, &health_definition).current_value;
+        if attacker_health <= health_definition.minimum {
+            rpg_message(ctx, room_id, actor_id, "error", "You are defeated and cannot attack.".to_string());
+            return Ok(true);
+        }
+        let (damage, weapon_name) = combat_damage(ctx, actor_id, &target_id);
         let current_health = actor_stat_row(ctx, &target_id, &health_definition).current_value;
         if current_health <= health_definition.minimum {
             rpg_message(ctx, room_id, actor_id, "error", format!("{target_name} is already defeated."));
@@ -1545,10 +1956,26 @@ fn handle_rpg_command(
         }
         let next_health = current_health.saturating_sub(damage).max(health_definition.minimum);
         set_actor_stat_current(ctx, &target_id, &health_definition, next_health);
-        let weapon_name = equipped_weapon.map(|weapon| weapon.name).unwrap_or_else(|| "bare hands".to_string());
         let result = if next_health <= health_definition.minimum { format!(" {target_name} is defeated.") } else { format!(" {target_name} has {next_health} {} remaining.", health_definition.name) };
         add_message(ctx, Some(room_id.to_string()), Some(actor_id.to_string()), Some(actor_name.to_string()), None, "combat",
             format!("{actor_name} attacks {target_name} with {weapon_name} for {damage} damage.{result}"), None, None);
+        if next_health <= health_definition.minimum {
+            if let Some(npc) = target_npc {
+                let drops = defeat_npc(ctx, npc, room_id);
+                let loot_message = if drops.is_empty() {
+                    format!("{target_name} carried no loot.")
+                } else {
+                    format!("{target_name} drops {}. Use `loot` or `take <item>`.", drops.join(", "))
+                };
+                rpg_message(ctx, room_id, actor_id, "system", loot_message);
+            } else {
+                respawn_player(ctx, &target_id, room_id, &target_name, &health_definition);
+            }
+        } else if let Some(npc) = target_npc {
+            if npc_disposition(&npc) != "friendly" {
+                npc_attack_player(ctx, npc, room_id, actor_id, actor_name, &health_definition);
+            }
+        }
         return Ok(true);
     }
 
@@ -1583,6 +2010,8 @@ pub fn submit_command(
 ) -> Result<(), String> {
     ensure_profile(ctx);
     let (actor_name, actor_id, is_profile) = actor(ctx, &character_id)?;
+    let world_actor_id = actor_id.clone();
+    let world_actor_name = actor_name.clone();
     let room_id = room_id.ok_or_else(|| "A room is required.".to_string())?;
     let raw = raw.trim().to_string();
     ctx.db.command().insert(Command {
@@ -1592,12 +2021,13 @@ pub fn submit_command(
     });
 
     if handle_rpg_command(ctx, &raw, &room_id, &actor_id, &actor_name)? {
+        advance_world(ctx, &world_actor_id, &world_actor_name);
         finish_command(ctx, &command_id);
         return Ok(());
     }
 
     if raw == "help" {
-        add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", "[AVAILABLE COMMANDS]\n\n• say <message> - Speak to everyone in the room\n• whisper <name> <message> - Send a private message\n• look - Examine your current location and its objects\n• who - See who is nearby\n• talk <npc> <message> - Speak to an AI-powered NPC\n• inspect <name> - Inspect a character\n• inventory / equipment - View carried and equipped items\n• stats - View configured hero stats\n• take / drop / examine <item> - Interact with objects\n• put <item> in <container> - Store an item or add fuel\n• equip / unequip <item> - Manage weapons and armor\n• use <item> - Run an item behavior\n• light / extinguish <object> - Control fuel-burning objects\n• attack <target> - Fight using stats, weapons, and armor\n• set handle <name> - Set your saved-world handle\n• <direction> - Move through an exit".to_string(), None, None);
+        add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", "[AVAILABLE COMMANDS]\n\n• say <message> - Speak to everyone in the room\n• whisper <name> <message> - Send a private message\n• look / who - Examine the room and nearby actors\n• talk <npc> <message> - Speak to an AI-powered NPC\n• inspect <name> - Inspect a character\n• inventory / equipment / stats - View your character\n• take / drop / examine <item> - Interact with objects\n• open / loot <container> - View chest or container contents\n• take all from <container> - Collect portable contents\n• put <item> in <container> - Store an item or add fuel\n• equip / unequip / use <item> - Use gear and consumables\n• light / extinguish <object> - Control fuel-burning objects\n• combat / attack <target> - Check rules or fight\n• rest / wait - Recover safely or let the world advance\n• flee <direction> - Escape through an exit\n• set handle <name> - Set your saved-world handle\n• <direction> - Move through an exit".to_string(), None, None);
     } else if let Some(handle) = raw.strip_prefix("set handle ") {
         let handle = handle.trim();
         if !is_profile || handle.is_empty() || handle.len() > 30 {
@@ -1623,13 +2053,18 @@ pub fn submit_command(
         }
     } else if raw == "look" {
         if let Some(room) = ctx.db.room().id().find(&room_id) {
-            let region_label = room.region_name.as_ref().and_then(|name| ctx.db.region().name().find(name)).and_then(|region| region.display_name).or(room.region_name.clone());
+            let region_record = room.region_name.as_ref().and_then(|name| ctx.db.region().name().find(name));
+            let region_label = region_record.as_ref().and_then(|region| region.display_name.clone()).or(room.region_name.clone());
             let heading = region_label.map(|region| format!("{} ({})", room.name.to_uppercase(), region.to_uppercase())).unwrap_or_else(|| room.name.to_uppercase());
             let mut body = room.image_url.as_ref().map(|url| format!("[IMAGE:{url}]\n")).unwrap_or_default();
             body.push_str(&format!("[LOCATION:{heading}]\n{}", room.description));
+            body.push_str(if region_record.map(|region| region.pvp_enabled).unwrap_or(false) { "\n\n[ZONE RULE] Player combat is enabled here." } else { "\n\n[ZONE RULE] This is a safe region; player combat is disabled." });
             let characters = ctx.db.character().iter().filter(|row| row.current_room.as_deref() == Some(room_id.as_str()) && row.id != actor_id).map(|row| format!("• {}", row.name)).collect::<Vec<_>>();
             if !characters.is_empty() { body.push_str(&format!("\n\n[CHARACTERS]\n{}", characters.join("\n"))); }
-            let npcs = ctx.db.npc().iter().filter(|row| row.current_room.as_deref() == Some(room_id.as_str())).map(|row| format!("• {} [{}] - {}", row.name, row.alias.unwrap_or_default(), row.description.unwrap_or_default())).collect::<Vec<_>>();
+            let npcs = ctx.db.npc().iter().filter(|row| row.current_room.as_deref() == Some(room_id.as_str())).map(|row| {
+                let behavior = if npc_disposition(&row) == "hostile" { "ENEMY" } else if row.behavior_type.starts_with("patrol") { "PATROLLING" } else { "NPC" };
+                format!("• {} [{} · {}] - {}", row.name, row.alias.unwrap_or_default(), behavior, row.description.unwrap_or_default())
+            }).collect::<Vec<_>>();
             if !npcs.is_empty() { body.push_str(&format!("\n\n[NPCs]\n{}", npcs.join("\n"))); }
             let objects = ctx.db.world_object().iter()
                 .filter(|object| object.location_kind == "room" && object.location_id == room_id)
@@ -1651,7 +2086,10 @@ pub fn submit_command(
         let mut lines = Vec::new();
         let characters = ctx.db.character().iter().filter(|row| row.current_room.as_deref() == Some(room_id.as_str()) && row.id != actor_id).map(|row| format!("• {}", row.name)).collect::<Vec<_>>();
         if !characters.is_empty() { lines.push(format!("[CHARACTERS]\n{}", characters.join("\n"))); }
-        let npcs = ctx.db.npc().iter().filter(|row| row.current_room.as_deref() == Some(room_id.as_str())).map(|row| format!("• {} (talk {})", row.name, row.alias.unwrap_or_default())).collect::<Vec<_>>();
+        let npcs = ctx.db.npc().iter().filter(|row| row.current_room.as_deref() == Some(room_id.as_str())).map(|row| {
+            let label = if npc_disposition(&row) == "hostile" { "enemy" } else { "talk" };
+            format!("• {} ({label} {})", row.name, row.alias.unwrap_or_default())
+        }).collect::<Vec<_>>();
         if !npcs.is_empty() { lines.push(format!("[NPCs]\n{}", npcs.join("\n"))); }
         add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", if lines.is_empty() { "You are alone here.".to_string() } else { lines.join("\n\n") }, None, None);
     } else if let Some(target) = raw.strip_prefix("inspect ") {
@@ -1681,7 +2119,10 @@ pub fn submit_command(
             let private = !is_profile && npc.greeting_behavior == "private";
             add_message(ctx, Some(room_id.clone()), Some(actor_id.clone()), None, if private { character_id.clone() } else { None }, if private { "npc_whisper" } else { "npc_speech" }, if private { format!("{} whispers to you: \"Welcome, {}.\"", npc.name, actor_name) } else { format!("{}: \"Welcome, {}.\"", npc.name, actor_name) }, None, None);
         }
-    } else if let Some(exit) = ctx.db.exit().iter().find(|exit| exit.from_room.as_deref() == Some(room_id.as_str()) && exit.verb.eq_ignore_ascii_case(&raw)) {
+    } else if let Some(exit) = ctx.db.exit().iter().find(|exit| {
+        let movement = raw.strip_prefix("flee ").unwrap_or(raw.as_str());
+        exit.from_room.as_deref() == Some(room_id.as_str()) && exit.verb.eq_ignore_ascii_case(movement)
+    }) {
         if let Some(destination) = exit.to_room {
             if is_profile {
                 if let Some(profile) = ctx.db.profile().id().find(&actor_id) { ctx.db.profile().id().update(Profile { current_room: Some(destination.clone()), ..profile }); }
@@ -1693,6 +2134,7 @@ pub fn submit_command(
     } else {
         add_message(ctx, Some(room_id), Some(actor_id), None, None, "system", format!("You cannot go \"{raw}\" from here. Type \"exits\" to see available directions."), None, None);
     }
+    advance_world(ctx, &world_actor_id, &world_actor_name);
     finish_command(ctx, &command_id);
     Ok(())
 }
