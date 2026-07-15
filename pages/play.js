@@ -4,6 +4,7 @@ import HamburgerIcon from '@/components/HamburgerIcon';
 import ArkyvTerminal from '@/components/ArkyvTerminal';
 import RoomChatWindow from '@/components/RoomChatWindow';
 import ArkyvAudioManager from '@/components/ArkyvAudioManager';
+import RpgHud from '@/components/RpgHud';
 
 export default function ArkyvAccess() {
     const [currentRoom, setCurrentRoom] = useState(null);
@@ -214,6 +215,11 @@ export default function ArkyvAccess() {
                                     className="w-[44vw] max-w-[240px]"
                                 />
                             </div>
+                            <RpgHud
+                                actor={activeCharacter}
+                                onExecuteCommand={(cmd) => executeCommandRef.current?.(cmd)}
+                                className="md:hidden mt-3"
+                            />
 
                             {/* Desktop Layout - Stacked */}
                             <div className="hidden md:flex md:flex-col h-full gap-3 pt-32">
@@ -225,6 +231,11 @@ export default function ArkyvAccess() {
                                     activeConversation={activeConversation}
                                     onExecuteCommand={(cmd) => executeCommandRef.current?.(cmd)}
                                     className="flex-shrink-0 h-[25vh]" 
+                                />
+                                <RpgHud
+                                    actor={activeCharacter}
+                                    onExecuteCommand={(cmd) => executeCommandRef.current?.(cmd)}
+                                    className="h-44 flex-shrink-0"
                                 />
                                 <RoomChatWindow
                                     disabled={false}

@@ -7,6 +7,7 @@ import getSpacetimeClient from '@/lib/spacetimedbClient';
 import { useAuth } from '@/contexts/AuthContext';
 import Tooltip from '@/components/ui/Tooltip';
 import HamburgerIcon from '@/components/HamburgerIcon';
+import RpgSystemsEditor from '@/components/admin/RpgSystemsEditor';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCircleInfo, faGamepad } from '@fortawesome/free-solid-svg-icons';
 import '@xyflow/react/dist/style.css';
@@ -574,30 +575,78 @@ export default function ArkyvAdminPanel() {
         };
     }, []);
 
-    // ESC key handler to close all modals and dialogs
+    // ESC closes the topmost surface first. Nested confirmations must be
+    // dismissed before their underlying editor so the visible stack and
+    // interaction state never get out of sync.
     useEffect(() => {
         const handleEsc = (e) => {
-            if (e.key === 'Escape') {
-                // Close all modals in priority order (most specific to least specific)
-                if (isDialogOpen) setIsDialogOpen(false);
-                else if (showCreateDialog) setShowCreateDialog(false);
-                else if (showBlankRoomDialog) setShowBlankRoomDialog(false);
-                else if (showLinkExistingDialog) setShowLinkExistingDialog(false);
-                else if (isDeleteDialogOpen) setIsDeleteDialogOpen(false);
-                else if (showNewRegionDialog) setShowNewRegionDialog(false);
-                else if (showEditRegionDialog) setShowEditRegionDialog(false);
-                else if (showHelpDialog) setShowHelpDialog(false);
-                else if (isNpcDialogOpen) setIsNpcDialogOpen(false);
-                else if (showCreateNpcDialog) setShowCreateNpcDialog(false);
-                else if (isDeleteNpcDialogOpen) setIsDeleteNpcDialogOpen(false);
+            if (e.key !== 'Escape') return;
+
+            if (isDeleteDialogOpen && !isDeleting) {
+                setIsDeleteDialogOpen(false);
+                setDeleteConfirmText('');
+                setDeleteError('');
+            } else if (deleteExitConfirm && !isDeletingExit) {
+                setDeleteExitConfirm(null);
+                setDeleteOnlyOneDirection(false);
+            } else if (isDeleteNpcDialogOpen && !isDeletingNpc) {
+                setIsDeleteNpcDialogOpen(false);
+                setDeleteNpcConfirmText('');
+                setDeleteNpcError('');
+            } else if (showLinkExistingDialog && !isCreatingExit) {
+                setShowLinkExistingDialog(false);
+                setLinkExistingSearch('');
+                setLinkExistingSelection('');
+                setIsOneWayExit(false);
+            } else if (showBlankRoomDialog && !isCreatingRoom) {
+                setShowBlankRoomDialog(false);
+                setPendingRoomCreate(null);
+                setPendingVerticalExit(null);
+                setIsStandaloneRoom(false);
+            } else if (showCreateDialog && !isCreatingRoom) {
+                setShowCreateDialog(false);
+                setPendingRoomCreate(null);
+            } else if (showNewRegionDialog && !isCreatingRegion) {
+                setShowNewRegionDialog(false);
+                setRegionError('');
+            } else if (showEditRegionDialog && !isUpdatingRegion) {
+                setShowEditRegionDialog(false);
+                setEditRegion(null);
+                setRegionError('');
+            } else if (showCreateNpcDialog && !isCreatingNpc) {
+                setShowCreateNpcDialog(false);
+                setNpcRoomSearch('');
+            } else if (isNpcDialogOpen && !npcSaving) {
+                setIsNpcDialogOpen(false);
+                setActiveNpc(null);
+                setEditNpc(null);
+                setIsNpcDirty(false);
+                setNpcSaveSuccess(false);
+                setNpcSaveError('');
+                setNpcRoomSearch('');
+            } else if (isDialogOpen && !saving) {
+                setIsDialogOpen(false);
+                setActiveRoom(null);
+                setEditRoom(null);
+                setIsDirty(false);
+                setSaveSuccess(false);
+                setSaveError('');
+                setExitRoomSearch({});
+                setExitRoomSelection({});
+                setActiveExitDirection(null);
+                setIsOneWayExit(false);
+            } else if (showHelpDialog) {
+                setShowHelpDialog(false);
             }
         };
 
         window.addEventListener('keydown', handleEsc);
         return () => window.removeEventListener('keydown', handleEsc);
-    }, [isDialogOpen, showCreateDialog, showBlankRoomDialog, showLinkExistingDialog, 
-        isDeleteDialogOpen, showNewRegionDialog, showEditRegionDialog, showHelpDialog,
-        isNpcDialogOpen, showCreateNpcDialog, isDeleteNpcDialogOpen]);
+    }, [deleteExitConfirm, isCreatingExit, isCreatingNpc, isCreatingRegion, isCreatingRoom,
+        isDeleteDialogOpen, isDeleteNpcDialogOpen, isDeleting, isDeletingExit, isDeletingNpc,
+        isDialogOpen, isNpcDialogOpen, isUpdatingRegion, npcSaving, saving, showBlankRoomDialog,
+        showCreateDialog, showCreateNpcDialog, showEditRegionDialog, showHelpDialog,
+        showLinkExistingDialog, showNewRegionDialog]);
 
     useEffect(() => {
         RoomNodeModule()
@@ -1155,7 +1204,8 @@ export default function ArkyvAdminPanel() {
             };
         }
     }, [isDialogOpen, isNpcDialogOpen, showCreateNpcDialog, showCreateDialog, showBlankRoomDialog, 
-        isDeleteDialogOpen, showNewRegionDialog, showEditRegionDialog, deleteExitConfirm, isDeleteNpcDialogOpen, showHelpDialog]);
+        showLinkExistingDialog, isDeleteDialogOpen, showNewRegionDialog, showEditRegionDialog,
+        deleteExitConfirm, isDeleteNpcDialogOpen, showHelpDialog]);
 
     // Close context menu on click elsewhere
     useEffect(() => {
@@ -4093,6 +4143,8 @@ export default function ArkyvAdminPanel() {
                             )}
                         </div>
                     </section>
+
+                    <RpgSystemsEditor enabled={Boolean(session)} />
 
                     <section className="bg-slate-900/70 border border-cyan-400/40 rounded-xl shadow-xl shadow-cyan-400/10">
                         <div className="p-6 border-b border-cyan-400/20 flex justify-between items-start">

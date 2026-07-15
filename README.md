@@ -11,7 +11,9 @@ This repository uses **SpacetimeDB 2.0.1** for its authoritative backend. The pr
 - Realtime multiplayer room and region chat
 - Rust reducers for commands, movement, profiles, characters, and world editing
 - AI-powered NPC conversations with OpenAI or Grok
-- Visual region, room, exit, and NPC editor
+- Visual region, room, exit, NPC, and RPG systems editor
+- Admin-defined items, containers, fuel burners, weapons, armor, consumables, equipment slots, and hero stats
+- Authoritative inventory, equipment, fuel consumption, stat effects, and combat reducers
 - Local saved worlds backed by persistent SpacetimeDB identity tokens
 - Multiple characters per saved world
 - Optional RetroDiffusion room images and NPC portraits
@@ -140,10 +142,47 @@ The Rust module in `spacetimedb/src/lib.rs` defines these public replicated tabl
 | `command` | Private command audit and pending AI work |
 | `room_message` | Realtime terminal messages |
 | `region_chat` | Realtime regional chat |
+| `stat_definition` | Admin-defined hero attributes and optional health/power/defense roles |
+| `object_definition` | Reusable item, container, fixture, weapon, armor, and consumable primitives |
+| `world_object` | Concrete objects placed in rooms, containers, inventories, or equipment slots |
+| `actor_stat` | Sparse character/NPC stat overrides; absent rows inherit definition defaults |
 
 Reducers are the only write path. They validate identity ownership for profiles and characters, require admin status for world editing, process deterministic commands server-side, and complete AI NPC responses returned by the stateless Next.js AI route.
 
 The frontend consumes generated bindings in `generated/`. The client data layer in `lib/spacetimedbClient.js` reads the subscribed SpacetimeDB cache, invokes reducers for every mutation, and attaches native table insert listeners for realtime UI updates.
+
+## RPG systems studio
+
+Administrators can open `/admin` and use **RPG Systems Studio** to create game rules from reusable primitives. The built-in starter kit is optional and contains Health, Strength, Defense, firewood, a wooden box, a fuel-burning campfire, a sword, armor, and a healing potion. It can be installed repeatedly without overwriting edited definitions.
+
+The studio has four authoring surfaces:
+
+- **Object primitives** define presentation, portability, stacking, container capacity, fuel production/acceptance, elapsed-time burn rate, equipment slot, weapon and armor values, stat scaling, equipment modifiers, and consumable stat effects.
+- **Hero stats** define numeric ranges, defaults, visibility, and optional system roles. Combat discovers Health, Combat Power, and Defense through these roles, so display names and additional custom stats remain game-specific.
+- **Placed objects** instantiate a primitive in a room, actor inventory, equipment slot, or another container. Instance state includes quantity, durability, remaining fuel, active/burning state, and a JSON extension object.
+- **Actor values** optionally override defaults for a particular hero or NPC. Actors without overrides automatically use the stat definition defaults.
+
+Fuel burners consume fuel according to elapsed server time whenever their state is observed or changed. Fuel objects declare a fuel value and tags; burners declare accepted tags and a burn rate. For example, putting a `fuel`-tagged log into a campfire converts the stack into fuel time, and the campfire remains burning until that fuel is exhausted or it is extinguished.
+
+Players can use the inventory/stat panel on `/play` or the corresponding terminal commands:
+
+```text
+inventory                     list carried and equipped objects
+stats                         show visible hero stats and equipment bonuses
+take <item>                   move a portable room object into inventory
+drop <item>                   place a carried object in the current room
+examine <object>              inspect state, fuel, or container contents
+put <item> in <container>     store an item or add accepted fuel
+take <item> from <container>  retrieve a contained item
+equip <item>                  equip it in its admin-defined slot
+unequip <item-or-slot>        return equipped gear to inventory
+light <object>                start a fueled burner
+extinguish <object>           stop burning without discarding fuel
+use <item>                    apply its configured stat effect
+attack <target>               resolve configured stats, weapon, and armor
+```
+
+All runtime mutations occur in the Rust module. The browser only sends commands and renders replicated state; it does not calculate authoritative damage, fuel, inventory ownership, or stat changes.
 
 ## Development commands
 

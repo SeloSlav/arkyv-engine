@@ -29,6 +29,13 @@ Available commands:
 • exits                  - Show available exits
 • go &lt;direction&gt;         - Move through an exit (north, enter, etc.)
 • &lt;direction&gt;            - Move directly (north, south, east, west, etc.)
+• inventory / stats      - View carried objects, equipment, and hero stats
+• take / drop / examine &lt;item&gt; - Interact with objects in the room
+• put &lt;item&gt; in &lt;container&gt; - Store an item or add accepted fuel
+• equip / unequip &lt;item&gt; - Manage weapons, armor, and equipment bonuses
+• light / extinguish &lt;object&gt; - Control fuel-burning objects
+• use &lt;item&gt;             - Run the item behavior configured by the admin
+• attack &lt;target&gt;        - Resolve combat from configured stats and equipment
 • clear                  - Clear the terminal output
 
 Movement:

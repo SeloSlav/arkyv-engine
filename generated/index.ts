@@ -38,26 +38,42 @@ import CompleteNpcCommandReducer from "./complete_npc_command_reducer";
 import DeleteCurrentAccountReducer from "./delete_current_account_reducer";
 import DeleteRowsReducer from "./delete_rows_reducer";
 import InsertRowsReducer from "./insert_rows_reducer";
+import InstallRpgStarterKitReducer from "./install_rpg_starter_kit_reducer";
 import SubmitCommandReducer from "./submit_command_reducer";
 import UpdateRowsReducer from "./update_rows_reducer";
 
 // Import all procedure arg schemas
 
 // Import all table schema definitions
+import ActorStatRow from "./actor_stat_table";
 import CharacterRow from "./character_table";
 import CommandRow from "./command_table";
 import ExitRow from "./exit_table";
 import NpcRow from "./npc_table";
+import ObjectDefinitionRow from "./object_definition_table";
 import ProfileRow from "./profile_table";
 import RegionRow from "./region_table";
 import RegionChatRow from "./region_chat_table";
 import RoomRow from "./room_table";
 import RoomMessageRow from "./room_message_table";
+import StatDefinitionRow from "./stat_definition_table";
+import WorldObjectRow from "./world_object_table";
 
 /** Type-only namespace exports for generated type groups. */
 
 /** The schema information for all tables in this module. This is defined the same was as the tables would have been defined in the server. */
 const tablesSchema = __schema({
+  actor_stat: __table({
+    name: 'actor_stat',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_stat_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ActorStatRow),
   character: __table({
     name: 'character',
     indexes: [
@@ -108,6 +124,17 @@ const tablesSchema = __schema({
       { name: 'npc_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, NpcRow),
+  object_definition: __table({
+    name: 'object_definition',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'object_definition_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ObjectDefinitionRow),
   profile: __table({
     name: 'profile',
     indexes: [
@@ -166,6 +193,28 @@ const tablesSchema = __schema({
       { name: 'room_message_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, RoomMessageRow),
+  stat_definition: __table({
+    name: 'stat_definition',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'stat_definition_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, StatDefinitionRow),
+  world_object: __table({
+    name: 'world_object',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'world_object_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, WorldObjectRow),
 });
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
@@ -174,6 +223,7 @@ const reducersSchema = __reducers(
   __reducerSchema("delete_current_account", DeleteCurrentAccountReducer),
   __reducerSchema("delete_rows", DeleteRowsReducer),
   __reducerSchema("insert_rows", InsertRowsReducer),
+  __reducerSchema("install_rpg_starter_kit", InstallRpgStarterKitReducer),
   __reducerSchema("submit_command", SubmitCommandReducer),
   __reducerSchema("update_rows", UpdateRowsReducer),
 );

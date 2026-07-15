@@ -137,6 +137,88 @@ pub struct RegionChat {
     pub region_name: Option<String>,
 }
 
+/// Admin-authored numeric attributes. The optional role lets runtime systems
+/// discover health, power, and defense without hard-coding a particular name.
+#[spacetimedb::table(accessor = stat_definition, public)]
+#[derive(Clone)]
+pub struct StatDefinition {
+    #[primary_key]
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub role: Option<String>,
+    pub minimum: i32,
+    pub maximum: i32,
+    pub default_value: i32,
+    pub visible: bool,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+/// A reusable RPG primitive authored in the admin editor. Behaviour is stored
+/// as explicit columns for the common runtime contracts plus JSON extension
+/// points for game-specific data.
+#[spacetimedb::table(accessor = object_definition, public)]
+#[derive(Clone)]
+pub struct ObjectDefinition {
+    #[primary_key]
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub primitive_kind: String,
+    pub icon: String,
+    pub tags: String,
+    pub portable: bool,
+    pub stackable: bool,
+    pub max_stack: u32,
+    pub capacity: u32,
+    pub equipment_slot: Option<String>,
+    pub weapon_damage: i32,
+    pub armor_value: i32,
+    pub scales_with_stat: Option<String>,
+    pub fuel_value: i32,
+    pub burn_rate: i32,
+    pub accepted_fuel_tags: String,
+    pub stat_modifiers: String,
+    pub on_use: String,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+/// A concrete object. `location_kind` is one of room, inventory, equipped, or
+/// container; `location_id` points at the room, actor, or containing instance.
+#[spacetimedb::table(accessor = world_object, public)]
+#[derive(Clone)]
+pub struct WorldObject {
+    #[primary_key]
+    pub id: String,
+    pub definition_id: String,
+    pub location_kind: String,
+    pub location_id: String,
+    pub quantity: u32,
+    pub equipped_slot: Option<String>,
+    pub durability: i32,
+    pub fuel_remaining: i32,
+    pub is_active: bool,
+    pub state_json: String,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+/// Sparse per-actor stat overrides. Missing rows inherit the definition's
+/// default value, which makes newly-created heroes immediately usable.
+#[spacetimedb::table(accessor = actor_stat, public)]
+#[derive(Clone)]
+pub struct ActorStat {
+    #[primary_key]
+    pub id: String,
+    pub actor_id: String,
+    pub stat_definition_id: String,
+    pub base_value: i32,
+    pub current_value: i32,
+    pub updated_at: Timestamp,
+}
+
 fn identity_id(identity: Identity) -> String {
     identity.to_string()
 }
@@ -199,6 +281,42 @@ fn i32_value(value: &Value, key: &str, fallback: i32) -> i32 {
     value.get(key).and_then(Value::as_i64).map(|value| value as i32).unwrap_or(fallback)
 }
 
+fn u32_value(value: &Value, key: &str, fallback: u32) -> u32 {
+    value
+        .get(key)
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or(fallback)
+}
+
+fn bool_value(value: &Value, key: &str, fallback: bool) -> bool {
+    value.get(key).and_then(Value::as_bool).unwrap_or(fallback)
+}
+
+fn normalized_key(value: &str) -> String {
+    value
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|character| if character.is_ascii_alphanumeric() { character } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+fn actor_stat_id(actor_id: &str, stat_definition_id: &str) -> String {
+    format!("{actor_id}::{stat_definition_id}")
+}
+
+fn actor_exists(ctx: &ReducerContext, actor_id: &str) -> bool {
+    let actor_id = actor_id.to_string();
+    ctx.db.character().id().find(&actor_id).is_some()
+        || ctx.db.npc().id().find(&actor_id).is_some()
+        || ctx.db.profile().id().find(&actor_id).is_some()
+}
+
 fn parse_rows(payload_json: &str) -> Result<Vec<Value>, String> {
     let value: Value = serde_json::from_str(payload_json).map_err(|error| error.to_string())?;
     match value {
@@ -237,7 +355,90 @@ fn add_message(
     });
 }
 
+fn seed_rpg_definitions(ctx: &ReducerContext) {
+    let stats = [
+        ("health", "Health", "How much harm an actor can withstand.", "health", 0, 9999, 20),
+        ("strength", "Strength", "Physical power used by weapons and heavy actions.", "power", 0, 999, 3),
+        ("defense", "Defense", "Innate resistance before equipped armor is applied.", "defense", 0, 999, 0),
+    ];
+    for (id, name, description, role, minimum, maximum, default_value) in stats {
+        let id = id.to_string();
+        if ctx.db.stat_definition().id().find(&id).is_none() {
+            ctx.db.stat_definition().insert(StatDefinition {
+                id,
+                name: name.to_string(),
+                description: description.to_string(),
+                role: Some(role.to_string()),
+                minimum,
+                maximum,
+                default_value,
+                visible: true,
+                created_at: ctx.timestamp,
+                updated_at: ctx.timestamp,
+            });
+        }
+    }
+
+    let definitions = [
+        ObjectDefinition {
+            id: "wood".to_string(), name: "Firewood".to_string(), description: "A dry split log suitable for fuel.".to_string(),
+            primitive_kind: "item".to_string(), icon: "🪵".to_string(), tags: r#"["fuel","wood"]"#.to_string(),
+            portable: true, stackable: true, max_stack: 20, capacity: 0, equipment_slot: None,
+            weapon_damage: 0, armor_value: 0, scales_with_stat: None, fuel_value: 300, burn_rate: 0,
+            accepted_fuel_tags: "[]".to_string(), stat_modifiers: "{}".to_string(), on_use: "{}".to_string(),
+            created_at: ctx.timestamp, updated_at: ctx.timestamp,
+        },
+        ObjectDefinition {
+            id: "wooden-box".to_string(), name: "Wooden Box".to_string(), description: "A simple container for loose possessions.".to_string(),
+            primitive_kind: "container".to_string(), icon: "📦".to_string(), tags: r#"["container","wood"]"#.to_string(),
+            portable: true, stackable: false, max_stack: 1, capacity: 12, equipment_slot: None,
+            weapon_damage: 0, armor_value: 0, scales_with_stat: None, fuel_value: 0, burn_rate: 0,
+            accepted_fuel_tags: "[]".to_string(), stat_modifiers: "{}".to_string(), on_use: "{}".to_string(),
+            created_at: ctx.timestamp, updated_at: ctx.timestamp,
+        },
+        ObjectDefinition {
+            id: "campfire".to_string(), name: "Campfire".to_string(), description: "A stone-ringed fire that burns while it has fuel.".to_string(),
+            primitive_kind: "fixture".to_string(), icon: "🔥".to_string(), tags: r#"["fire","light"]"#.to_string(),
+            portable: false, stackable: false, max_stack: 1, capacity: 0, equipment_slot: None,
+            weapon_damage: 0, armor_value: 0, scales_with_stat: None, fuel_value: 0, burn_rate: 1,
+            accepted_fuel_tags: r#"["fuel"]"#.to_string(), stat_modifiers: "{}".to_string(), on_use: "{}".to_string(),
+            created_at: ctx.timestamp, updated_at: ctx.timestamp,
+        },
+        ObjectDefinition {
+            id: "iron-sword".to_string(), name: "Iron Sword".to_string(), description: "A dependable one-handed blade.".to_string(),
+            primitive_kind: "weapon".to_string(), icon: "⚔️".to_string(), tags: r#"["weapon","blade"]"#.to_string(),
+            portable: true, stackable: false, max_stack: 1, capacity: 0, equipment_slot: Some("main-hand".to_string()),
+            weapon_damage: 5, armor_value: 0, scales_with_stat: Some("strength".to_string()), fuel_value: 0, burn_rate: 0,
+            accepted_fuel_tags: "[]".to_string(), stat_modifiers: "{}".to_string(), on_use: "{}".to_string(),
+            created_at: ctx.timestamp, updated_at: ctx.timestamp,
+        },
+        ObjectDefinition {
+            id: "leather-armor".to_string(), name: "Leather Armor".to_string(), description: "Flexible protection made from boiled leather.".to_string(),
+            primitive_kind: "armor".to_string(), icon: "🛡️".to_string(), tags: r#"["armor","leather"]"#.to_string(),
+            portable: true, stackable: false, max_stack: 1, capacity: 0, equipment_slot: Some("body".to_string()),
+            weapon_damage: 0, armor_value: 2, scales_with_stat: None, fuel_value: 0, burn_rate: 0,
+            accepted_fuel_tags: "[]".to_string(), stat_modifiers: "{}".to_string(), on_use: "{}".to_string(),
+            created_at: ctx.timestamp, updated_at: ctx.timestamp,
+        },
+        ObjectDefinition {
+            id: "healing-potion".to_string(), name: "Healing Potion".to_string(), description: "A crimson restorative draught.".to_string(),
+            primitive_kind: "consumable".to_string(), icon: "🧪".to_string(), tags: r#"["consumable","potion"]"#.to_string(),
+            portable: true, stackable: true, max_stack: 10, capacity: 0, equipment_slot: None,
+            weapon_damage: 0, armor_value: 0, scales_with_stat: None, fuel_value: 0, burn_rate: 0,
+            accepted_fuel_tags: "[]".to_string(), stat_modifiers: "{}".to_string(),
+            on_use: r#"{"stat_id":"health","delta":8,"consume":true}"#.to_string(),
+            created_at: ctx.timestamp, updated_at: ctx.timestamp,
+        },
+    ];
+    for definition in definitions {
+        if ctx.db.object_definition().id().find(&definition.id).is_none() {
+            ctx.db.object_definition().insert(definition);
+        }
+    }
+}
+
 fn seed_world(ctx: &ReducerContext) {
+    seed_rpg_definitions(ctx);
     let arkyv_region = "arkyv".to_string();
     let creation_region = "character-creation".to_string();
     let starting_region = "starting-zone".to_string();
@@ -325,6 +526,14 @@ pub fn client_connected(ctx: &ReducerContext) {
 }
 
 #[reducer]
+pub fn install_rpg_starter_kit(ctx: &ReducerContext) -> Result<(), String> {
+    ensure_profile(ctx);
+    require_admin(ctx)?;
+    seed_rpg_definitions(ctx);
+    Ok(())
+}
+
+#[reducer]
 pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: String) -> Result<(), String> {
     ensure_profile(ctx);
     let rows = parse_rows(&payload_json)?;
@@ -372,6 +581,116 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                     updated_at: ctx.timestamp,
                     color_scheme: json_string(row.get("color_scheme"), r##"{"accent":"rgba(56, 189, 248, 0.14)","fontColor":"#e0f2fe","borderColor":"#38bdf8"}"##),
                 });
+            }
+        }
+        "stat_definitions" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = normalized_key(&string(&row, "id", &string(&row, "name", "")));
+                if id.is_empty() || ctx.db.stat_definition().id().find(&id).is_some() {
+                    return Err("Stat id is missing or already exists.".to_string());
+                }
+                let minimum = i32_value(&row, "minimum", 0);
+                let maximum = i32_value(&row, "maximum", 100).max(minimum);
+                let default_value = i32_value(&row, "default_value", minimum).clamp(minimum, maximum);
+                ctx.db.stat_definition().insert(StatDefinition {
+                    id,
+                    name: string(&row, "name", "Untitled Stat"),
+                    description: string(&row, "description", ""),
+                    role: optional_string(&row, "role").filter(|role| !role.trim().is_empty()),
+                    minimum,
+                    maximum,
+                    default_value,
+                    visible: bool_value(&row, "visible", true),
+                    created_at: ctx.timestamp,
+                    updated_at: ctx.timestamp,
+                });
+            }
+        }
+        "object_definitions" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = normalized_key(&string(&row, "id", &string(&row, "name", "")));
+                if id.is_empty() || ctx.db.object_definition().id().find(&id).is_some() {
+                    return Err("Object definition id is missing or already exists.".to_string());
+                }
+                ctx.db.object_definition().insert(ObjectDefinition {
+                    id,
+                    name: string(&row, "name", "Untitled Object"),
+                    description: string(&row, "description", ""),
+                    primitive_kind: string(&row, "primitive_kind", "item"),
+                    icon: string(&row, "icon", "◇"),
+                    tags: json_string(row.get("tags"), "[]"),
+                    portable: bool_value(&row, "portable", true),
+                    stackable: bool_value(&row, "stackable", false),
+                    max_stack: u32_value(&row, "max_stack", 1).max(1),
+                    capacity: u32_value(&row, "capacity", 0),
+                    equipment_slot: optional_string(&row, "equipment_slot").filter(|slot| !slot.trim().is_empty()),
+                    weapon_damage: i32_value(&row, "weapon_damage", 0).max(0),
+                    armor_value: i32_value(&row, "armor_value", 0).max(0),
+                    scales_with_stat: optional_string(&row, "scales_with_stat").filter(|stat| !stat.trim().is_empty()),
+                    fuel_value: i32_value(&row, "fuel_value", 0).max(0),
+                    burn_rate: i32_value(&row, "burn_rate", 0).max(0),
+                    accepted_fuel_tags: json_string(row.get("accepted_fuel_tags"), "[]"),
+                    stat_modifiers: json_string(row.get("stat_modifiers"), "{}"),
+                    on_use: json_string(row.get("on_use"), "{}"),
+                    created_at: ctx.timestamp,
+                    updated_at: ctx.timestamp,
+                });
+            }
+        }
+        "world_objects" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = string(&row, "id", "");
+                let definition_id = string(&row, "definition_id", "");
+                let location_kind = string(&row, "location_kind", "room");
+                let location_id = string(&row, "location_id", "");
+                if id.is_empty() || ctx.db.world_object().id().find(&id).is_some() {
+                    return Err("World object id is missing or already exists.".to_string());
+                }
+                if ctx.db.object_definition().id().find(&definition_id).is_none() {
+                    return Err("World object definition does not exist.".to_string());
+                }
+                if !matches!(location_kind.as_str(), "room" | "inventory" | "equipped" | "container") {
+                    return Err("Object location must be room, inventory, equipped, or container.".to_string());
+                }
+                if location_id.is_empty() {
+                    return Err("World objects require a location.".to_string());
+                }
+                ctx.db.world_object().insert(WorldObject {
+                    id,
+                    definition_id,
+                    location_kind,
+                    location_id,
+                    quantity: u32_value(&row, "quantity", 1).max(1),
+                    equipped_slot: optional_string(&row, "equipped_slot").filter(|slot| !slot.trim().is_empty()),
+                    durability: i32_value(&row, "durability", 100).max(0),
+                    fuel_remaining: i32_value(&row, "fuel_remaining", 0).max(0),
+                    is_active: bool_value(&row, "is_active", false),
+                    state_json: json_string(row.get("state_json"), "{}"),
+                    created_at: ctx.timestamp,
+                    updated_at: ctx.timestamp,
+                });
+            }
+        }
+        "actor_stats" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let actor_id = string(&row, "actor_id", "");
+                let stat_definition_id = string(&row, "stat_definition_id", "");
+                let id = actor_stat_id(&actor_id, &stat_definition_id);
+                let definition = ctx.db.stat_definition().id().find(&stat_definition_id)
+                    .ok_or_else(|| "Stat definition does not exist.".to_string())?;
+                if !actor_exists(ctx, &actor_id) {
+                    return Err("Actor does not exist.".to_string());
+                }
+                if ctx.db.actor_stat().id().find(&id).is_some() {
+                    return Err("That actor already has this stat override.".to_string());
+                }
+                let base_value = i32_value(&row, "base_value", definition.default_value).clamp(definition.minimum, definition.maximum);
+                let current_value = i32_value(&row, "current_value", base_value).clamp(definition.minimum, definition.maximum);
+                ctx.db.actor_stat().insert(ActorStat { id, actor_id, stat_definition_id, base_value, current_value, updated_at: ctx.timestamp });
             }
         }
         "rooms" => {
@@ -506,6 +825,92 @@ pub fn update_rows(
                 }
             }
         }
+        "stat_definitions" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.stat_definition().id().find(&id) else { continue };
+                let minimum = payload.get("minimum").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.minimum);
+                let maximum = payload.get("maximum").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.maximum).max(minimum);
+                let default_value = payload.get("default_value").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.default_value).clamp(minimum, maximum);
+                ctx.db.stat_definition().id().update(StatDefinition {
+                    name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(),
+                    description: payload.get("description").and_then(Value::as_str).unwrap_or(&existing.description).to_string(),
+                    role: payload.get("role").map(|_| optional_string(&payload, "role").filter(|role| !role.trim().is_empty())).unwrap_or(existing.role),
+                    minimum,
+                    maximum,
+                    default_value,
+                    visible: payload.get("visible").and_then(Value::as_bool).unwrap_or(existing.visible),
+                    updated_at: ctx.timestamp,
+                    ..existing
+                });
+            }
+        }
+        "object_definitions" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.object_definition().id().find(&id) else { continue };
+                ctx.db.object_definition().id().update(ObjectDefinition {
+                    name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(),
+                    description: payload.get("description").and_then(Value::as_str).unwrap_or(&existing.description).to_string(),
+                    primitive_kind: payload.get("primitive_kind").and_then(Value::as_str).unwrap_or(&existing.primitive_kind).to_string(),
+                    icon: payload.get("icon").and_then(Value::as_str).unwrap_or(&existing.icon).to_string(),
+                    tags: payload.get("tags").map(|value| json_string(Some(value), &existing.tags)).unwrap_or(existing.tags),
+                    portable: payload.get("portable").and_then(Value::as_bool).unwrap_or(existing.portable),
+                    stackable: payload.get("stackable").and_then(Value::as_bool).unwrap_or(existing.stackable),
+                    max_stack: payload.get("max_stack").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.max_stack).max(1),
+                    capacity: payload.get("capacity").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.capacity),
+                    equipment_slot: payload.get("equipment_slot").map(|_| optional_string(&payload, "equipment_slot").filter(|slot| !slot.trim().is_empty())).unwrap_or(existing.equipment_slot),
+                    weapon_damage: payload.get("weapon_damage").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.weapon_damage).max(0),
+                    armor_value: payload.get("armor_value").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.armor_value).max(0),
+                    scales_with_stat: payload.get("scales_with_stat").map(|_| optional_string(&payload, "scales_with_stat").filter(|stat| !stat.trim().is_empty())).unwrap_or(existing.scales_with_stat),
+                    fuel_value: payload.get("fuel_value").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.fuel_value).max(0),
+                    burn_rate: payload.get("burn_rate").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.burn_rate).max(0),
+                    accepted_fuel_tags: payload.get("accepted_fuel_tags").map(|value| json_string(Some(value), &existing.accepted_fuel_tags)).unwrap_or(existing.accepted_fuel_tags),
+                    stat_modifiers: payload.get("stat_modifiers").map(|value| json_string(Some(value), &existing.stat_modifiers)).unwrap_or(existing.stat_modifiers),
+                    on_use: payload.get("on_use").map(|value| json_string(Some(value), &existing.on_use)).unwrap_or(existing.on_use),
+                    updated_at: ctx.timestamp,
+                    ..existing
+                });
+            }
+        }
+        "world_objects" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.world_object().id().find(&id) else { continue };
+                let definition_id = payload.get("definition_id").and_then(Value::as_str).unwrap_or(&existing.definition_id).to_string();
+                if ctx.db.object_definition().id().find(&definition_id).is_none() {
+                    return Err("World object definition does not exist.".to_string());
+                }
+                let location_kind = payload.get("location_kind").and_then(Value::as_str).unwrap_or(&existing.location_kind).to_string();
+                if !matches!(location_kind.as_str(), "room" | "inventory" | "equipped" | "container") {
+                    return Err("Object location must be room, inventory, equipped, or container.".to_string());
+                }
+                ctx.db.world_object().id().update(WorldObject {
+                    definition_id,
+                    location_kind,
+                    location_id: payload.get("location_id").and_then(Value::as_str).unwrap_or(&existing.location_id).to_string(),
+                    quantity: payload.get("quantity").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.quantity).max(1),
+                    equipped_slot: payload.get("equipped_slot").map(|_| optional_string(&payload, "equipped_slot").filter(|slot| !slot.trim().is_empty())).unwrap_or(existing.equipped_slot),
+                    durability: payload.get("durability").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.durability).max(0),
+                    fuel_remaining: payload.get("fuel_remaining").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.fuel_remaining).max(0),
+                    is_active: payload.get("is_active").and_then(Value::as_bool).unwrap_or(existing.is_active),
+                    state_json: payload.get("state_json").map(|value| json_string(Some(value), &existing.state_json)).unwrap_or(existing.state_json),
+                    updated_at: ctx.timestamp,
+                    ..existing
+                });
+            }
+        }
+        "actor_stats" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.actor_stat().id().find(&id) else { continue };
+                let definition = ctx.db.stat_definition().id().find(&existing.stat_definition_id)
+                    .ok_or_else(|| "Stat definition does not exist.".to_string())?;
+                let base_value = payload.get("base_value").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.base_value).clamp(definition.minimum, definition.maximum);
+                let current_value = payload.get("current_value").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.current_value).clamp(definition.minimum, definition.maximum);
+                ctx.db.actor_stat().id().update(ActorStat { base_value, current_value, updated_at: ctx.timestamp, ..existing });
+            }
+        }
         "rooms" => {
             require_admin(ctx)?;
             for id in ids {
@@ -544,6 +949,34 @@ pub fn update_rows(
     Ok(())
 }
 
+fn delete_world_object_tree(ctx: &ReducerContext, id: &String) {
+    let child_ids = ctx.db.world_object().iter()
+        .filter(|object| object.location_kind == "container" && object.location_id == *id)
+        .map(|object| object.id)
+        .collect::<Vec<_>>();
+    for child_id in child_ids {
+        delete_world_object_tree(ctx, &child_id);
+    }
+    ctx.db.world_object().id().delete(id);
+}
+
+fn delete_actor_rpg_state(ctx: &ReducerContext, actor_id: &String) {
+    let object_ids = ctx.db.world_object().iter()
+        .filter(|object| matches!(object.location_kind.as_str(), "inventory" | "equipped") && object.location_id == *actor_id)
+        .map(|object| object.id)
+        .collect::<Vec<_>>();
+    for object_id in object_ids {
+        delete_world_object_tree(ctx, &object_id);
+    }
+    let stat_ids = ctx.db.actor_stat().iter()
+        .filter(|stat| stat.actor_id == *actor_id)
+        .map(|stat| stat.id)
+        .collect::<Vec<_>>();
+    for stat_id in stat_ids {
+        ctx.db.actor_stat().id().delete(&stat_id);
+    }
+}
+
 #[reducer]
 pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -> Result<(), String> {
     ensure_profile(ctx);
@@ -555,6 +988,7 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
                     if row.owner != ctx.sender() {
                         return Err("Characters can only be deleted by their owner.".to_string());
                     }
+                    delete_actor_rpg_state(ctx, &id);
                     ctx.db.character().id().delete(&id);
                 }
             }
@@ -563,6 +997,34 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
         "regions" => {
             require_admin(ctx)?;
             for id in ids { ctx.db.region().name().delete(&id); }
+        }
+        "stat_definitions" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let actor_stat_ids = ctx.db.actor_stat().iter().filter(|stat| stat.stat_definition_id == id).map(|stat| stat.id).collect::<Vec<_>>();
+                for actor_stat_id in actor_stat_ids { ctx.db.actor_stat().id().delete(&actor_stat_id); }
+                let definitions = ctx.db.object_definition().iter().filter(|definition| definition.scales_with_stat.as_deref() == Some(id.as_str())).collect::<Vec<_>>();
+                for definition in definitions {
+                    ctx.db.object_definition().id().update(ObjectDefinition { scales_with_stat: None, updated_at: ctx.timestamp, ..definition });
+                }
+                ctx.db.stat_definition().id().delete(&id);
+            }
+        }
+        "object_definitions" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let object_ids = ctx.db.world_object().iter().filter(|object| object.definition_id == id).map(|object| object.id).collect::<Vec<_>>();
+                for object_id in object_ids { delete_world_object_tree(ctx, &object_id); }
+                ctx.db.object_definition().id().delete(&id);
+            }
+        }
+        "world_objects" => {
+            require_admin(ctx)?;
+            for id in ids { delete_world_object_tree(ctx, &id); }
+        }
+        "actor_stats" => {
+            require_admin(ctx)?;
+            for id in ids { ctx.db.actor_stat().id().delete(&id); }
         }
         "rooms" => {
             require_admin(ctx)?;
@@ -574,7 +1036,10 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
         }
         "npcs" => {
             require_admin(ctx)?;
-            for id in ids { ctx.db.npc().id().delete(&id); }
+            for id in ids {
+                delete_actor_rpg_state(ctx, &id);
+                ctx.db.npc().id().delete(&id);
+            }
         }
         "exits" => {
             require_admin(ctx)?;
@@ -606,11 +1071,15 @@ pub fn delete_current_account(ctx: &ReducerContext) -> Result<(), String> {
         row.character_id.as_ref().map(|id| owned_actor_ids.contains(id)).unwrap_or(false)
     }).map(|row| row.id).collect::<Vec<_>>();
     for id in owned_chats { ctx.db.region_chat().id().delete(&id); }
-    for id in owned_characters { ctx.db.character().id().delete(&id); }
+    for id in owned_characters {
+        delete_actor_rpg_state(ctx, &id);
+        ctx.db.character().id().delete(&id);
+    }
     let owned_commands = ctx.db.command().iter().filter(|row| row.owner == ctx.sender()).map(|row| row.id).collect::<Vec<_>>();
     for id in owned_commands { ctx.db.command().id().delete(&id); }
     let deleted_admin = profile.as_ref().map(|profile| profile.is_admin).unwrap_or(false);
     if let Some(profile) = profile {
+        delete_actor_rpg_state(ctx, &profile.id);
         ctx.db.profile().id().delete(&profile.id);
     }
     if deleted_admin {
@@ -619,6 +1088,463 @@ pub fn delete_current_account(ctx: &ReducerContext) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn object_definition_for(ctx: &ReducerContext, object: &WorldObject) -> Option<ObjectDefinition> {
+    ctx.db.object_definition().id().find(&object.definition_id)
+}
+
+fn object_matches(definition: &ObjectDefinition, query: &str) -> bool {
+    let query = query.trim().to_lowercase();
+    definition.id.eq_ignore_ascii_case(&query)
+        || definition.name.eq_ignore_ascii_case(&query)
+        || definition.name.to_lowercase().starts_with(&query)
+}
+
+fn find_object_at(
+    ctx: &ReducerContext,
+    location_kind: &str,
+    location_id: &str,
+    query: &str,
+) -> Option<(WorldObject, ObjectDefinition)> {
+    ctx.db.world_object().iter()
+        .filter(|object| object.location_kind == location_kind && object.location_id == location_id)
+        .find_map(|object| object_definition_for(ctx, &object)
+            .filter(|definition| object_matches(definition, query))
+            .map(|definition| (object, definition)))
+}
+
+fn find_carried_object(ctx: &ReducerContext, actor_id: &str, query: &str) -> Option<(WorldObject, ObjectDefinition)> {
+    find_object_at(ctx, "inventory", actor_id, query)
+        .or_else(|| find_object_at(ctx, "equipped", actor_id, query))
+}
+
+fn reconcile_fuel(ctx: &ReducerContext, object: WorldObject, definition: &ObjectDefinition) -> WorldObject {
+    if !object.is_active || object.fuel_remaining <= 0 || definition.burn_rate <= 0 {
+        return object;
+    }
+    let elapsed_micros = ctx.timestamp.to_micros_since_unix_epoch()
+        .saturating_sub(object.updated_at.to_micros_since_unix_epoch());
+    let elapsed_seconds = elapsed_micros / 1_000_000;
+    let consumed = elapsed_seconds.saturating_mul(i64::from(definition.burn_rate));
+    if consumed <= 0 {
+        return object;
+    }
+    let fuel_remaining = i64::from(object.fuel_remaining).saturating_sub(consumed).max(0) as i32;
+    let updated = WorldObject {
+        fuel_remaining,
+        is_active: fuel_remaining > 0,
+        updated_at: ctx.timestamp,
+        ..object
+    };
+    ctx.db.world_object().id().update(updated.clone());
+    updated
+}
+
+fn stat_definition_by_role(ctx: &ReducerContext, role: &str) -> Option<StatDefinition> {
+    ctx.db.stat_definition().iter().find(|definition| definition.role.as_deref() == Some(role))
+}
+
+fn actor_stat_row(ctx: &ReducerContext, actor_id: &str, definition: &StatDefinition) -> ActorStat {
+    let id = actor_stat_id(actor_id, &definition.id);
+    ctx.db.actor_stat().id().find(&id).unwrap_or(ActorStat {
+        id,
+        actor_id: actor_id.to_string(),
+        stat_definition_id: definition.id.clone(),
+        base_value: definition.default_value,
+        current_value: definition.default_value,
+        updated_at: ctx.timestamp,
+    })
+}
+
+fn equipment_stat_bonus(ctx: &ReducerContext, actor_id: &str, stat_id: &str) -> i32 {
+    ctx.db.world_object().iter()
+        .filter(|object| object.location_kind == "equipped" && object.location_id == actor_id)
+        .filter_map(|object| object_definition_for(ctx, &object))
+        .filter_map(|definition| serde_json::from_str::<Value>(&definition.stat_modifiers).ok())
+        .filter_map(|modifiers| modifiers.get(stat_id).and_then(Value::as_i64))
+        .map(|value| value as i32)
+        .sum()
+}
+
+fn actor_stat_value(ctx: &ReducerContext, actor_id: &str, definition: &StatDefinition) -> i32 {
+    let row = actor_stat_row(ctx, actor_id, definition);
+    row.current_value.saturating_add(equipment_stat_bonus(ctx, actor_id, &definition.id))
+}
+
+fn set_actor_stat_current(ctx: &ReducerContext, actor_id: &str, definition: &StatDefinition, value: i32) {
+    let mut row = actor_stat_row(ctx, actor_id, definition);
+    let exists = ctx.db.actor_stat().id().find(&row.id).is_some();
+    row.current_value = value.clamp(definition.minimum, definition.maximum);
+    row.updated_at = ctx.timestamp;
+    if exists {
+        ctx.db.actor_stat().id().update(row);
+    } else {
+        ctx.db.actor_stat().insert(row);
+    }
+}
+
+fn consume_object_quantity(ctx: &ReducerContext, object: WorldObject, quantity: u32) {
+    if object.quantity > quantity {
+        ctx.db.world_object().id().update(WorldObject {
+            quantity: object.quantity - quantity,
+            updated_at: ctx.timestamp,
+            ..object
+        });
+    } else {
+        delete_world_object_tree(ctx, &object.id);
+    }
+}
+
+fn rpg_message(ctx: &ReducerContext, room_id: &str, actor_id: &str, kind: &str, body: String) {
+    add_message(ctx, Some(room_id.to_string()), Some(actor_id.to_string()), None, None, kind, body, None, None);
+}
+
+fn list_inventory(ctx: &ReducerContext, room_id: &str, actor_id: &str) {
+    let mut inventory = Vec::new();
+    let mut equipment = Vec::new();
+    for object in ctx.db.world_object().iter().filter(|object| object.location_id == actor_id) {
+        let Some(definition) = object_definition_for(ctx, &object) else { continue };
+        let label = if object.quantity > 1 { format!("{} {} ×{}", definition.icon, definition.name, object.quantity) } else { format!("{} {}", definition.icon, definition.name) };
+        if object.location_kind == "equipped" {
+            equipment.push(format!("• {} [{}]", label, object.equipped_slot.clone().unwrap_or_else(|| "equipped".to_string())));
+        } else if object.location_kind == "inventory" {
+            inventory.push(format!("• {label}"));
+        }
+    }
+    let mut sections = Vec::new();
+    sections.push(if inventory.is_empty() { "[INVENTORY]\n• Empty".to_string() } else { format!("[INVENTORY]\n{}", inventory.join("\n")) });
+    if !equipment.is_empty() { sections.push(format!("[EQUIPMENT]\n{}", equipment.join("\n"))); }
+    rpg_message(ctx, room_id, actor_id, "system", sections.join("\n\n"));
+}
+
+fn list_stats(ctx: &ReducerContext, room_id: &str, actor_id: &str) {
+    let mut definitions = ctx.db.stat_definition().iter().filter(|definition| definition.visible).collect::<Vec<_>>();
+    definitions.sort_by(|left, right| left.name.cmp(&right.name));
+    if definitions.is_empty() {
+        rpg_message(ctx, room_id, actor_id, "system", "This world has no visible hero stats yet.".to_string());
+        return;
+    }
+    let lines = definitions.into_iter().map(|definition| {
+        let row = actor_stat_row(ctx, actor_id, &definition);
+        let bonus = equipment_stat_bonus(ctx, actor_id, &definition.id);
+        if bonus == 0 {
+            format!("• {}: {}/{}", definition.name, row.current_value, definition.maximum)
+        } else {
+            format!("• {}: {} ({:+} equipment) / {}", definition.name, row.current_value.saturating_add(bonus), bonus, definition.maximum)
+        }
+    }).collect::<Vec<_>>();
+    rpg_message(ctx, room_id, actor_id, "system", format!("[HERO STATS]\n{}", lines.join("\n")));
+}
+
+fn describe_object(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &str) {
+    let found = find_object_at(ctx, "room", room_id, query)
+        .or_else(|| find_carried_object(ctx, actor_id, query));
+    let Some((object, definition)) = found else {
+        rpg_message(ctx, room_id, actor_id, "error", format!("There is no \"{query}\" here."));
+        return;
+    };
+    let object = reconcile_fuel(ctx, object, &definition);
+    let mut lines = vec![format!("[{} {}]", definition.icon, definition.name.to_uppercase()), definition.description.clone()];
+    if definition.burn_rate > 0 {
+        lines.push(if object.is_active {
+            format!("It is burning with {} fuel-seconds remaining.", object.fuel_remaining / definition.burn_rate.max(1))
+        } else if object.fuel_remaining > 0 {
+            format!("It is unlit and holds {} fuel-seconds.", object.fuel_remaining / definition.burn_rate.max(1))
+        } else { "It is cold and has no fuel.".to_string() });
+    }
+    if definition.capacity > 0 {
+        let contents = ctx.db.world_object().iter()
+            .filter(|child| child.location_kind == "container" && child.location_id == object.id)
+            .filter_map(|child| object_definition_for(ctx, &child).map(|child_definition| format!("• {} {} ×{}", child_definition.icon, child_definition.name, child.quantity)))
+            .collect::<Vec<_>>();
+        lines.push(if contents.is_empty() { "[CONTENTS]\n• Empty".to_string() } else { format!("[CONTENTS]\n{}", contents.join("\n")) });
+    }
+    rpg_message(ctx, room_id, actor_id, "system", lines.join("\n\n"));
+}
+
+fn target_actor_in_room(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &str) -> Option<(String, String)> {
+    let query = query.trim();
+    ctx.db.npc().iter()
+        .find(|npc| npc.current_room.as_deref() == Some(room_id)
+            && (npc.name.eq_ignore_ascii_case(query) || npc.alias.as_deref().map(|alias| alias.eq_ignore_ascii_case(query)).unwrap_or(false)))
+        .map(|npc| (npc.id, npc.name))
+        .or_else(|| ctx.db.character().iter()
+            .find(|character| character.id != actor_id && character.current_room.as_deref() == Some(room_id) && character.name.eq_ignore_ascii_case(query))
+            .map(|character| (character.id, character.name)))
+}
+
+fn fuel_is_accepted(fuel: &ObjectDefinition, burner: &ObjectDefinition) -> bool {
+    if fuel.fuel_value <= 0 { return false; }
+    let accepted = serde_json::from_str::<Vec<String>>(&burner.accepted_fuel_tags).unwrap_or_default();
+    if accepted.is_empty() { return true; }
+    let tags = serde_json::from_str::<Vec<String>>(&fuel.tags).unwrap_or_default();
+    accepted.iter().any(|accepted_tag| tags.iter().any(|tag| tag.eq_ignore_ascii_case(accepted_tag)))
+}
+
+fn handle_rpg_command(
+    ctx: &ReducerContext,
+    raw: &str,
+    room_id: &str,
+    actor_id: &str,
+    actor_name: &str,
+) -> Result<bool, String> {
+    let lower = raw.to_lowercase();
+
+    if matches!(lower.as_str(), "inventory" | "inv" | "i" | "equipment") {
+        list_inventory(ctx, room_id, actor_id);
+        return Ok(true);
+    }
+    if matches!(lower.as_str(), "stats" | "status" | "sheet") {
+        list_stats(ctx, room_id, actor_id);
+        return Ok(true);
+    }
+    if let Some(query) = lower.strip_prefix("examine ").or_else(|| lower.strip_prefix("open ")) {
+        describe_object(ctx, room_id, actor_id, query.trim());
+        return Ok(true);
+    }
+
+    if let Some(rest) = lower.strip_prefix("take ").or_else(|| lower.strip_prefix("get ")) {
+        if let Some((item_query, container_query)) = rest.split_once(" from ") {
+            let container = find_object_at(ctx, "room", room_id, container_query.trim())
+                .or_else(|| find_carried_object(ctx, actor_id, container_query.trim()));
+            let Some((container, container_definition)) = container else {
+                rpg_message(ctx, room_id, actor_id, "error", format!("There is no \"{}\" here.", container_query.trim()));
+                return Ok(true);
+            };
+            if container_definition.capacity == 0 {
+                rpg_message(ctx, room_id, actor_id, "error", format!("{} is not a container.", container_definition.name));
+                return Ok(true);
+            }
+            let Some((object, definition)) = find_object_at(ctx, "container", &container.id, item_query.trim()) else {
+                rpg_message(ctx, room_id, actor_id, "error", format!("{} does not contain that.", container_definition.name));
+                return Ok(true);
+            };
+            if !definition.portable {
+                rpg_message(ctx, room_id, actor_id, "error", format!("{} cannot be carried.", definition.name));
+                return Ok(true);
+            }
+            ctx.db.world_object().id().update(WorldObject {
+                location_kind: "inventory".to_string(), location_id: actor_id.to_string(), equipped_slot: None,
+                updated_at: ctx.timestamp, ..object
+            });
+            rpg_message(ctx, room_id, actor_id, "system", format!("You take {} from {}.", definition.name, container_definition.name));
+            return Ok(true);
+        }
+
+        let query = rest.trim();
+        let Some((object, definition)) = find_object_at(ctx, "room", room_id, query) else {
+            rpg_message(ctx, room_id, actor_id, "error", format!("There is no \"{query}\" here to take."));
+            return Ok(true);
+        };
+        if !definition.portable {
+            rpg_message(ctx, room_id, actor_id, "error", format!("{} is fixed in place.", definition.name));
+            return Ok(true);
+        }
+        ctx.db.world_object().id().update(WorldObject {
+            location_kind: "inventory".to_string(), location_id: actor_id.to_string(), equipped_slot: None,
+            is_active: false, updated_at: ctx.timestamp, ..object
+        });
+        rpg_message(ctx, room_id, actor_id, "system", format!("You take {}.", definition.name));
+        return Ok(true);
+    }
+
+    if let Some(query) = lower.strip_prefix("drop ") {
+        let Some((object, definition)) = find_carried_object(ctx, actor_id, query.trim()) else {
+            rpg_message(ctx, room_id, actor_id, "error", format!("You are not carrying \"{}\".", query.trim()));
+            return Ok(true);
+        };
+        ctx.db.world_object().id().update(WorldObject {
+            location_kind: "room".to_string(), location_id: room_id.to_string(), equipped_slot: None,
+            is_active: false, updated_at: ctx.timestamp, ..object
+        });
+        rpg_message(ctx, room_id, actor_id, "system", format!("You drop {}.", definition.name));
+        return Ok(true);
+    }
+
+    if let Some(rest) = lower.strip_prefix("put ") {
+        let Some((item_query, container_query)) = rest.split_once(" in ") else {
+            rpg_message(ctx, room_id, actor_id, "error", "Use `put <item> in <container>`.".to_string());
+            return Ok(true);
+        };
+        let Some((item, item_definition)) = find_object_at(ctx, "inventory", actor_id, item_query.trim()) else {
+            rpg_message(ctx, room_id, actor_id, "error", format!("You are not carrying \"{}\".", item_query.trim()));
+            return Ok(true);
+        };
+        let container = find_object_at(ctx, "room", room_id, container_query.trim())
+            .or_else(|| find_carried_object(ctx, actor_id, container_query.trim()));
+        let Some((container, container_definition)) = container else {
+            rpg_message(ctx, room_id, actor_id, "error", format!("There is no \"{}\" here.", container_query.trim()));
+            return Ok(true);
+        };
+        if container.id == item.id {
+            rpg_message(ctx, room_id, actor_id, "error", "An object cannot contain itself.".to_string());
+            return Ok(true);
+        }
+        if container_definition.burn_rate > 0 {
+            if !fuel_is_accepted(&item_definition, &container_definition) {
+                rpg_message(ctx, room_id, actor_id, "error", format!("{} cannot fuel {}.", item_definition.name, container_definition.name));
+                return Ok(true);
+            }
+            let added = item_definition.fuel_value.saturating_mul(item.quantity as i32);
+            let reconciled = reconcile_fuel(ctx, container, &container_definition);
+            ctx.db.world_object().id().update(WorldObject {
+                fuel_remaining: reconciled.fuel_remaining.saturating_add(added), updated_at: ctx.timestamp, ..reconciled
+            });
+            let quantity = item.quantity;
+            consume_object_quantity(ctx, item, quantity);
+            rpg_message(ctx, room_id, actor_id, "system", format!("You add {} to {} (+{} fuel-seconds).", item_definition.name, container_definition.name, added / container_definition.burn_rate.max(1)));
+            return Ok(true);
+        }
+        if container_definition.capacity == 0 {
+            rpg_message(ctx, room_id, actor_id, "error", format!("{} cannot hold items.", container_definition.name));
+            return Ok(true);
+        }
+        let occupied = ctx.db.world_object().iter().filter(|child| child.location_kind == "container" && child.location_id == container.id).count() as u32;
+        if occupied >= container_definition.capacity {
+            rpg_message(ctx, room_id, actor_id, "error", format!("{} is full.", container_definition.name));
+            return Ok(true);
+        }
+        ctx.db.world_object().id().update(WorldObject {
+            location_kind: "container".to_string(), location_id: container.id, equipped_slot: None,
+            updated_at: ctx.timestamp, ..item
+        });
+        rpg_message(ctx, room_id, actor_id, "system", format!("You put {} in {}.", item_definition.name, container_definition.name));
+        return Ok(true);
+    }
+
+    if let Some(query) = lower.strip_prefix("equip ") {
+        let Some((object, definition)) = find_object_at(ctx, "inventory", actor_id, query.trim()) else {
+            rpg_message(ctx, room_id, actor_id, "error", format!("You are not carrying \"{}\".", query.trim()));
+            return Ok(true);
+        };
+        let Some(slot) = definition.equipment_slot.clone() else {
+            rpg_message(ctx, room_id, actor_id, "error", format!("{} is not equippable.", definition.name));
+            return Ok(true);
+        };
+        let occupied = ctx.db.world_object().iter().find(|item| item.location_kind == "equipped" && item.location_id == actor_id && item.equipped_slot.as_deref() == Some(slot.as_str()));
+        if let Some(occupied) = occupied {
+            ctx.db.world_object().id().update(WorldObject {
+                location_kind: "inventory".to_string(), equipped_slot: None, updated_at: ctx.timestamp, ..occupied
+            });
+        }
+        ctx.db.world_object().id().update(WorldObject {
+            location_kind: "equipped".to_string(), equipped_slot: Some(slot.clone()), updated_at: ctx.timestamp, ..object
+        });
+        rpg_message(ctx, room_id, actor_id, "system", format!("You equip {} in your {} slot.", definition.name, slot));
+        return Ok(true);
+    }
+
+    if let Some(query) = lower.strip_prefix("unequip ") {
+        let found = find_object_at(ctx, "equipped", actor_id, query.trim()).or_else(|| {
+            ctx.db.world_object().iter()
+                .find(|item| item.location_kind == "equipped" && item.location_id == actor_id && item.equipped_slot.as_deref().map(|slot| slot.eq_ignore_ascii_case(query.trim())).unwrap_or(false))
+                .and_then(|item| object_definition_for(ctx, &item).map(|definition| (item, definition)))
+        });
+        let Some((object, definition)) = found else {
+            rpg_message(ctx, room_id, actor_id, "error", format!("Nothing matching \"{}\" is equipped.", query.trim()));
+            return Ok(true);
+        };
+        ctx.db.world_object().id().update(WorldObject {
+            location_kind: "inventory".to_string(), equipped_slot: None, updated_at: ctx.timestamp, ..object
+        });
+        rpg_message(ctx, room_id, actor_id, "system", format!("You unequip {}.", definition.name));
+        return Ok(true);
+    }
+
+    if let Some(query) = lower.strip_prefix("light ") {
+        let found = find_object_at(ctx, "room", room_id, query.trim()).or_else(|| find_carried_object(ctx, actor_id, query.trim()));
+        let Some((object, definition)) = found else {
+            rpg_message(ctx, room_id, actor_id, "error", format!("There is no \"{}\" here.", query.trim()));
+            return Ok(true);
+        };
+        if definition.burn_rate <= 0 {
+            rpg_message(ctx, room_id, actor_id, "error", format!("{} is not a fuel-burning object.", definition.name));
+            return Ok(true);
+        }
+        let object = reconcile_fuel(ctx, object, &definition);
+        if object.fuel_remaining <= 0 {
+            rpg_message(ctx, room_id, actor_id, "error", format!("{} needs fuel first.", definition.name));
+            return Ok(true);
+        }
+        ctx.db.world_object().id().update(WorldObject { is_active: true, updated_at: ctx.timestamp, ..object });
+        rpg_message(ctx, room_id, actor_id, "system", format!("You light {}. It begins to burn.", definition.name));
+        return Ok(true);
+    }
+
+    if let Some(query) = lower.strip_prefix("extinguish ") {
+        let found = find_object_at(ctx, "room", room_id, query.trim()).or_else(|| find_carried_object(ctx, actor_id, query.trim()));
+        let Some((object, definition)) = found else {
+            rpg_message(ctx, room_id, actor_id, "error", format!("There is no \"{}\" here.", query.trim()));
+            return Ok(true);
+        };
+        let object = reconcile_fuel(ctx, object, &definition);
+        ctx.db.world_object().id().update(WorldObject { is_active: false, updated_at: ctx.timestamp, ..object });
+        rpg_message(ctx, room_id, actor_id, "system", format!("You extinguish {}.", definition.name));
+        return Ok(true);
+    }
+
+    if let Some(query) = lower.strip_prefix("use ") {
+        let Some((object, definition)) = find_object_at(ctx, "inventory", actor_id, query.trim()) else {
+            rpg_message(ctx, room_id, actor_id, "error", format!("You are not carrying \"{}\".", query.trim()));
+            return Ok(true);
+        };
+        let behavior = serde_json::from_str::<Value>(&definition.on_use).unwrap_or(Value::Null);
+        let Some(stat_id) = behavior.get("stat_id").and_then(Value::as_str) else {
+            rpg_message(ctx, room_id, actor_id, "error", format!("{} has no use behavior configured.", definition.name));
+            return Ok(true);
+        };
+        let Some(stat_definition) = ctx.db.stat_definition().id().find(&stat_id.to_string()) else {
+            rpg_message(ctx, room_id, actor_id, "error", "The configured target stat no longer exists.".to_string());
+            return Ok(true);
+        };
+        let delta = behavior.get("delta").and_then(Value::as_i64).unwrap_or(0) as i32;
+        let current = actor_stat_row(ctx, actor_id, &stat_definition).current_value;
+        set_actor_stat_current(ctx, actor_id, &stat_definition, current.saturating_add(delta));
+        if behavior.get("consume").and_then(Value::as_bool).unwrap_or(true) { consume_object_quantity(ctx, object, 1); }
+        rpg_message(ctx, room_id, actor_id, "system", format!("You use {}. {} changes by {:+}.", definition.name, stat_definition.name, delta));
+        return Ok(true);
+    }
+
+    if let Some(query) = lower.strip_prefix("attack ") {
+        let Some(health_definition) = stat_definition_by_role(ctx, "health") else {
+            rpg_message(ctx, room_id, actor_id, "error", "Combat is not configured: create a stat with the Health role.".to_string());
+            return Ok(true);
+        };
+        let Some((target_id, target_name)) = target_actor_in_room(ctx, room_id, actor_id, query.trim()) else {
+            rpg_message(ctx, room_id, actor_id, "error", format!("There is no attackable target named \"{}\" here.", query.trim()));
+            return Ok(true);
+        };
+        let equipped_weapon = ctx.db.world_object().iter()
+            .filter(|object| object.location_kind == "equipped" && object.location_id == actor_id)
+            .filter_map(|object| object_definition_for(ctx, &object))
+            .find(|definition| definition.weapon_damage > 0);
+        let mut attack = equipped_weapon.as_ref().map(|weapon| weapon.weapon_damage).unwrap_or(1);
+        if let Some(stat_id) = equipped_weapon.as_ref().and_then(|weapon| weapon.scales_with_stat.clone()) {
+            if let Some(definition) = ctx.db.stat_definition().id().find(&stat_id) {
+                attack = attack.saturating_add(actor_stat_value(ctx, actor_id, &definition));
+            }
+        } else if let Some(power) = stat_definition_by_role(ctx, "power") {
+            attack = attack.saturating_add(actor_stat_value(ctx, actor_id, &power));
+        }
+        let innate_defense = stat_definition_by_role(ctx, "defense").map(|definition| actor_stat_value(ctx, &target_id, &definition)).unwrap_or(0);
+        let armor = ctx.db.world_object().iter()
+            .filter(|object| object.location_kind == "equipped" && object.location_id == target_id)
+            .filter_map(|object| object_definition_for(ctx, &object))
+            .map(|definition| definition.armor_value)
+            .sum::<i32>();
+        let damage = attack.saturating_sub(innate_defense.saturating_add(armor)).max(1);
+        let current_health = actor_stat_row(ctx, &target_id, &health_definition).current_value;
+        let next_health = current_health.saturating_sub(damage).max(health_definition.minimum);
+        set_actor_stat_current(ctx, &target_id, &health_definition, next_health);
+        let weapon_name = equipped_weapon.map(|weapon| weapon.name).unwrap_or_else(|| "bare hands".to_string());
+        let result = if next_health <= health_definition.minimum { format!(" {target_name} is defeated.") } else { format!(" {target_name} has {next_health} {} remaining.", health_definition.name) };
+        add_message(ctx, Some(room_id.to_string()), Some(actor_id.to_string()), Some(actor_name.to_string()), None, "combat",
+            format!("{actor_name} attacks {target_name} with {weapon_name} for {damage} damage.{result}"), None, None);
+        return Ok(true);
+    }
+
+    Ok(false)
 }
 
 fn actor(ctx: &ReducerContext, character_id: &Option<String>) -> Result<(String, String, bool), String> {
@@ -657,6 +1583,11 @@ pub fn submit_command(
         user_id: if is_profile { Some(identity_id(ctx.sender())) } else { None },
     });
 
+    if handle_rpg_command(ctx, &raw, &room_id, &actor_id, &actor_name)? {
+        finish_command(ctx, &command_id);
+        return Ok(());
+    }
+
     if raw == "help" {
         add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", "[AVAILABLE COMMANDS]\n\n• say <message> - Speak to everyone in the room\n• whisper <name> <message> - Send a private message\n• look - Examine your current location\n• talk <npc> <message> - Speak to an AI-powered NPC\n• who - See who is nearby\n• inspect <name> - Inspect a character\n• set handle <name> - Set your saved-world handle\n• <direction> - Move through an exit".to_string(), None, None);
     } else if let Some(handle) = raw.strip_prefix("set handle ") {
@@ -692,6 +1623,15 @@ pub fn submit_command(
             if !characters.is_empty() { body.push_str(&format!("\n\n[CHARACTERS]\n{}", characters.join("\n"))); }
             let npcs = ctx.db.npc().iter().filter(|row| row.current_room.as_deref() == Some(room_id.as_str())).map(|row| format!("• {} [{}] - {}", row.name, row.alias.unwrap_or_default(), row.description.unwrap_or_default())).collect::<Vec<_>>();
             if !npcs.is_empty() { body.push_str(&format!("\n\n[NPCs]\n{}", npcs.join("\n"))); }
+            let objects = ctx.db.world_object().iter()
+                .filter(|object| object.location_kind == "room" && object.location_id == room_id)
+                .filter_map(|object| object_definition_for(ctx, &object).map(|definition| (reconcile_fuel(ctx, object, &definition), definition)))
+                .map(|(object, definition)| {
+                    let quantity = if object.quantity > 1 { format!(" ×{}", object.quantity) } else { String::new() };
+                    let state = if definition.burn_rate > 0 && object.is_active { " (burning)" } else { "" };
+                    format!("• {} {}{}{}", definition.icon, definition.name, quantity, state)
+                }).collect::<Vec<_>>();
+            if !objects.is_empty() { body.push_str(&format!("\n\n[OBJECTS]\n{}", objects.join("\n"))); }
             let exits = ctx.db.exit().iter().filter(|row| row.from_room.as_deref() == Some(room_id.as_str())).map(|row| {
                 let destination = row.to_room.as_ref().and_then(|id| ctx.db.room().id().find(id)).map(|room| room.name).unwrap_or_else(|| "unknown destination".to_string());
                 format!("• {} → {}", row.verb, destination)

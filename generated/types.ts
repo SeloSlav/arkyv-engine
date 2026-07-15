@@ -10,6 +10,16 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
+export const ActorStat = __t.object("ActorStat", {
+  id: __t.string(),
+  actorId: __t.string(),
+  statDefinitionId: __t.string(),
+  baseValue: __t.i32(),
+  currentValue: __t.i32(),
+  updatedAt: __t.timestamp(),
+});
+export type ActorStat = __Infer<typeof ActorStat>;
+
 export const Character = __t.object("Character", {
   id: __t.string(),
   owner: __t.identity(),
@@ -56,6 +66,31 @@ export const Npc = __t.object("Npc", {
   portraitUrl: __t.option(__t.string()),
 });
 export type Npc = __Infer<typeof Npc>;
+
+export const ObjectDefinition = __t.object("ObjectDefinition", {
+  id: __t.string(),
+  name: __t.string(),
+  description: __t.string(),
+  primitiveKind: __t.string(),
+  icon: __t.string(),
+  tags: __t.string(),
+  portable: __t.bool(),
+  stackable: __t.bool(),
+  maxStack: __t.u32(),
+  capacity: __t.u32(),
+  equipmentSlot: __t.option(__t.string()),
+  weaponDamage: __t.i32(),
+  armorValue: __t.i32(),
+  scalesWithStat: __t.option(__t.string()),
+  fuelValue: __t.i32(),
+  burnRate: __t.i32(),
+  acceptedFuelTags: __t.string(),
+  statModifiers: __t.string(),
+  onUse: __t.string(),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type ObjectDefinition = __Infer<typeof ObjectDefinition>;
 
 export const Profile = __t.object("Profile", {
   id: __t.string(),
@@ -118,4 +153,34 @@ export const RoomMessage = __t.object("RoomMessage", {
   regionName: __t.option(__t.string()),
 });
 export type RoomMessage = __Infer<typeof RoomMessage>;
+
+export const StatDefinition = __t.object("StatDefinition", {
+  id: __t.string(),
+  name: __t.string(),
+  description: __t.string(),
+  role: __t.option(__t.string()),
+  minimum: __t.i32(),
+  maximum: __t.i32(),
+  defaultValue: __t.i32(),
+  visible: __t.bool(),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type StatDefinition = __Infer<typeof StatDefinition>;
+
+export const WorldObject = __t.object("WorldObject", {
+  id: __t.string(),
+  definitionId: __t.string(),
+  locationKind: __t.string(),
+  locationId: __t.string(),
+  quantity: __t.u32(),
+  equippedSlot: __t.option(__t.string()),
+  durability: __t.i32(),
+  fuelRemaining: __t.i32(),
+  isActive: __t.bool(),
+  stateJson: __t.string(),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type WorldObject = __Infer<typeof WorldObject>;
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/contexts/AuthContext';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -15,6 +15,8 @@ import {
 
 export default function HamburgerIcon() {
   const [isOpen, setIsOpen] = useState(false);
+  const triggerRef = useRef(null);
+  const panelRef = useRef(null);
   const router = useRouter();
   const { user, profile, signOut } = useAuth();
 
@@ -39,12 +41,37 @@ export default function HamburgerIcon() {
     return () => window.removeEventListener('keydown', handleEsc);
   }, [isOpen]);
 
+  // Dismiss the popover without placing a click-blocking layer over the page.
+  // This lets a single click switch directly from the menu to a card or control.
+  React.useEffect(() => {
+    if (!isOpen) return undefined;
+    let closeTimer;
+
+    const handleClickOutside = (event) => {
+      if (triggerRef.current?.contains(event.target) || panelRef.current?.contains(event.target)) {
+        return;
+      }
+      // Let the newly targeted control finish its own click handler first.
+      closeTimer = window.setTimeout(() => setIsOpen(false), 0);
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+      window.clearTimeout(closeTimer);
+    };
+  }, [isOpen]);
+
   return (
     <>
       <button
+        ref={triggerRef}
         onClick={() => setIsOpen(!isOpen)}
         className="fixed top-4 right-4 z-50 p-3 bg-slate-900 border-2 border-cyan-500/30 rounded-xl hover:bg-slate-800 hover:border-cyan-400 transition-all shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/40 block"
         aria-label="Menu"
+        aria-expanded={isOpen}
+        aria-haspopup="menu"
+        aria-controls="arkyv-navigation-menu"
       >
         <div className="w-6 h-5 flex flex-col justify-between">
           <span className={`block h-0.5 bg-cyan-400 transition-all ${isOpen ? 'rotate-45 translate-y-2' : ''}`}></span>
@@ -54,7 +81,12 @@ export default function HamburgerIcon() {
       </button>
 
       {isOpen && (
-        <div className="fixed top-16 right-4 z-40 bg-slate-900 border border-cyan-500/30 rounded-xl shadow-2xl shadow-cyan-500/20 backdrop-blur-md w-[280px] max-w-[calc(100vw-2rem)] overflow-hidden">
+        <div
+          ref={panelRef}
+          id="arkyv-navigation-menu"
+          role="menu"
+          className="fixed top-16 right-4 z-40 bg-slate-900 border border-cyan-500/30 rounded-xl shadow-2xl shadow-cyan-500/20 backdrop-blur-md w-[280px] max-w-[calc(100vw-2rem)] overflow-hidden"
+        >
           <div className="p-2">
             <nav className="space-y-1">
               {/* Home */}
@@ -86,6 +118,7 @@ export default function HamburgerIcon() {
                 href="https://www.babushkabook.com/arkyv"
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={() => setIsOpen(false)}
                 className="flex items-center gap-3 w-full text-left px-4 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 text-white hover:from-cyan-400 hover:to-blue-400 rounded-lg transition-all font-terminal font-bold shadow-md shadow-cyan-500/50 uppercase tracking-[0.15em] text-sm"
               >
                 <FontAwesomeIcon icon={faGamepad} className="w-4 h-4" />
@@ -166,6 +199,7 @@ export default function HamburgerIcon() {
                 href="https://github.com/SeloSlav/arkyv-engine"
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={() => setIsOpen(false)}
                 className="flex items-center gap-3 w-full px-4 py-3 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded-lg transition-all font-terminal uppercase tracking-[0.1em] text-sm"
               >
                 <FontAwesomeIcon icon={faCodeBranch} className="w-4 h-4" />
@@ -177,12 +211,6 @@ export default function HamburgerIcon() {
         </div>
       )}
 
-      {isOpen && (
-        <div
-          onClick={() => setIsOpen(false)}
-          className="fixed inset-0 z-30"
-        />
-      )}
     </>
   );
 }
