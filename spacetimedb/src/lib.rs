@@ -4,7 +4,7 @@
 //! the client. All persistent game state and mutations live in this module.
 
 use serde_json::Value;
-use spacetimedb::{reducer, Identity, ReducerContext, Table, Timestamp};
+use spacetimedb::{reducer, Identity, ReducerContext, ScheduleAt, Table, TimeDuration, Timestamp};
 use std::collections::{BTreeMap, VecDeque};
 
 const CREATION_ROOM_ID: &str = "e58caed0-8268-419e-abe8-faa3833a1de6";
@@ -198,6 +198,15 @@ pub struct StatDefinition {
     /// Passive recovery per elapsed real-time second. Zero disables regeneration.
     #[default(0)]
     pub regeneration_per_second: i32,
+    /// Whether players may spend earned stat points on this attribute.
+    #[default(true)]
+    pub player_allocatable: bool,
+    /// Number of unspent stat points consumed for one purchased rank.
+    #[default(1)]
+    pub point_cost: u32,
+    /// Base-value increase granted by one purchased rank.
+    #[default(1)]
+    pub points_per_rank: i32,
 }
 
 /// A reusable RPG primitive authored in the admin editor. Behaviour is stored
@@ -269,6 +278,9 @@ pub struct ActorStat {
     pub stat_definition_id: String,
     pub base_value: i32,
     pub current_value: i32,
+    /// Total progression points deliberately invested by the player.
+    #[default(0)]
+    pub invested_points: u32,
     pub updated_at: Timestamp,
 }
 
@@ -386,6 +398,22 @@ pub struct ActorCooldown {
     pub action_id: String,
     pub ready_at_micros: i64,
     pub updated_at: Timestamp,
+}
+
+/// A cast with a non-zero cast time is resolved by SpacetimeDB's scheduler,
+/// rather than pretending that cast time is merely additional cooldown.
+#[spacetimedb::table(accessor = scheduled_cast, public, scheduled(resolve_scheduled_cast))]
+#[derive(Clone)]
+pub struct ScheduledCast {
+    #[primary_key]
+    #[auto_inc]
+    pub scheduled_id: u64,
+    pub scheduled_at: ScheduleAt,
+    pub actor_id: String,
+    pub actor_name: String,
+    pub room_id: String,
+    pub ability_id: String,
+    pub target_query: Option<String>,
 }
 
 /// An admin-authored political or social group. Reputation thresholds are
@@ -797,6 +825,9 @@ fn seed_rpg_definitions(ctx: &ReducerContext) {
                 updated_at: ctx.timestamp,
                 per_level_gain,
                 regeneration_per_second,
+                player_allocatable: true,
+                point_cost: 1,
+                points_per_rank: 1,
             });
         }
     }
@@ -1200,6 +1231,9 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                     updated_at: ctx.timestamp,
                     per_level_gain: i32_value(&row, "per_level_gain", 0),
                     regeneration_per_second: i32_value(&row, "regeneration_per_second", 0).max(0),
+                    player_allocatable: bool_value(&row, "player_allocatable", true),
+                    point_cost: u32_value(&row, "point_cost", 1).max(1),
+                    points_per_rank: i32_value(&row, "points_per_rank", 1).max(1),
                 });
             }
         }
@@ -1598,7 +1632,11 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                 }
                 let base_value = i32_value(&row, "base_value", definition.default_value).clamp(definition.minimum, definition.maximum);
                 let current_value = i32_value(&row, "current_value", base_value).clamp(definition.minimum, definition.maximum);
-                ctx.db.actor_stat().insert(ActorStat { id, actor_id, stat_definition_id, base_value, current_value, updated_at: ctx.timestamp });
+                ctx.db.actor_stat().insert(ActorStat {
+                    id, actor_id, stat_definition_id, base_value, current_value,
+                    invested_points: u32_value(&row, "invested_points", 0),
+                    updated_at: ctx.timestamp,
+                });
             }
         }
         "loot_table_entries" => {
@@ -1802,6 +1840,9 @@ pub fn update_rows(
                     visible: payload.get("visible").and_then(Value::as_bool).unwrap_or(existing.visible),
                     per_level_gain: payload.get("per_level_gain").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.per_level_gain),
                     regeneration_per_second: payload.get("regeneration_per_second").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.regeneration_per_second).max(0),
+                    player_allocatable: payload.get("player_allocatable").and_then(Value::as_bool).unwrap_or(existing.player_allocatable),
+                    point_cost: payload.get("point_cost").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.point_cost).max(1),
+                    points_per_rank: payload.get("points_per_rank").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.points_per_rank).max(1),
                     updated_at: ctx.timestamp,
                     ..existing
                 });
@@ -1873,7 +1914,8 @@ pub fn update_rows(
                     .ok_or_else(|| "Stat definition does not exist.".to_string())?;
                 let base_value = payload.get("base_value").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.base_value).clamp(definition.minimum, definition.maximum);
                 let current_value = payload.get("current_value").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.current_value).clamp(definition.minimum, definition.maximum);
-                ctx.db.actor_stat().id().update(ActorStat { base_value, current_value, updated_at: ctx.timestamp, ..existing });
+                let invested_points = payload.get("invested_points").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.invested_points);
+                ctx.db.actor_stat().id().update(ActorStat { base_value, current_value, invested_points, updated_at: ctx.timestamp, ..existing });
             }
         }
         "progression_configs" => {
@@ -1893,6 +1935,7 @@ pub fn update_rows(
                 });
                 let progressions = ctx.db.actor_progression().iter().filter(|row| row.level > max_level).collect::<Vec<_>>();
                 for progression in progressions {
+                    apply_level_change(ctx, &progression.actor_id, progression.level, max_level);
                     ctx.db.actor_progression().id().update(ActorProgression { level: max_level, experience: 0, updated_at: ctx.timestamp, ..progression });
                 }
             }
@@ -1962,8 +2005,10 @@ pub fn update_rows(
             let config = world_progression_config(ctx);
             for id in ids {
                 let Some(existing) = ctx.db.actor_progression().id().find(&id) else { continue };
+                let level = payload.get("level").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.level).clamp(1, config.max_level.max(1));
+                apply_level_change(ctx, &existing.actor_id, existing.level, level);
                 ctx.db.actor_progression().id().update(ActorProgression {
-                    level: payload.get("level").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.level).clamp(1, config.max_level.max(1)),
+                    level,
                     experience: payload.get("experience").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.experience),
                     unspent_stat_points: payload.get("unspent_stat_points").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.unspent_stat_points),
                     updated_at: ctx.timestamp,
@@ -2264,6 +2309,8 @@ fn delete_actor_rpg_state(ctx: &ReducerContext, actor_id: &String) {
     for ability_id in ability_ids { ctx.db.actor_ability().id().delete(&ability_id); }
     let cooldown_ids = ctx.db.actor_cooldown().iter().filter(|row| row.actor_id == *actor_id).map(|row| row.id).collect::<Vec<_>>();
     for cooldown_id in cooldown_ids { ctx.db.actor_cooldown().id().delete(&cooldown_id); }
+    let cast_ids = ctx.db.scheduled_cast().iter().filter(|row| row.actor_id == *actor_id).map(|row| row.scheduled_id).collect::<Vec<_>>();
+    for cast_id in cast_ids { ctx.db.scheduled_cast().scheduled_id().delete(cast_id); }
     let reputation_ids = ctx.db.actor_faction_reputation().iter().filter(|row| row.actor_id == *actor_id).map(|row| row.id).collect::<Vec<_>>();
     for reputation_id in reputation_ids { ctx.db.actor_faction_reputation().id().delete(&reputation_id); }
     let crime_ids = ctx.db.actor_crime().iter().filter(|row| row.actor_id == *actor_id).map(|row| row.id).collect::<Vec<_>>();
@@ -2484,6 +2531,30 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
             require_admin(ctx)?;
             for id in ids { ctx.db.actor_wallet().id().delete(&id); }
         }
+        "actor_cooldowns" => {
+            require_admin(ctx)?;
+            for id in ids { ctx.db.actor_cooldown().id().delete(&id); }
+        }
+        "actor_crimes" => {
+            require_admin(ctx)?;
+            for id in ids { ctx.db.actor_crime().id().delete(&id); }
+        }
+        "actor_quests" => {
+            require_admin(ctx)?;
+            for id in ids {
+                if let Some(actor_quest) = ctx.db.actor_quest().id().find(&id) {
+                    let progress_ids = ctx.db.actor_quest_progress().iter()
+                        .filter(|row| row.actor_id == actor_quest.actor_id && row.quest_id == actor_quest.quest_id)
+                        .map(|row| row.id).collect::<Vec<_>>();
+                    for progress_id in progress_ids { ctx.db.actor_quest_progress().id().delete(&progress_id); }
+                }
+                ctx.db.actor_quest().id().delete(&id);
+            }
+        }
+        "actor_quest_progress" => {
+            require_admin(ctx)?;
+            for id in ids { ctx.db.actor_quest_progress().id().delete(&id); }
+        }
         "spawn_points" => {
             require_admin(ctx)?;
             for id in ids {
@@ -2520,6 +2591,95 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
             }
         }
         _ => return Err(format!("Unsupported delete table: {table_name}")),
+    }
+    Ok(())
+}
+
+/// Focused moderation operations that need more invariants than generic row
+/// editing can provide. The payload is a JSON object whose fields depend on
+/// the action; all branches are administrator-only and server validated.
+#[reducer]
+pub fn admin_actor_action(ctx: &ReducerContext, actor_id: String, action: String, payload_json: String) -> Result<(), String> {
+    ensure_profile(ctx);
+    require_admin(ctx)?;
+    if !actor_exists(ctx, &actor_id) { return Err("Actor does not exist.".to_string()); }
+    let payload: Value = serde_json::from_str(&payload_json).map_err(|error| format!("Invalid moderation payload: {error}"))?;
+    match action.as_str() {
+        "set_gold" => {
+            let gold = payload.get("gold").and_then(Value::as_i64).and_then(|value| i32::try_from(value).ok()).unwrap_or(0).max(0);
+            if let Some(wallet) = ctx.db.actor_wallet().id().find(&actor_id) {
+                ctx.db.actor_wallet().id().update(ActorWallet { gold, updated_at: ctx.timestamp, ..wallet });
+            } else {
+                ctx.db.actor_wallet().insert(ActorWallet { id: actor_id.clone(), actor_id: actor_id.clone(), gold, updated_at: ctx.timestamp });
+            }
+        }
+        "clear_crimes" => {
+            let ids = ctx.db.actor_crime().iter().filter(|row| row.actor_id == actor_id).map(|row| row.id).collect::<Vec<_>>();
+            for id in ids { ctx.db.actor_crime().id().delete(&id); }
+        }
+        "clear_cooldowns" => {
+            let ids = ctx.db.actor_cooldown().iter().filter(|row| row.actor_id == actor_id).map(|row| row.id).collect::<Vec<_>>();
+            for id in ids { ctx.db.actor_cooldown().id().delete(&id); }
+        }
+        "move" => {
+            let room_id = payload.get("room_id").and_then(Value::as_str).ok_or_else(|| "Choose a destination room.".to_string())?;
+            move_actor_to_room(ctx, &actor_id, room_id)?;
+        }
+        "rescue" => {
+            let origin_room = actor_current_room(ctx, &actor_id).unwrap_or_else(|| STARTING_ROOM_ID.to_string());
+            let destination = if let Some(room_id) = payload.get("room_id").and_then(Value::as_str).filter(|value| !value.trim().is_empty()) {
+                if ctx.db.room().id().find(&room_id.to_string()).is_none() { return Err("Destination room does not exist.".to_string()); }
+                room_id.to_string()
+            } else {
+                choose_respawn_point(ctx, &actor_id, &origin_room).map(|point| point.room_id).unwrap_or_else(|| legacy_respawn_room(ctx, &origin_room))
+            };
+            move_actor_to_room(ctx, &actor_id, &destination)?;
+            let config = world_lifecycle_config(ctx);
+            restore_actor_after_respawn(ctx, &actor_id, &config);
+            let state = ensure_actor_life_state(ctx, &actor_id);
+            ctx.db.actor_life_state().id().update(ActorLifeState {
+                state: "alive".to_string(), death_room_id: None, pending_spawn_point_id: None,
+                respawn_available_at_micros: 0, protected_until_micros: 0, updated_at: ctx.timestamp, ..state
+            });
+        }
+        "set_quest_status" => {
+            let quest_id = payload.get("quest_id").and_then(Value::as_str).ok_or_else(|| "Choose a quest.".to_string())?.to_string();
+            if ctx.db.quest_definition().id().find(&quest_id).is_none() { return Err("Quest does not exist.".to_string()); }
+            let status = payload.get("status").and_then(Value::as_str).unwrap_or("active");
+            if !matches!(status, "active" | "ready" | "completed") { return Err("Quest status must be active, ready, or completed.".to_string()); }
+            let id = actor_quest_id(&actor_id, &quest_id);
+            let existing = ctx.db.actor_quest().id().find(&id);
+            let completion_count = existing.as_ref().map(|row| row.completion_count).unwrap_or(0);
+            let accepted_at = existing.as_ref().map(|row| row.accepted_at).unwrap_or(ctx.timestamp);
+            let row = ActorQuest {
+                id: id.clone(), actor_id: actor_id.clone(), quest_id: quest_id.clone(), status: status.to_string(),
+                completion_count: if status == "completed" { completion_count.saturating_add(1) } else { completion_count },
+                accepted_at, updated_at: ctx.timestamp, completed_at: if status == "completed" { Some(ctx.timestamp) } else { None },
+            };
+            if existing.is_some() { ctx.db.actor_quest().id().update(row); } else { ctx.db.actor_quest().insert(row); }
+            if status == "ready" || status == "completed" {
+                let objectives = ctx.db.quest_objective().iter().filter(|row| row.quest_id == quest_id).collect::<Vec<_>>();
+                for objective in objectives {
+                    let progress_id = quest_progress_id(&actor_id, &objective.id);
+                    let progress = ActorQuestProgress {
+                        id: progress_id.clone(), actor_id: actor_id.clone(), quest_id: quest_id.clone(), objective_id: objective.id,
+                        progress: objective.required_count, updated_at: ctx.timestamp,
+                    };
+                    if ctx.db.actor_quest_progress().id().find(&progress_id).is_some() { ctx.db.actor_quest_progress().id().update(progress); }
+                    else { ctx.db.actor_quest_progress().insert(progress); }
+                }
+            }
+        }
+        "set_quest_progress" => {
+            let objective_id = payload.get("objective_id").and_then(Value::as_str).ok_or_else(|| "Choose a quest objective.".to_string())?.to_string();
+            let objective = ctx.db.quest_objective().id().find(&objective_id).ok_or_else(|| "Quest objective does not exist.".to_string())?;
+            let progress_value = payload.get("progress").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(0).min(objective.required_count);
+            let id = quest_progress_id(&actor_id, &objective_id);
+            let row = ActorQuestProgress { id: id.clone(), actor_id: actor_id.clone(), quest_id: objective.quest_id, objective_id, progress: progress_value, updated_at: ctx.timestamp };
+            if ctx.db.actor_quest_progress().id().find(&id).is_some() { ctx.db.actor_quest_progress().id().update(row); }
+            else { ctx.db.actor_quest_progress().insert(row); }
+        }
+        _ => return Err(format!("Unsupported moderation action: {action}")),
     }
     Ok(())
 }
@@ -2640,6 +2800,7 @@ fn ensure_actor_progression(ctx: &ReducerContext, actor_id: &str) -> ActorProgre
             ctx.db.actor_stat().insert(ActorStat {
                 id, actor_id: actor_key.clone(), stat_definition_id: definition.id,
                 base_value: definition.default_value, current_value: definition.default_value,
+                invested_points: 0,
                 updated_at: ctx.timestamp,
             });
         }
@@ -2791,6 +2952,7 @@ fn actor_stat_row(ctx: &ReducerContext, actor_id: &str, definition: &StatDefinit
         stat_definition_id: definition.id.clone(),
         base_value: definition.default_value,
         current_value: definition.default_value,
+        invested_points: 0,
         updated_at: ctx.timestamp,
     }};
     if definition.regeneration_per_second > 0 && row.current_value < row.base_value {
@@ -2810,7 +2972,7 @@ fn actor_stat_row(ctx: &ReducerContext, actor_id: &str, definition: &StatDefinit
 
 fn equipment_stat_bonus(ctx: &ReducerContext, actor_id: &str, stat_id: &str) -> i32 {
     ctx.db.world_object().iter()
-        .filter(|object| object.location_kind == "equipped" && object.location_id == actor_id)
+        .filter(|object| object.location_kind == "equipped" && object.location_id == actor_id && object.durability > 0)
         .filter_map(|object| object_definition_for(ctx, &object))
         .filter_map(|definition| serde_json::from_str::<Value>(&definition.stat_modifiers).ok())
         .filter_map(|modifiers| modifiers.get(stat_id).and_then(Value::as_i64))
@@ -2835,6 +2997,71 @@ fn set_actor_stat_current(ctx: &ReducerContext, actor_id: &str, definition: &Sta
     }
 }
 
+/// Apply only the portion of an actor's base stats that comes from levels.
+/// Purchased ranks and administrator-authored offsets remain intact when an
+/// administrator raises or lowers a level directly.
+fn apply_level_change(ctx: &ReducerContext, actor_id: &str, old_level: u32, new_level: u32) {
+    if old_level == new_level { return; }
+    let level_delta = i64::from(new_level).saturating_sub(i64::from(old_level));
+    let definitions = ctx.db.stat_definition().iter().filter(|definition| definition.per_level_gain != 0).collect::<Vec<_>>();
+    for definition in definitions {
+        let mut row = actor_stat_row(ctx, actor_id, &definition);
+        let exists = ctx.db.actor_stat().id().find(&row.id).is_some();
+        let previous_base = row.base_value;
+        let change = i64::from(definition.per_level_gain).saturating_mul(level_delta);
+        row.base_value = i64::from(row.base_value).saturating_add(change)
+            .clamp(i64::from(definition.minimum), i64::from(definition.maximum)) as i32;
+        let applied = row.base_value.saturating_sub(previous_base);
+        row.current_value = row.current_value.saturating_add(applied).clamp(definition.minimum, row.base_value);
+        row.updated_at = ctx.timestamp;
+        if exists { ctx.db.actor_stat().id().update(row); } else { ctx.db.actor_stat().insert(row); }
+    }
+}
+
+fn train_actor_stat(ctx: &ReducerContext, actor_id: &str, query: &str, requested_ranks: u32) -> Result<String, String> {
+    let query = query.trim();
+    if query.is_empty() { return Err("Choose a stat to train, for example `train strength`.".to_string()); }
+    if requested_ranks == 0 { return Err("The number of ranks must be at least 1.".to_string()); }
+    let query_lower = query.to_lowercase();
+    let mut matches = ctx.db.stat_definition().iter().filter(|definition| {
+        definition.id.eq_ignore_ascii_case(query)
+            || definition.name.eq_ignore_ascii_case(query)
+            || definition.name.to_lowercase().starts_with(&query_lower)
+    }).collect::<Vec<_>>();
+    matches.sort_by(|left, right| left.name.cmp(&right.name));
+    let Some(definition) = matches.first().cloned() else { return Err(format!("There is no stat named \"{query}\".")); };
+    if matches.len() > 1 && !definition.id.eq_ignore_ascii_case(query) && !definition.name.eq_ignore_ascii_case(query) {
+        return Err(format!("That matches several stats: {}.", matches.iter().map(|row| row.name.clone()).collect::<Vec<_>>().join(", ")));
+    }
+    if !definition.player_allocatable { return Err(format!("{} cannot be increased with player stat points.", definition.name)); }
+    let point_cost = definition.point_cost.max(1);
+    let points_per_rank = definition.points_per_rank.max(1);
+    let mut progression = ensure_actor_progression(ctx, actor_id);
+    let mut row = actor_stat_row(ctx, actor_id, &definition);
+    if row.base_value >= definition.maximum { return Err(format!("{} is already at its maximum of {}.", definition.name, definition.maximum)); }
+    let affordable_ranks = progression.unspent_stat_points / point_cost;
+    if affordable_ranks == 0 {
+        return Err(format!("Training {} costs {} stat point{}; you have {}.", definition.name, point_cost, if point_cost == 1 { "" } else { "s" }, progression.unspent_stat_points));
+    }
+    let room = u32::try_from(definition.maximum.saturating_sub(row.base_value)).unwrap_or(0);
+    let gain = u32::try_from(points_per_rank).unwrap_or(1).max(1);
+    let ranks_until_cap = room.saturating_add(gain.saturating_sub(1)) / gain;
+    let ranks = requested_ranks.min(affordable_ranks).min(ranks_until_cap).max(1);
+    let spent = ranks.saturating_mul(point_cost);
+    let previous_base = row.base_value;
+    let increase = i64::from(points_per_rank).saturating_mul(i64::from(ranks));
+    row.base_value = i64::from(row.base_value).saturating_add(increase).min(i64::from(definition.maximum)) as i32;
+    let applied = row.base_value.saturating_sub(previous_base);
+    row.current_value = row.current_value.saturating_add(applied).clamp(definition.minimum, row.base_value);
+    row.invested_points = row.invested_points.saturating_add(spent);
+    row.updated_at = ctx.timestamp;
+    ctx.db.actor_stat().id().update(row.clone());
+    progression.unspent_stat_points = progression.unspent_stat_points.saturating_sub(spent);
+    progression.updated_at = ctx.timestamp;
+    ctx.db.actor_progression().id().update(progression.clone());
+    Ok(format!("You train {} by {} to {}. {} unspent stat point{} remain.", definition.name, applied, row.base_value, progression.unspent_stat_points, if progression.unspent_stat_points == 1 { "" } else { "s" }))
+}
+
 fn award_experience(ctx: &ReducerContext, actor_id: &str, amount: u32) -> String {
     let config = world_progression_config(ctx);
     let mut progression = ensure_actor_progression(ctx, actor_id);
@@ -2852,22 +3079,8 @@ fn award_experience(ctx: &ReducerContext, actor_id: &str, amount: u32) -> String
         progression.experience = progression.experience.saturating_sub(required);
         progression.level = progression.level.saturating_add(1);
         progression.unspent_stat_points = progression.unspent_stat_points.saturating_add(config.stat_points_per_level);
-        let definitions = ctx.db.stat_definition().iter().collect::<Vec<_>>();
-        for definition in definitions {
-            if definition.per_level_gain == 0 { continue; }
-            let mut row = actor_stat_row(ctx, actor_id, &definition);
-            let previous_base = row.base_value;
-            row.base_value = row.base_value.saturating_add(definition.per_level_gain).clamp(definition.minimum, definition.maximum);
-            let applied = row.base_value.saturating_sub(previous_base);
-            row.current_value = row.current_value.saturating_add(applied).clamp(definition.minimum, row.base_value);
-            row.updated_at = ctx.timestamp;
-            if ctx.db.actor_stat().id().find(&row.id).is_some() {
-                ctx.db.actor_stat().id().update(row);
-            } else {
-                ctx.db.actor_stat().insert(row);
-            }
-        }
     }
+    apply_level_change(ctx, actor_id, starting_level, progression.level);
     progression.updated_at = ctx.timestamp;
     ctx.db.actor_progression().id().update(progression.clone());
     if progression.level == starting_level {
@@ -2890,7 +3103,7 @@ fn inventory_slots(ctx: &ReducerContext, actor_id: &str) -> u32 {
     let config = world_progression_config(ctx);
     let level = ensure_actor_progression(ctx, actor_id).level.max(1);
     let equipment_bonus = ctx.db.world_object().iter()
-        .filter(|object| object.location_kind == "equipped" && object.location_id == actor_id)
+        .filter(|object| object.location_kind == "equipped" && object.location_id == actor_id && object.durability > 0)
         .filter_map(|object| object_definition_for(ctx, &object))
         .map(|definition| definition.inventory_slots_bonus)
         .fold(0u32, u32::saturating_add);
@@ -2972,7 +3185,10 @@ fn list_inventory(ctx: &ReducerContext, room_id: &str, actor_id: &str) {
     let mut equipment = Vec::new();
     for object in ctx.db.world_object().iter().filter(|object| object.location_id == actor_id) {
         let Some(definition) = object_definition_for(ctx, &object) else { continue };
-        let label = if object.quantity > 1 { format!("{} {} ×{}", definition.icon, definition.name, object.quantity) } else { format!("{} {}", definition.icon, definition.name) };
+        let durability = if definition.equipment_slot.is_some() || definition.weapon_damage > 0 || definition.armor_value > 0 {
+            if object.durability == 0 { " · BROKEN".to_string() } else { format!(" · {} durability", object.durability) }
+        } else { String::new() };
+        let label = if object.quantity > 1 { format!("{} {} ×{}{}", definition.icon, definition.name, object.quantity, durability) } else { format!("{} {}{}", definition.icon, definition.name, durability) };
         if object.location_kind == "equipped" {
             equipment.push(format!("• {} [{}]", label, object.equipped_slot.clone().unwrap_or_else(|| "equipped".to_string())));
         } else if object.location_kind == "inventory" {
@@ -2997,10 +3213,13 @@ fn list_stats(ctx: &ReducerContext, room_id: &str, actor_id: &str) {
     let lines = definitions.into_iter().map(|definition| {
         let row = actor_stat_row(ctx, actor_id, &definition);
         let bonus = equipment_stat_bonus(ctx, actor_id, &definition.id);
+        let training = if definition.player_allocatable {
+            format!(" · train: {} point{} for +{} · invested {}", definition.point_cost.max(1), if definition.point_cost == 1 { "" } else { "s" }, definition.points_per_rank.max(1), row.invested_points)
+        } else { String::new() };
         if bonus == 0 {
-            format!("• {}: {}/{}", definition.name, row.current_value, row.base_value)
+            format!("• {}: {}/{}{}", definition.name, row.current_value, row.base_value, training)
         } else {
-            format!("• {}: {} ({:+} equipment) / {}", definition.name, row.current_value.saturating_add(bonus), bonus, row.base_value.saturating_add(bonus))
+            format!("• {}: {} ({:+} equipment) / {}{}", definition.name, row.current_value.saturating_add(bonus), bonus, row.base_value.saturating_add(bonus), training)
         }
     }).collect::<Vec<_>>();
     let config = world_progression_config(ctx);
@@ -3010,7 +3229,10 @@ fn list_stats(ctx: &ReducerContext, room_id: &str, actor_id: &str) {
     } else {
         format!("{} / {} XP", progression.experience, xp_for_next_level(&config, progression.level))
     };
-    rpg_message(ctx, room_id, actor_id, "system", format!("[LEVEL {} · {}]\n\n[HERO STATS]\n{}", progression.level, xp, lines.join("\n")));
+    let training_hint = if progression.unspent_stat_points > 0 {
+        format!("\n\n[UNSPENT STAT POINTS: {}]\nUse `train <stat> [ranks]` to allocate them.", progression.unspent_stat_points)
+    } else { String::new() };
+    rpg_message(ctx, room_id, actor_id, "system", format!("[LEVEL {} · {}]\n\n[HERO STATS]\n{}{}", progression.level, xp, lines.join("\n"), training_hint));
 }
 
 fn describe_object(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &str) {
@@ -3028,6 +3250,9 @@ fn describe_object(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &
         } else if object.fuel_remaining > 0 {
             format!("It is unlit and holds {} fuel-seconds.", object.fuel_remaining / definition.burn_rate.max(1))
         } else { "It is cold and has no fuel.".to_string() });
+    }
+    if definition.equipment_slot.is_some() || definition.weapon_damage > 0 || definition.armor_value > 0 {
+        lines.push(if object.durability == 0 { "It is broken and provides no equipment benefits.".to_string() } else { format!("Durability: {}.", object.durability) });
     }
     if definition.capacity > 0 {
         let contents = ctx.db.world_object().iter()
@@ -3070,6 +3295,26 @@ fn actor_current_room(ctx: &ReducerContext, actor_id: &str) -> Option<String> {
     let actor_id = actor_id.to_string();
     ctx.db.character().id().find(&actor_id).and_then(|actor| actor.current_room)
         .or_else(|| ctx.db.profile().id().find(&actor_id).and_then(|actor| actor.current_room))
+        .or_else(|| ctx.db.npc().id().find(&actor_id).and_then(|actor| actor.current_room))
+}
+
+fn move_actor_to_room(ctx: &ReducerContext, actor_id: &str, room_id: &str) -> Result<(), String> {
+    let actor_key = actor_id.to_string();
+    let room_key = room_id.to_string();
+    if ctx.db.room().id().find(&room_key).is_none() { return Err("Destination room does not exist.".to_string()); }
+    if let Some(origin) = actor_current_room(ctx, actor_id).filter(|origin| origin != room_id) {
+        interrupt_actor_casts(ctx, actor_id, &origin, "by moving");
+    }
+    if let Some(actor) = ctx.db.character().id().find(&actor_key) {
+        ctx.db.character().id().update(Character { current_room: Some(room_key), ..actor });
+    } else if let Some(actor) = ctx.db.profile().id().find(&actor_key) {
+        ctx.db.profile().id().update(Profile { current_room: Some(room_key), ..actor });
+    } else if let Some(actor) = ctx.db.npc().id().find(&actor_key) {
+        ctx.db.npc().id().update(Npc { current_room: Some(room_key), defeated_at: None, ..actor });
+    } else {
+        return Err("Actor does not exist.".to_string());
+    }
+    Ok(())
 }
 
 fn reputation_id(actor_id: &str, faction_id: &str) -> String {
@@ -3486,7 +3731,7 @@ fn actor_health_max(ctx: &ReducerContext, actor_id: &str, definition: &StatDefin
 
 fn combat_damage(ctx: &ReducerContext, attacker_id: &str, target_id: &str) -> (i32, String) {
     let equipped_weapon = ctx.db.world_object().iter()
-        .filter(|object| object.location_kind == "equipped" && object.location_id == attacker_id)
+        .filter(|object| object.location_kind == "equipped" && object.location_id == attacker_id && object.durability > 0)
         .filter_map(|object| object_definition_for(ctx, &object))
         .find(|definition| definition.weapon_damage > 0);
     let mut attack = equipped_weapon.as_ref().map(|weapon| weapon.weapon_damage).unwrap_or(1);
@@ -3501,7 +3746,7 @@ fn combat_damage(ctx: &ReducerContext, attacker_id: &str, target_id: &str) -> (i
         .map(|definition| actor_stat_value(ctx, target_id, &definition))
         .unwrap_or(0);
     let armor = ctx.db.world_object().iter()
-        .filter(|object| object.location_kind == "equipped" && object.location_id == target_id)
+        .filter(|object| object.location_kind == "equipped" && object.location_id == target_id && object.durability > 0)
         .filter_map(|object| object_definition_for(ctx, &object))
         .map(|definition| definition.armor_value)
         .sum::<i32>();
@@ -3513,11 +3758,37 @@ fn combat_damage(ctx: &ReducerContext, attacker_id: &str, target_id: &str) -> (i
 
 fn basic_attack_cooldown_ms(ctx: &ReducerContext, actor_id: &str) -> u32 {
     ctx.db.world_object().iter()
-        .filter(|object| object.location_kind == "equipped" && object.location_id == actor_id)
+        .filter(|object| object.location_kind == "equipped" && object.location_id == actor_id && object.durability > 0)
         .filter_map(|object| object_definition_for(ctx, &object))
         .find(|definition| definition.weapon_damage > 0)
         .map(|weapon| weapon.attack_cooldown_ms)
         .unwrap_or(2000)
+}
+
+fn wear_equipped_weapon(ctx: &ReducerContext, actor_id: &str, room_id: &str) {
+    let equipped = ctx.db.world_object().iter()
+        .filter(|object| object.location_kind == "equipped" && object.location_id == actor_id && object.durability > 0)
+        .find_map(|object| object_definition_for(ctx, &object).filter(|definition| definition.weapon_damage > 0).map(|definition| (object, definition)));
+    let Some((object, definition)) = equipped else { return };
+    let durability = object.durability.saturating_sub(1).max(0);
+    ctx.db.world_object().id().update(WorldObject { durability, updated_at: ctx.timestamp, ..object });
+    if durability == 0 {
+        rpg_message(ctx, room_id, actor_id, "error", format!("Your {} breaks and no longer provides weapon damage or bonuses.", definition.name));
+    }
+}
+
+fn wear_equipped_armor(ctx: &ReducerContext, actor_id: &str, room_id: &str) {
+    let armor = ctx.db.world_object().iter()
+        .filter(|object| object.location_kind == "equipped" && object.location_id == actor_id && object.durability > 0)
+        .filter_map(|object| object_definition_for(ctx, &object).filter(|definition| definition.armor_value > 0).map(|definition| (object, definition)))
+        .collect::<Vec<_>>();
+    for (object, definition) in armor {
+        let durability = object.durability.saturating_sub(1).max(0);
+        ctx.db.world_object().id().update(WorldObject { durability, updated_at: ctx.timestamp, ..object });
+        if durability == 0 {
+            rpg_message(ctx, room_id, actor_id, "error", format!("Your {} breaks and no longer provides armor or bonuses.", definition.name));
+        }
+    }
 }
 
 fn deterministic_roll(seed: &str) -> u32 {
@@ -3585,7 +3856,16 @@ fn cast_ability(
     actor_name: &str,
     ability_query: &str,
     target_query: Option<&str>,
+    resolving_scheduled_cast: bool,
 ) {
+    if resolving_scheduled_cast && actor_current_room(ctx, actor_id).as_deref() != Some(room_id) {
+        let current_room = actor_current_room(ctx, actor_id).unwrap_or_else(|| room_id.to_string());
+        rpg_message(ctx, &current_room, actor_id, "error", "Your cast is interrupted because you moved.".to_string());
+        return;
+    }
+    if resolving_scheduled_cast && actor_is_dead(ctx, actor_id) {
+        return;
+    }
     let progression = ensure_actor_progression(ctx, actor_id);
     let Some(ability) = find_ability(ctx, ability_query) else {
         rpg_message(ctx, room_id, actor_id, "error", format!("There is no ability named \"{}\".", ability_query.trim()));
@@ -3600,6 +3880,10 @@ fn cast_ability(
     let remaining = cooldown_remaining_ms(ctx, actor_id, &action_id);
     if remaining > 0 {
         rpg_message(ctx, room_id, actor_id, "error", format!("{} will be ready in {:.1} seconds.", ability.name, remaining as f32 / 1000.0));
+        return;
+    }
+    if !resolving_scheduled_cast && ctx.db.scheduled_cast().iter().any(|cast| cast.actor_id == actor_id) {
+        rpg_message(ctx, room_id, actor_id, "error", "You are already casting an ability.".to_string());
         return;
     }
 
@@ -3629,11 +3913,13 @@ fn cast_ability(
             rpg_message(ctx, room_id, actor_id, "error", format!("{target_name} is protected after respawning."));
             return;
         }
-        if let Some(npc) = target_npc.as_ref() {
-            penalize_npc_attack(ctx, room_id, actor_id, actor_name, npc, false);
-            if actor_current_room(ctx, actor_id).as_deref() != Some(room_id) { return; }
-        } else if !target_is_npc && !region_for_room(ctx, room_id).map(|region| region.pvp_enabled).unwrap_or(false) {
-            record_safe_zone_crime(ctx, room_id, actor_id, actor_name, None, true, 1);
+        if !resolving_scheduled_cast {
+            if let Some(npc) = target_npc.as_ref() {
+                penalize_npc_attack(ctx, room_id, actor_id, actor_name, npc, false);
+                if actor_current_room(ctx, actor_id).as_deref() != Some(room_id) { return; }
+            } else if !target_is_npc && !region_for_room(ctx, room_id).map(|region| region.pvp_enabled).unwrap_or(false) {
+                record_safe_zone_crime(ctx, room_id, actor_id, actor_name, None, true, 1);
+            }
         }
         if target_npc.as_ref().map(|npc| npc_disposition(npc) == "friendly").unwrap_or(false) {
             rpg_message(ctx, room_id, actor_id, "error", format!("{target_name} is friendly and cannot be targeted by hostile abilities."));
@@ -3670,17 +3956,33 @@ fn cast_ability(
         return;
     }
 
+    if ability.cast_time_ms > 0 && !resolving_scheduled_cast {
+        let cast_at = ctx.timestamp + TimeDuration::from_micros(i64::from(ability.cast_time_ms).saturating_mul(1_000));
+        ctx.db.scheduled_cast().insert(ScheduledCast {
+            scheduled_id: 0,
+            scheduled_at: cast_at.into(),
+            actor_id: actor_id.to_string(),
+            actor_name: actor_name.to_string(),
+            room_id: room_id.to_string(),
+            ability_id: ability.id.clone(),
+            target_query: if ability.target_type == "self" { None } else { Some(target_name.clone()) },
+        });
+        add_message(ctx, Some(room_id.to_string()), Some(actor_id.to_string()), Some(actor_name.to_string()), None, "combat",
+            format!("{actor_name} begins casting {} {} ({:.1}s).", ability.icon, ability.name, ability.cast_time_ms as f32 / 1000.0), None, None);
+        return;
+    }
+
     if let Some(resource) = resource.as_ref() {
         let row = actor_stat_row(ctx, actor_id, resource);
         set_actor_stat_current(ctx, actor_id, resource, row.current_value.saturating_sub(ability.resource_cost));
     }
     if ability.target_type == "enemy" { clear_actor_spawn_protection(ctx, actor_id); }
-    set_cooldown(ctx, actor_id, &action_id, ability.cooldown_ms.max(ability.cast_time_ms));
+    set_cooldown(ctx, actor_id, &action_id, ability.cooldown_ms);
     let mut power = ability_power(ctx, actor_id, &ability);
     if ability.effect_type == "damage" && ability.mitigation_type == "armor" {
         let innate_defense = stat_definition_by_role(ctx, "defense").map(|definition| actor_stat_value(ctx, &target_id, &definition)).unwrap_or(0);
         let armor = ctx.db.world_object().iter()
-            .filter(|object| object.location_kind == "equipped" && object.location_id == target_id)
+            .filter(|object| object.location_kind == "equipped" && object.location_id == target_id && object.durability > 0)
             .filter_map(|object| object_definition_for(ctx, &object))
             .map(|definition| definition.armor_value).sum::<i32>();
         power = power.saturating_sub(innate_defense.saturating_add(armor)).max(1);
@@ -3689,6 +3991,8 @@ fn cast_ability(
     match ability.effect_type.as_str() {
         "damage" => {
             let next = target_row.current_value.saturating_sub(power).max(effect_stat.minimum);
+            interrupt_actor_casts(ctx, &target_id, room_id, "by taking damage");
+            if ability.mitigation_type == "armor" { wear_equipped_armor(ctx, &target_id, room_id); }
             set_actor_stat_current(ctx, &target_id, &effect_stat, next);
             let result = if next <= effect_stat.minimum { format!(" {target_name} is defeated.") } else { format!(" {target_name} has {next} {} remaining.", effect_stat.name) };
             add_message(ctx, Some(room_id.to_string()), Some(actor_id.to_string()), Some(actor_name.to_string()), None, "combat",
@@ -3722,6 +4026,23 @@ fn cast_ability(
         }
         _ => {}
     }
+}
+
+#[reducer]
+pub fn resolve_scheduled_cast(ctx: &ReducerContext, cast: ScheduledCast) -> Result<(), String> {
+    if ctx.sender() != ctx.identity() {
+        return Err("Scheduled casts may only be resolved by the module scheduler.".to_string());
+    }
+    cast_ability(
+        ctx,
+        &cast.room_id,
+        &cast.actor_id,
+        &cast.actor_name,
+        &cast.ability_id,
+        cast.target_query.as_deref(),
+        true,
+    );
+    Ok(())
 }
 
 fn drop_enemy_loot(ctx: &ReducerContext, npc: &Npc, room_id: &str) -> Vec<String> {
@@ -3887,6 +4208,13 @@ fn clear_actor_spawn_protection(ctx: &ReducerContext, actor_id: &str) {
     }
 }
 
+fn interrupt_actor_casts(ctx: &ReducerContext, actor_id: &str, room_id: &str, reason: &str) {
+    let casts = ctx.db.scheduled_cast().iter().filter(|row| row.actor_id == actor_id).collect::<Vec<_>>();
+    if casts.is_empty() { return; }
+    for cast in casts { ctx.db.scheduled_cast().scheduled_id().delete(cast.scheduled_id); }
+    rpg_message(ctx, room_id, actor_id, "error", format!("Your cast is interrupted {reason}."));
+}
+
 fn complete_actor_respawn(ctx: &ReducerContext, actor_id: &str, actor_name: &str) -> Result<(), String> {
     let actor_key = actor_id.to_string();
     let Some(state) = ctx.db.actor_life_state().id().find(&actor_key) else { return Err("No death state exists for this actor.".to_string()) };
@@ -3980,6 +4308,9 @@ fn npc_attack_player(ctx: &ReducerContext, npc: Npc, room_id: &str, actor_id: &s
     if current_health <= health.minimum { return; }
     let (damage, weapon_name) = combat_damage(ctx, &npc.id, actor_id);
     let next_health = current_health.saturating_sub(damage).max(health.minimum);
+    interrupt_actor_casts(ctx, actor_id, room_id, "by taking damage");
+    wear_equipped_weapon(ctx, &npc.id, room_id);
+    wear_equipped_armor(ctx, actor_id, room_id);
     set_actor_stat_current(ctx, actor_id, health, next_health);
     ctx.db.npc().id().update(Npc { last_attack_at: Some(ctx.timestamp), ..npc.clone() });
     let result = if next_health <= health.minimum {
@@ -4113,6 +4444,16 @@ fn handle_rpg_command(
         list_stats(ctx, room_id, actor_id);
         return Ok(true);
     }
+    if let Some(rest) = lower.strip_prefix("train ").or_else(|| lower.strip_prefix("spend ")) {
+        let (stat_query, ranks) = rest.rsplit_once(' ')
+            .and_then(|(query, value)| value.parse::<u32>().ok().map(|ranks| (query, ranks)))
+            .unwrap_or((rest, 1));
+        match train_actor_stat(ctx, actor_id, stat_query, ranks) {
+            Ok(message) => rpg_message(ctx, room_id, actor_id, "system", message),
+            Err(error) => rpg_message(ctx, room_id, actor_id, "error", error),
+        }
+        return Ok(true);
+    }
     if matches!(lower.as_str(), "abilities" | "spells" | "skills" | "powers") {
         list_abilities(ctx, room_id, actor_id);
         return Ok(true);
@@ -4139,7 +4480,7 @@ fn handle_rpg_command(
     }
     if let Some(rest) = lower.strip_prefix("cast ").or_else(|| lower.strip_prefix("ability ")) {
         let (ability, target) = rest.split_once(" at ").map(|(ability, target)| (ability, Some(target))).unwrap_or((rest, None));
-        cast_ability(ctx, room_id, actor_id, actor_name, ability.trim(), target);
+        cast_ability(ctx, room_id, actor_id, actor_name, ability.trim(), target, false);
         return Ok(true);
     }
     if matches!(lower.as_str(), "exits" | "directions") {
@@ -4531,6 +4872,9 @@ fn handle_rpg_command(
         clear_actor_spawn_protection(ctx, actor_id);
         set_cooldown(ctx, actor_id, "basic-attack", basic_attack_cooldown_ms(ctx, actor_id));
         let next_health = current_health.saturating_sub(damage).max(health_definition.minimum);
+        interrupt_actor_casts(ctx, &target_id, room_id, "by taking damage");
+        wear_equipped_weapon(ctx, actor_id, room_id);
+        wear_equipped_armor(ctx, &target_id, room_id);
         set_actor_stat_current(ctx, &target_id, &health_definition, next_health);
         let result = if next_health <= health_definition.minimum { format!(" {target_name} is defeated.") } else { format!(" {target_name} has {next_health} {} remaining.", health_definition.name) };
         add_message(ctx, Some(room_id.to_string()), Some(actor_id.to_string()), Some(actor_name.to_string()), None, "combat",
@@ -4713,6 +5057,7 @@ pub fn submit_command(
         exit.from_room.as_deref() == Some(room_id.as_str()) && exit.verb.eq_ignore_ascii_case(movement)
     }) {
         if let Some(destination) = exit.to_room {
+            interrupt_actor_casts(ctx, &actor_id, &room_id, "by moving");
             if is_profile {
                 if let Some(profile) = ctx.db.profile().id().find(&actor_id) { ctx.db.profile().id().update(Profile { current_room: Some(destination.clone()), ..profile }); }
             } else if let Some(character) = ctx.db.character().id().find(&actor_id) {

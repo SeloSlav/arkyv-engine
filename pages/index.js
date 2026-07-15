@@ -121,22 +121,24 @@ export default function HomePage({ marketingSite }) {
         <meta name="theme-color" content="#050711" />
       </Head>
 
-      <div className="arkyv-app-shell landing-shell relative overflow-hidden text-white">
-        <HamburgerIcon />
+      <div className="arkyv-app-shell landing-shell relative text-white">
+        <HamburgerIcon mobileOnly />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-[58rem] overflow-hidden" aria-hidden="true"><div className="landing-aurora landing-aurora--cyan" /><div className="landing-aurora landing-aurora--pink" /><div className="landing-horizon" /></div>
 
-        <header className="relative z-20 mx-auto flex h-20 w-full max-w-[1440px] items-center px-4 pr-20 sm:px-6 sm:pr-24 lg:px-10">
-          <a href="#top" className="group flex items-center gap-3" aria-label="Arkyv Engine home">
-            <span className="relative grid h-10 w-10 place-items-center overflow-hidden rounded-xl border border-cyan-300/25 bg-slate-950 shadow-lg shadow-cyan-950/50"><Image src="/arkyv_logo.jpg" alt="" width={40} height={40} className="h-full w-full object-cover transition duration-300 group-hover:scale-110" /></span>
-            <span><span className="block text-sm font-black uppercase tracking-[0.2em] text-slate-100">Arkyv</span><span className="block text-[0.54rem] font-semibold uppercase tracking-[0.28em] text-cyan-300/65">World engine</span></span>
+        <header className="sticky top-0 z-40 w-full border-b border-white/10 bg-black/95 shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl">
+          <div className="mx-auto flex h-20 w-full max-w-[1440px] items-center px-4 pr-20 sm:px-6 sm:pr-24 lg:px-10 lg:pr-10">
+          <a href="#top" className="group flex items-center gap-2 sm:gap-3" aria-label="Arkyv Engine home">
+            <Image src="/arkyv_logo.jpg" alt="" width={64} height={64} priority className="h-16 w-16 object-contain drop-shadow-[0_0_18px_rgba(34,211,238,0.16)] transition duration-300 group-hover:scale-105" />
+            <span><span className="block text-base font-black uppercase tracking-[0.2em] text-slate-100">Arkyv</span><span className="block text-[0.58rem] font-semibold uppercase tracking-[0.28em] text-cyan-300/65">World engine</span></span>
           </a>
-          <nav className="ml-auto hidden items-center gap-7 pr-5 text-xs font-semibold text-slate-400 lg:flex" aria-label="Landing page navigation">
+          <nav className="ml-auto hidden items-center gap-8 text-xs font-semibold text-slate-400 lg:flex" aria-label="Landing page navigation">
             <a href="#builder" className="transition hover:text-cyan-200">World builder</a><a href="#features" className="transition hover:text-cyan-200">Features</a><a href="#architecture" className="transition hover:text-cyan-200">How it works</a><a href="https://github.com/SeloSlav/arkyv-engine" target="_blank" rel="noopener noreferrer" className="transition hover:text-cyan-200">GitHub <span aria-hidden="true">↗</span></a>
           </nav>
+          </div>
         </header>
 
         <main id="top" className="relative z-10">
-          <section className="mx-auto grid w-full max-w-[1440px] items-center gap-14 px-4 pb-20 pt-12 sm:px-6 sm:pt-16 lg:min-h-[calc(100vh-5rem)] lg:grid-cols-[minmax(0,0.92fr)_minmax(520px,1.08fr)] lg:gap-12 lg:px-10 lg:pb-24 lg:pt-12">
+          <section className="mx-auto grid w-full max-w-[1440px] items-center gap-14 px-4 pb-20 pt-12 sm:px-6 sm:pt-16 lg:min-h-[calc(100vh-6rem)] lg:grid-cols-[minmax(0,0.92fr)_minmax(520px,1.08fr)] lg:gap-12 lg:px-10 lg:pb-24 lg:pt-12">
             <div className="relative z-10 max-w-3xl">
               <div className="mb-7 inline-flex items-center gap-2.5 rounded-full border border-cyan-300/20 bg-cyan-300/[0.055] px-3.5 py-2 text-[0.62rem] font-bold uppercase tracking-[0.2em] text-cyan-100 backdrop-blur-xl"><span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-300 opacity-50" /><span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-300" /></span>Open-source multiplayer world engine</div>
               <h1 className="text-[clamp(3.2rem,7.1vw,6.9rem)] font-black leading-[0.88] tracking-[-0.064em] text-slate-50">Worlds with<span className="landing-gradient-text mt-1 block pb-2">memory.</span></h1>

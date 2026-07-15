@@ -141,6 +141,7 @@ export const ActorStat = __t.object("ActorStat", {
   statDefinitionId: __t.string(),
   baseValue: __t.i32(),
   currentValue: __t.i32(),
+  investedPoints: __t.u32(),
   updatedAt: __t.timestamp(),
 });
 export type ActorStat = __Infer<typeof ActorStat>;
@@ -431,6 +432,9 @@ export const StatDefinition = __t.object("StatDefinition", {
   updatedAt: __t.timestamp(),
   perLevelGain: __t.i32(),
   regenerationPerSecond: __t.i32(),
+  playerAllocatable: __t.bool(),
+  pointCost: __t.u32(),
+  pointsPerRank: __t.i32(),
 });
 export type StatDefinition = __Infer<typeof StatDefinition>;
 

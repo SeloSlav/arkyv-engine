@@ -6,6 +6,7 @@
 import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
+import AdminActorActionReducer from "../admin_actor_action_reducer";
 import ClientConnectedReducer from "../client_connected_reducer";
 import CompleteNpcCommandReducer from "../complete_npc_command_reducer";
 import DeleteCurrentAccountReducer from "../delete_current_account_reducer";
@@ -15,6 +16,7 @@ import InstallRpgStarterKitReducer from "../install_rpg_starter_kit_reducer";
 import SubmitCommandReducer from "../submit_command_reducer";
 import UpdateRowsReducer from "../update_rows_reducer";
 
+export type AdminActorActionParams = __Infer<typeof AdminActorActionReducer>;
 export type ClientConnectedParams = __Infer<typeof ClientConnectedReducer>;
 export type CompleteNpcCommandParams = __Infer<typeof CompleteNpcCommandReducer>;
 export type DeleteCurrentAccountParams = __Infer<typeof DeleteCurrentAccountReducer>;

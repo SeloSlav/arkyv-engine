@@ -107,7 +107,7 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
         const nextDefinitions = new Map((definitionsResult.data || []).map((definition) => [definition.id, definition]));
         const overrides = new Map((actorStatsResult.data || []).map((row) => [row.stat_definition_id, row]));
         const equipped = (objectsResult.data || []).filter((object) => object.location_kind === 'equipped');
-        const equipmentBonus = (statId) => equipped.reduce((total, object) => {
+        const equipmentBonus = (statId) => equipped.filter((object) => Number(object.durability) > 0).reduce((total, object) => {
             const modifier = nextDefinitions.get(object.definition_id)?.stat_modifiers?.[statId];
             return total + (Number(modifier) || 0);
         }, 0);
@@ -120,7 +120,7 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
             const elapsedSeconds = Math.max(0, Math.floor((Date.now() - updatedAt) / 1000));
             const rawValue = Math.min(rawBase, (row?.current_value ?? definition.default_value) + elapsedSeconds * Math.max(0, Number(definition.regeneration_per_second) || 0));
             const bonus = equipmentBonus(definition.id);
-            return { ...definition, value: rawValue + bonus, rawValue, baseValue: rawBase + bonus, bonus };
+            return { ...definition, value: rawValue + bonus, rawValue, baseValue: rawBase + bonus, bonus, investedPoints: Number(row?.invested_points) || 0 };
         }));
         const room = (roomsResult.data || []).find((candidate) => candidate.id === actor.current_room);
         const region = (regionsResult.data || []).find((candidate) => candidate.name === room?.region_name);
@@ -157,7 +157,7 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
     const atLevelCap = level >= Math.max(1, Number(progressionConfig?.max_level) || 60);
     const inventoryCapacity = Math.max(0, Number(progressionConfig?.base_inventory_slots ?? 20))
         + Math.max(0, level - 1) * Math.max(0, Number(progressionConfig?.inventory_slots_per_level ?? 0))
-        + equipped.reduce((total, object) => total + (Number(definitions.get(object.definition_id)?.inventory_slots_bonus) || 0), 0);
+        + equipped.filter((object) => Number(object.durability) > 0).reduce((total, object) => total + (Number(definitions.get(object.definition_id)?.inventory_slots_bonus) || 0), 0);
     const slotCapacity = new Map(equipmentSlots.map((slot) => [slot.id, Number(slot.capacity) || 1]));
     const grantedAbilityIds = new Set(abilityGrants.map((grant) => grant.ability_id));
     const statById = new Map(stats.map((stat) => [stat.id, stat]));
@@ -256,6 +256,7 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
                                             <button type="button" onClick={() => run(`examine ${definition?.name || object.definition_id}`)} className="min-w-0 flex-1 text-left">
                                                 <span className="block truncate text-xs font-semibold text-slate-100">{definition?.name || object.definition_id}</span>
                                                 <span className="block truncate text-[0.6rem] uppercase tracking-wider text-cyan-300/70">{object.equipped_slot || definition?.equipment_slot || 'equipped'} · {equipped.filter((item) => (item.equipped_slot || definitions.get(item.definition_id)?.equipment_slot) === (object.equipped_slot || definition?.equipment_slot)).length}/{slotCapacity.get(object.equipped_slot || definition?.equipment_slot) || 1}</span>
+                                                <span className={`mt-0.5 block text-[0.6rem] uppercase tracking-wider ${Number(object.durability) > 0 ? 'text-slate-500' : 'text-rose-300'}`}>{Number(object.durability) > 0 ? `${object.durability} durability` : 'Broken · bonuses disabled'}</span>
                                             </button>
                                             <button type="button" onClick={() => run(`unequip ${definition?.name || object.definition_id}`)} className="arkyv-chip">Remove</button>
                                         </div>
@@ -282,6 +283,7 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
                                             <div className="min-w-0 flex-1">
                                                 <button type="button" onClick={() => run(`examine ${name}`)} className="block max-w-full truncate text-left text-xs font-semibold text-slate-100">{name}{object.quantity > 1 ? ` ×${object.quantity}` : ''}</button>
                                                 <p className="mt-0.5 truncate text-[0.65rem] text-slate-500">{definition?.description || definition?.primitive_kind || 'Inventory item'}</p>
+                                                {canEquip && <p className={`mt-1 text-[0.62rem] ${Number(object.durability) > 0 ? 'text-slate-500' : 'text-rose-300'}`}>{Number(object.durability) > 0 ? `${object.durability} durability` : 'Broken'}</p>}
                                                 <div className="mt-2 flex flex-wrap gap-1.5">
                                                     {canEquip && <button type="button" onClick={() => run(`equip ${name}`)} className="arkyv-chip arkyv-chip--accent">Equip</button>}
                                                     {canUse && <button type="button" onClick={() => run(`use ${name}`)} className="arkyv-chip arkyv-chip--accent">Use</button>}
@@ -304,6 +306,11 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
                         {stats.map((stat) => {
                             const max = Math.max(Number(stat.baseValue) || Number(stat.value) || 1, 1);
                             const progress = Math.min(100, Math.max(0, (Number(stat.value) / max) * 100));
+                            const pointCost = Math.max(1, Number(stat.point_cost) || 1);
+                            const pointsPerRank = Math.max(1, Number(stat.points_per_rank) || 1);
+                            const canTrain = stat.player_allocatable !== false
+                                && Number(progression.unspent_stat_points) >= pointCost
+                                && Number(stat.baseValue) - Number(stat.bonus || 0) < Number(stat.maximum);
                             return (
                                 <article key={stat.id} className="rounded-xl border border-slate-800 bg-black/20 p-3">
                                     <div className="flex items-baseline justify-between gap-3">
@@ -312,6 +319,12 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
                                     </div>
                                     <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500" style={{ width: `${progress}%` }} /></div>
                                     {stat.bonus !== 0 && <p className="mt-1.5 text-[0.62rem] text-emerald-300">Equipment {stat.bonus > 0 ? '+' : ''}{stat.bonus}</p>}
+                                    {stat.player_allocatable !== false && (
+                                        <div className="mt-2 flex items-center justify-between gap-2 border-t border-slate-800/80 pt-2">
+                                            <span className="text-[0.6rem] text-slate-500">+{pointsPerRank} for {pointCost} point{pointCost === 1 ? '' : 's'} · {stat.investedPoints} invested</span>
+                                            <button type="button" disabled={!canTrain} onClick={() => run(`train ${stat.id} 1`)} className="rounded-md border border-amber-400/30 bg-amber-400/10 px-2 py-1 text-[0.62rem] font-semibold text-amber-100 transition hover:bg-amber-400/20 disabled:cursor-not-allowed disabled:opacity-35">Train</button>
+                                        </div>
+                                    )}
                                 </article>
                             );
                         })}
@@ -344,10 +357,10 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
                             {activeQuestCards.map(({ row, quest }) => {
                                 const objectives = questObjectives.filter((objective) => objective.quest_id === quest.id);
                                 const turnInNpc = nearbyNpcs.find((npc) => npc.id === quest.turn_in_npc_id);
-                                return <article key={row.id} className={`rounded-xl border p-3 ${row.status === 'ready' ? 'border-emerald-400/30 bg-emerald-500/[0.05]' : 'border-slate-800 bg-black/20'}`}><div className="flex items-start justify-between gap-3"><div><h4 className="text-sm font-semibold text-slate-100">{quest.title}</h4><p className="mt-1 text-[0.68rem] leading-5 text-slate-500">{quest.description}</p></div><span className={`text-[0.6rem] uppercase tracking-wider ${row.status === 'ready' ? 'text-emerald-300' : 'text-amber-300'}`}>{row.status}</span></div><div className="mt-3 space-y-1.5">{objectives.map((objective) => { const progress = Math.min(Number(objective.required_count) || 1, progressByObjective.get(objective.id) || 0); const done = progress >= Number(objective.required_count || 1); return <div key={objective.id} className="flex items-center justify-between gap-3 text-xs"><span className={done ? 'text-emerald-300' : 'text-slate-400'}>{done ? 'âœ“' : 'â—‹'} {objectiveLabel(objective)}</span><span className="text-slate-600">{progress}/{objective.required_count}</span></div>; })}</div>{turnInNpc && <div className="mt-3 flex justify-end"><button type="button" onClick={() => run(row.status === 'ready' ? `turn in ${quest.title}` : `quest ${turnInNpc.alias || turnInNpc.name}`)} className="arkyv-chip arkyv-chip--accent">{row.status === 'ready' ? `Turn in to ${turnInNpc.name}` : `Ask ${turnInNpc.name}`}</button></div>}</article>;
+                                return <article key={row.id} className={`rounded-xl border p-3 ${row.status === 'ready' ? 'border-emerald-400/30 bg-emerald-500/[0.05]' : 'border-slate-800 bg-black/20'}`}><div className="flex items-start justify-between gap-3"><div><h4 className="text-sm font-semibold text-slate-100">{quest.title}</h4><p className="mt-1 text-[0.68rem] leading-5 text-slate-500">{quest.description}</p></div><span className={`text-[0.6rem] uppercase tracking-wider ${row.status === 'ready' ? 'text-emerald-300' : 'text-amber-300'}`}>{row.status}</span></div><div className="mt-3 space-y-1.5">{objectives.map((objective) => { const progress = Math.min(Number(objective.required_count) || 1, progressByObjective.get(objective.id) || 0); const done = progress >= Number(objective.required_count || 1); return <div key={objective.id} className="flex items-center justify-between gap-3 text-xs"><span className={done ? 'text-emerald-300' : 'text-slate-400'}>{done ? '✓' : '○'} {objectiveLabel(objective)}</span><span className="text-slate-600">{progress}/{objective.required_count}</span></div>; })}</div>{turnInNpc && <div className="mt-3 flex justify-end"><button type="button" onClick={() => run(row.status === 'ready' ? `turn in ${quest.title}` : `quest ${turnInNpc.alias || turnInNpc.name}`)} className="arkyv-chip arkyv-chip--accent">{row.status === 'ready' ? `Turn in to ${turnInNpc.name}` : `Ask ${turnInNpc.name}`}</button></div>}</article>;
                             })}
                         </div>
-                        <div className="space-y-2"><h3 className="text-[0.65rem] font-semibold uppercase tracking-[0.18em] text-slate-400">Available here</h3>{availableQuests.length === 0 && <p className="rounded-lg border border-dashed border-slate-800 p-4 text-center text-xs text-slate-600">No new quests are offered in this room.</p>}{availableQuests.map((quest) => { const giver = npcsById.get(quest.quest_giver_npc_id); return <div key={quest.id} className="rounded-xl border border-slate-800 bg-black/20 p-3"><h4 className="text-sm font-semibold text-slate-100">{quest.title}</h4><p className="mt-1 text-[0.68rem] leading-5 text-slate-500">{quest.description}</p><div className="mt-2 flex items-center justify-between gap-3 text-[0.62rem] text-slate-500"><span>{quest.xp_reward} XP Â· {quest.gold_reward} gold</span><button type="button" onClick={() => run(`accept ${quest.title}`)} className="arkyv-chip arkyv-chip--accent">Accept from {giver?.name || 'NPC'}</button></div></div>; })}</div>
+                        <div className="space-y-2"><h3 className="text-[0.65rem] font-semibold uppercase tracking-[0.18em] text-slate-400">Available here</h3>{availableQuests.length === 0 && <p className="rounded-lg border border-dashed border-slate-800 p-4 text-center text-xs text-slate-600">No new quests are offered in this room.</p>}{availableQuests.map((quest) => { const giver = npcsById.get(quest.quest_giver_npc_id); return <div key={quest.id} className="rounded-xl border border-slate-800 bg-black/20 p-3"><h4 className="text-sm font-semibold text-slate-100">{quest.title}</h4><p className="mt-1 text-[0.68rem] leading-5 text-slate-500">{quest.description}</p><div className="mt-2 flex items-center justify-between gap-3 text-[0.62rem] text-slate-500"><span>{quest.xp_reward} XP · {quest.gold_reward} gold</span><button type="button" onClick={() => run(`accept ${quest.title}`)} className="arkyv-chip arkyv-chip--accent">Accept from {giver?.name || 'NPC'}</button></div></div>; })}</div>
                         <div className="border-t border-slate-800 pt-3"><h3 className="mb-2 text-[0.65rem] font-semibold uppercase tracking-[0.18em] text-slate-400">Faction standing</h3><div className="flex flex-wrap gap-2">{factions.map((faction) => { const value = reputationByFaction.has(faction.id) ? reputationByFaction.get(faction.id) : Number(faction.starting_reputation) || 0; const standing = value <= Number(faction.hostile_threshold) ? 'Hostile' : value >= Number(faction.friendly_threshold) ? 'Friendly' : 'Neutral'; return <button key={faction.id} type="button" onClick={() => run('reputation')} className={`arkyv-chip ${standing === 'Hostile' ? 'text-rose-300' : standing === 'Friendly' ? 'text-emerald-300' : ''}`}>{faction.name}: {standing} ({value >= 0 ? '+' : ''}{value})</button>; })}</div></div>
                     </div>
                 )}

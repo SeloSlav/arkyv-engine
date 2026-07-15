@@ -258,6 +258,33 @@ img[alt*="visualization"] {
   image-rendering: crisp-edges;
 }
 
+@keyframes arkyv-navigation-slide-in {
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes arkyv-navigation-pop-in {
+  from { opacity: 0; transform: translateY(-0.5rem) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.arkyv-navigation-panel {
+  animation: arkyv-navigation-slide-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+#builder,
+#features,
+#architecture {
+  scroll-margin-top: 5rem;
+}
+
+@media (min-width: 1024px) {
+  .arkyv-navigation-panel {
+    animation-name: arkyv-navigation-pop-in;
+    animation-duration: 160ms;
+  }
+}
+
 @media (max-width: 640px) {
   ::-webkit-scrollbar { width: 5px; height: 5px; }
 }
@@ -276,6 +303,7 @@ img[alt*="visualization"] {
   --landing-cyan: 34, 211, 238;
   --landing-pink: 217, 70, 239;
   background-color: #050711;
+  overflow-x: clip;
 }
 
 .landing-aurora {

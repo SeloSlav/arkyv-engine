@@ -23,4 +23,7 @@ export default __t.row({
   updatedAt: __t.timestamp().name("updated_at"),
   perLevelGain: __t.i32().name("per_level_gain"),
   regenerationPerSecond: __t.i32().name("regeneration_per_second"),
+  playerAllocatable: __t.bool().name("player_allocatable"),
+  pointCost: __t.u32().name("point_cost"),
+  pointsPerRank: __t.i32().name("points_per_rank"),
 });

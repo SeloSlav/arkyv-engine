@@ -16,5 +16,6 @@ export default __t.row({
   statDefinitionId: __t.string().name("stat_definition_id"),
   baseValue: __t.i32().name("base_value"),
   currentValue: __t.i32().name("current_value"),
+  investedPoints: __t.u32().name("invested_points"),
   updatedAt: __t.timestamp().name("updated_at"),
 });
