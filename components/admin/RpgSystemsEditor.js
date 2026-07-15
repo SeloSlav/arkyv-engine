@@ -13,6 +13,11 @@ const PRIMITIVE_PRESETS = [
 const TAB_OPTIONS = [
     { id: 'objects', label: 'Object primitives' },
     { id: 'stats', label: 'Hero stats' },
+    { id: 'abilities', label: 'Abilities & magic' },
+    { id: 'factions', label: 'Factions & reputation' },
+    { id: 'quests', label: 'Quests' },
+    { id: 'progression', label: 'Levels & inventory' },
+    { id: 'slots', label: 'Equipment slots' },
     { id: 'instances', label: 'Placed objects' },
     { id: 'loot', label: 'Enemy loot' },
     { id: 'actors', label: 'Actor values' },
@@ -25,14 +30,22 @@ const buttonClass = 'rounded-md border border-cyan-400/50 bg-cyan-500/10 px-4 py
 const emptyDefinition = () => ({
     id: '', name: '', description: '', primitive_kind: 'item', icon: '◇', image_url: '', tags: '', portable: true,
     stackable: false, max_stack: 1, capacity: 0, equipment_slot: '', weapon_damage: 0, armor_value: 0,
-    scales_with_stat: '', fuel_value: 0, burn_rate: 0, accepted_fuel_tags: '', stat_modifiers: '{}',
+    scales_with_stat: '', attack_cooldown_ms: 2000, inventory_slots_bonus: 0, fuel_value: 0, burn_rate: 0, accepted_fuel_tags: '', stat_modifiers: '{}',
     use_stat_id: '', use_delta: 0, use_consume: true,
 });
 
-const emptyStat = () => ({ id: '', name: '', description: '', role: '', minimum: 0, maximum: 100, default_value: 10, visible: true });
+const emptyStat = () => ({ id: '', name: '', description: '', role: '', minimum: 0, maximum: 100, default_value: 10, per_level_gain: 0, regeneration_per_second: 0, visible: true });
 const emptyInstance = () => ({ id: '', definition_id: '', location_kind: 'room', location_id: '', quantity: 1, equipped_slot: '', durability: 100, fuel_remaining: 0, is_active: false, state_json: '{}' });
 const emptyActorStat = () => ({ id: '', actor_id: '', stat_definition_id: '', base_value: 0, current_value: 0 });
 const emptyLootEntry = () => ({ id: '', npc_id: '', definition_id: '', minimum_quantity: 1, maximum_quantity: 1, chance_percent: 100 });
+const emptyProgression = () => ({ id: 'world', max_level: 60, base_xp: 100, growth_percent: 15, base_inventory_slots: 20, inventory_slots_per_level: 1, stat_points_per_level: 0 });
+const emptyAbility = () => ({ id: '', name: '', description: '', icon: '✦', school: 'physical', effect_type: 'damage', target_type: 'enemy', resource_stat_id: '', resource_cost: 0, cooldown_ms: 2000, cast_time_ms: 0, power_min: 1, power_max: 4, scales_with_stat: '', scaling_percent: 0, effect_stat_id: 'health', mitigation_type: 'none', required_level: 1, auto_learn: true, enabled: true });
+const emptySlot = () => ({ id: '', name: '', capacity: 1, sort_order: 100 });
+const emptyGrant = () => ({ actor_id: '', ability_id: '' });
+const emptyFaction = () => ({ id: '', name: '', description: '', starting_reputation: 0, minimum_reputation: -3000, maximum_reputation: 3000, hostile_threshold: -1000, friendly_threshold: 1000, attack_penalty: -100, kill_penalty: -500 });
+const emptyQuest = () => ({ id: '', title: '', description: '', quest_giver_npc_id: '', turn_in_npc_id: '', required_level: 1, required_faction_id: '', required_reputation: 0, repeatable: false, active: true, xp_reward: 0, gold_reward: 0, reputation_faction_id: '', reputation_reward: 0 });
+const emptyObjective = () => ({ id: '', quest_id: '', objective_type: 'explore_room', target_id: '', description: '', required_count: 1, sort_order: 0, consume_on_turn_in: false });
+const emptyQuestReward = () => ({ id: '', quest_id: '', definition_id: '', quantity: 1 });
 
 function csvToArray(value) {
     return String(value || '').split(',').map((part) => part.trim()).filter(Boolean);
@@ -86,6 +99,8 @@ function definitionPayload(form) {
         equipment_slot: form.equipment_slot || null,
         weapon_damage: Math.max(0, Number(form.weapon_damage) || 0),
         armor_value: Math.max(0, Number(form.armor_value) || 0),
+        attack_cooldown_ms: Math.max(0, Number(form.attack_cooldown_ms) || 0),
+        inventory_slots_bonus: Math.max(0, Number(form.inventory_slots_bonus) || 0),
         scales_with_stat: form.scales_with_stat || null,
         fuel_value: Math.max(0, Number(form.fuel_value) || 0),
         burn_rate: Math.max(0, Number(form.burn_rate) || 0),
@@ -119,16 +134,40 @@ export default function RpgSystemsEditor({ enabled }) {
     const [npcs, setNpcs] = useState([]);
     const [actorStats, setActorStats] = useState([]);
     const [lootEntries, setLootEntries] = useState([]);
+    const [progressionConfigs, setProgressionConfigs] = useState([]);
+    const [actorProgressions, setActorProgressions] = useState([]);
+    const [abilities, setAbilities] = useState([]);
+    const [abilityGrants, setAbilityGrants] = useState([]);
+    const [equipmentSlots, setEquipmentSlots] = useState([]);
+    const [factions, setFactions] = useState([]);
+    const [actorReputations, setActorReputations] = useState([]);
+    const [quests, setQuests] = useState([]);
+    const [questObjectives, setQuestObjectives] = useState([]);
+    const [questRewards, setQuestRewards] = useState([]);
     const [definitionForm, setDefinitionForm] = useState(emptyDefinition);
     const [statForm, setStatForm] = useState(emptyStat);
     const [instanceForm, setInstanceForm] = useState(emptyInstance);
     const [actorStatForm, setActorStatForm] = useState(emptyActorStat);
     const [lootForm, setLootForm] = useState(emptyLootEntry);
+    const [progressionForm, setProgressionForm] = useState(emptyProgression);
+    const [abilityForm, setAbilityForm] = useState(emptyAbility);
+    const [slotForm, setSlotForm] = useState(emptySlot);
+    const [grantForm, setGrantForm] = useState(emptyGrant);
+    const [factionForm, setFactionForm] = useState(emptyFaction);
+    const [questForm, setQuestForm] = useState(emptyQuest);
+    const [objectiveForm, setObjectiveForm] = useState(emptyObjective);
+    const [questRewardForm, setQuestRewardForm] = useState(emptyQuestReward);
     const [editingDefinition, setEditingDefinition] = useState(null);
     const [editingStat, setEditingStat] = useState(null);
     const [editingInstance, setEditingInstance] = useState(null);
     const [editingActorStat, setEditingActorStat] = useState(null);
     const [editingLootEntry, setEditingLootEntry] = useState(null);
+    const [editingAbility, setEditingAbility] = useState(null);
+    const [editingSlot, setEditingSlot] = useState(null);
+    const [editingFaction, setEditingFaction] = useState(null);
+    const [editingQuest, setEditingQuest] = useState(null);
+    const [editingObjective, setEditingObjective] = useState(null);
+    const [editingQuestReward, setEditingQuestReward] = useState(null);
     const [busy, setBusy] = useState(false);
     const [generatingImage, setGeneratingImage] = useState(false);
     const [message, setMessage] = useState(null);
@@ -154,6 +193,16 @@ export default function RpgSystemsEditor({ enabled }) {
             spacetime.from('npcs').select('id, name').order('name'),
             spacetime.from('actor_stats').select('*'),
             spacetime.from('loot_table_entries').select('*'),
+            spacetime.from('progression_configs').select('*'),
+            spacetime.from('actor_progressions').select('*'),
+            spacetime.from('ability_definitions').select('*').order('required_level'),
+            spacetime.from('actor_abilities').select('*'),
+            spacetime.from('equipment_slot_definitions').select('*').order('sort_order'),
+            spacetime.from('faction_definitions').select('*').order('name'),
+            spacetime.from('actor_faction_reputations').select('*'),
+            spacetime.from('quest_definitions').select('*').order('title'),
+            spacetime.from('quest_objectives').select('*').order('sort_order'),
+            spacetime.from('quest_item_rewards').select('*'),
         ]);
         const firstError = results.find((result) => result.error)?.error;
         if (firstError) throw firstError;
@@ -165,6 +214,18 @@ export default function RpgSystemsEditor({ enabled }) {
         setNpcs(results[5].data || []);
         setActorStats(results[6].data || []);
         setLootEntries(results[7].data || []);
+        const nextProgressionConfigs = results[8].data || [];
+        setProgressionConfigs(nextProgressionConfigs);
+        setProgressionForm({ ...emptyProgression(), ...(nextProgressionConfigs[0] || {}) });
+        setActorProgressions(results[9].data || []);
+        setAbilities(results[10].data || []);
+        setAbilityGrants(results[11].data || []);
+        setEquipmentSlots(results[12].data || []);
+        setFactions(results[13].data || []);
+        setActorReputations(results[14].data || []);
+        setQuests(results[15].data || []);
+        setQuestObjectives(results[16].data || []);
+        setQuestRewards(results[17].data || []);
     }, [enabled, spacetime]);
 
     useEffect(() => {
@@ -242,6 +303,7 @@ export default function RpgSystemsEditor({ enabled }) {
             ...statForm,
             id: statForm.id.trim(), name: statForm.name.trim(), description: statForm.description.trim(), role: statForm.role || null,
             minimum: Number(statForm.minimum) || 0, maximum: Number(statForm.maximum) || 0, default_value: Number(statForm.default_value) || 0,
+            per_level_gain: Number(statForm.per_level_gain) || 0, regeneration_per_second: Math.max(0, Number(statForm.regeneration_per_second) || 0),
         };
         if (!payload.id || !payload.name) { setMessage({ type: 'error', text: 'Stat id and name are required.' }); return; }
         const ok = await run(
@@ -252,6 +314,91 @@ export default function RpgSystemsEditor({ enabled }) {
         );
         if (ok) { setEditingStat(null); setStatForm(emptyStat()); }
     };
+
+    const saveProgression = async () => {
+        const payload = {
+            ...progressionForm,
+            id: progressionForm.id || 'world',
+            max_level: Math.max(1, Number(progressionForm.max_level) || 1),
+            base_xp: Math.max(1, Number(progressionForm.base_xp) || 1),
+            growth_percent: Math.max(0, Number(progressionForm.growth_percent) || 0),
+            base_inventory_slots: Math.max(0, Number(progressionForm.base_inventory_slots) || 0),
+            inventory_slots_per_level: Math.max(0, Number(progressionForm.inventory_slots_per_level) || 0),
+            stat_points_per_level: Math.max(0, Number(progressionForm.stat_points_per_level) || 0),
+        };
+        await run(
+            () => progressionConfigs.length
+                ? spacetime.from('progression_configs').update(payload).eq('id', progressionConfigs[0].id).select()
+                : spacetime.from('progression_configs').insert(payload).select(),
+            'Level curve and inventory rules saved.',
+        );
+    };
+
+    const saveAbility = async () => {
+        const minimum = Math.max(0, Number(abilityForm.power_min) || 0);
+        const payload = {
+            ...abilityForm,
+            id: abilityForm.id.trim(), name: abilityForm.name.trim(), description: abilityForm.description.trim(),
+            resource_stat_id: abilityForm.resource_stat_id || null,
+            resource_cost: Math.max(0, Number(abilityForm.resource_cost) || 0),
+            cooldown_ms: Math.max(0, Number(abilityForm.cooldown_ms) || 0),
+            cast_time_ms: Math.max(0, Number(abilityForm.cast_time_ms) || 0),
+            power_min: minimum,
+            power_max: Math.max(minimum, Number(abilityForm.power_max) || minimum),
+            scales_with_stat: abilityForm.scales_with_stat || null,
+            scaling_percent: Math.max(0, Number(abilityForm.scaling_percent) || 0),
+            effect_stat_id: abilityForm.effect_stat_id || null,
+            required_level: Math.max(1, Number(abilityForm.required_level) || 1),
+        };
+        if (!payload.id || !payload.name) { setMessage({ type: 'error', text: 'Ability id and name are required.' }); return; }
+        const ok = await run(
+            () => editingAbility
+                ? spacetime.from('ability_definitions').update(payload).eq('id', editingAbility).select()
+                : spacetime.from('ability_definitions').insert(payload).select(),
+            editingAbility ? 'Ability updated.' : 'Ability created.',
+        );
+        if (ok) { setEditingAbility(null); setAbilityForm(emptyAbility()); }
+    };
+
+    const saveSlot = async () => {
+        const payload = { ...slotForm, id: slotForm.id.trim(), name: slotForm.name.trim(), capacity: Math.max(1, Number(slotForm.capacity) || 1), sort_order: Math.max(0, Number(slotForm.sort_order) || 0) };
+        if (!payload.id || !payload.name) { setMessage({ type: 'error', text: 'Slot id and name are required.' }); return; }
+        const ok = await run(
+            () => editingSlot
+                ? spacetime.from('equipment_slot_definitions').update(payload).eq('id', editingSlot).select()
+                : spacetime.from('equipment_slot_definitions').insert(payload).select(),
+            editingSlot ? 'Equipment slot updated.' : 'Equipment slot created.',
+        );
+        if (ok) { setEditingSlot(null); setSlotForm(emptySlot()); }
+    };
+
+    const saveGrant = async () => {
+        if (!grantForm.actor_id || !grantForm.ability_id) { setMessage({ type: 'error', text: 'Choose an actor and ability.' }); return; }
+        const payload = { id: `${grantForm.actor_id}::${grantForm.ability_id}`, ...grantForm };
+        const ok = await run(() => spacetime.from('actor_abilities').insert(payload).select(), 'Ability granted.');
+        if (ok) setGrantForm(emptyGrant());
+    };
+
+    const saveActorProgression = (row) => run(
+        () => spacetime.from('actor_progressions').update({
+            level: Math.max(1, Number(row.level) || 1),
+            experience: Math.max(0, Number(row.experience) || 0),
+            unspent_stat_points: Math.max(0, Number(row.unspent_stat_points) || 0),
+        }).eq('id', row.id).select(),
+        `Progression saved for ${actorsById.get(row.actor_id)?.label || row.actor_id}.`,
+    );
+
+    const curvePreview = useMemo(() => {
+        const levels = [];
+        let required = Math.max(1, Number(progressionForm.base_xp) || 1);
+        const growth = Math.max(0, Number(progressionForm.growth_percent) || 0);
+        const count = Math.min(10, Math.max(1, Number(progressionForm.max_level) || 1) - 1);
+        for (let level = 1; level <= count; level += 1) {
+            levels.push({ level, required });
+            required = Math.max(required + 1, Math.floor((required * (100 + growth)) / 100));
+        }
+        return levels;
+    }, [progressionForm.base_xp, progressionForm.growth_percent, progressionForm.max_level]);
 
     const validLocationTargets = useMemo(() => {
         if (instanceForm.location_kind === 'room') return rooms.map((room) => ({ id: room.id, label: room.name }));
@@ -317,6 +464,61 @@ export default function RpgSystemsEditor({ enabled }) {
         );
         if (ok) { setEditingLootEntry(null); setLootForm(emptyLootEntry()); }
     };
+
+    const saveFaction = async () => {
+        const minimum = Number(factionForm.minimum_reputation) || 0;
+        const maximum = Math.max(minimum, Number(factionForm.maximum_reputation) || 0);
+        const payload = {
+            ...factionForm, id: factionForm.id.trim(), name: factionForm.name.trim(), description: factionForm.description.trim(),
+            starting_reputation: Math.min(maximum, Math.max(minimum, Number(factionForm.starting_reputation) || 0)),
+            minimum_reputation: minimum, maximum_reputation: maximum,
+            hostile_threshold: Math.min(maximum, Math.max(minimum, Number(factionForm.hostile_threshold) || 0)),
+            friendly_threshold: Math.min(maximum, Math.max(minimum, Number(factionForm.friendly_threshold) || 0)),
+            attack_penalty: Number(factionForm.attack_penalty) || 0, kill_penalty: Number(factionForm.kill_penalty) || 0,
+        };
+        if (!payload.id || !payload.name) { setMessage({ type: 'error', text: 'Faction id and name are required.' }); return; }
+        const ok = await run(() => editingFaction ? spacetime.from('faction_definitions').update(payload).eq('id', editingFaction).select() : spacetime.from('faction_definitions').insert(payload).select(), editingFaction ? 'Faction updated.' : 'Faction created.');
+        if (ok) { setEditingFaction(null); setFactionForm(emptyFaction()); }
+    };
+
+    const saveActorReputation = (row) => run(
+        () => spacetime.from('actor_faction_reputations').update({ reputation: Number(row.reputation) || 0 }).eq('id', row.id).select(),
+        `Reputation saved for ${actorsById.get(row.actor_id)?.label || row.actor_id}.`,
+    );
+
+    const saveQuest = async () => {
+        const payload = {
+            ...questForm, id: questForm.id.trim(), title: questForm.title.trim(), description: questForm.description.trim(),
+            required_level: Math.max(1, Number(questForm.required_level) || 1), required_faction_id: questForm.required_faction_id || null,
+            required_reputation: Number(questForm.required_reputation) || 0, xp_reward: Math.max(0, Number(questForm.xp_reward) || 0),
+            gold_reward: Math.max(0, Number(questForm.gold_reward) || 0), reputation_faction_id: questForm.reputation_faction_id || null,
+            reputation_reward: Number(questForm.reputation_reward) || 0,
+        };
+        if (!payload.id || !payload.title || !payload.quest_giver_npc_id || !payload.turn_in_npc_id) { setMessage({ type: 'error', text: 'Quest id, title, giver, and turn-in NPC are required.' }); return; }
+        const ok = await run(() => editingQuest ? spacetime.from('quest_definitions').update(payload).eq('id', editingQuest).select() : spacetime.from('quest_definitions').insert(payload).select(), editingQuest ? 'Quest updated.' : 'Quest created.');
+        if (ok) { setEditingQuest(null); setQuestForm(emptyQuest()); }
+    };
+
+    const saveObjective = async () => {
+        const payload = { ...objectiveForm, id: objectiveForm.id || crypto.randomUUID(), description: objectiveForm.description.trim(), required_count: Math.max(1, Number(objectiveForm.required_count) || 1), sort_order: Math.max(0, Number(objectiveForm.sort_order) || 0) };
+        if (!payload.quest_id || !payload.target_id) { setMessage({ type: 'error', text: 'Choose a quest and objective target.' }); return; }
+        const ok = await run(() => editingObjective ? spacetime.from('quest_objectives').update(payload).eq('id', editingObjective).select() : spacetime.from('quest_objectives').insert(payload).select(), editingObjective ? 'Quest objective updated.' : 'Quest objective added.');
+        if (ok) { setEditingObjective(null); setObjectiveForm(emptyObjective()); }
+    };
+
+    const saveQuestReward = async () => {
+        const payload = { ...questRewardForm, id: questRewardForm.id || crypto.randomUUID(), quantity: Math.max(1, Number(questRewardForm.quantity) || 1) };
+        if (!payload.quest_id || !payload.definition_id) { setMessage({ type: 'error', text: 'Choose a quest and reward item.' }); return; }
+        const ok = await run(() => editingQuestReward ? spacetime.from('quest_item_rewards').update(payload).eq('id', editingQuestReward).select() : spacetime.from('quest_item_rewards').insert(payload).select(), editingQuestReward ? 'Quest item reward updated.' : 'Quest item reward added.');
+        if (ok) { setEditingQuestReward(null); setQuestRewardForm(emptyQuestReward()); }
+    };
+
+    const objectiveTargets = useMemo(() => {
+        if (objectiveForm.objective_type === 'explore_room') return rooms.map((row) => ({ id: row.id, name: row.name }));
+        if (objectiveForm.objective_type === 'acquire_item') return definitions.map((row) => ({ id: row.id, name: `${row.icon} ${row.name}` }));
+        if (objectiveForm.objective_type === 'kill_faction') return factions.map((row) => ({ id: row.id, name: row.name }));
+        return npcs.map((row) => ({ id: row.id, name: row.name }));
+    }, [definitions, factions, npcs, objectiveForm.objective_type, rooms]);
 
     const remove = (table, id, label) => run(() => spacetime.from(table).delete().eq('id', id), `${label} deleted.`);
 
@@ -407,11 +609,13 @@ export default function RpgSystemsEditor({ enabled }) {
                             <Field label="Burn rate / second"><input type="number" min="0" className={inputClass} value={definitionForm.burn_rate} onChange={(e) => setDefinitionForm((value) => ({ ...value, burn_rate: e.target.value }))} /></Field>
                         </div>
                         <Field label="Accepted fuel tags"><input className={inputClass} value={definitionForm.accepted_fuel_tags} onChange={(e) => setDefinitionForm((value) => ({ ...value, accepted_fuel_tags: e.target.value }))} placeholder="fuel, oil" /></Field>
-                        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                            <Field label="Equipment slot"><input className={inputClass} value={definitionForm.equipment_slot} onChange={(e) => setDefinitionForm((value) => ({ ...value, equipment_slot: e.target.value }))} placeholder="main-hand" /></Field>
+                        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                            <Field label="Equipment slot"><select className={inputClass} value={definitionForm.equipment_slot} onChange={(e) => setDefinitionForm((value) => ({ ...value, equipment_slot: e.target.value }))}><option value="">Not equippable</option>{definitionForm.equipment_slot && !equipmentSlots.some((slot) => slot.id === definitionForm.equipment_slot) && <option value={definitionForm.equipment_slot}>{definitionForm.equipment_slot} (legacy)</option>}{equipmentSlots.map((slot) => <option key={slot.id} value={slot.id}>{slot.name} · {slot.capacity} item{slot.capacity === 1 ? '' : 's'}</option>)}</select></Field>
                             <Field label="Weapon damage"><input type="number" min="0" className={inputClass} value={definitionForm.weapon_damage} onChange={(e) => setDefinitionForm((value) => ({ ...value, weapon_damage: e.target.value }))} /></Field>
                             <Field label="Armor value"><input type="number" min="0" className={inputClass} value={definitionForm.armor_value} onChange={(e) => setDefinitionForm((value) => ({ ...value, armor_value: e.target.value }))} /></Field>
                             <Field label="Scale with stat"><select className={inputClass} value={definitionForm.scales_with_stat} onChange={(e) => setDefinitionForm((value) => ({ ...value, scales_with_stat: e.target.value }))}><option value="">None</option>{stats.map((stat) => <option key={stat.id} value={stat.id}>{stat.name}</option>)}</select></Field>
+                            <Field label="Attack cooldown (ms)"><input type="number" min="0" step="100" className={inputClass} value={definitionForm.attack_cooldown_ms} onChange={(e) => setDefinitionForm((value) => ({ ...value, attack_cooldown_ms: e.target.value }))} /></Field>
+                            <Field label="Inventory slots bonus"><input type="number" min="0" className={inputClass} value={definitionForm.inventory_slots_bonus} onChange={(e) => setDefinitionForm((value) => ({ ...value, inventory_slots_bonus: e.target.value }))} /></Field>
                         </div>
                         <Field label="Equipment stat modifiers (JSON)"><textarea className={`${inputClass} min-h-24 font-mono text-xs`} value={definitionForm.stat_modifiers} onChange={(e) => setDefinitionForm((value) => ({ ...value, stat_modifiers: e.target.value }))} placeholder={'{"strength": 2}'} /></Field>
                         <div className="rounded-lg border border-slate-700/60 p-4"><p className="mb-3 text-xs uppercase tracking-[0.2em] text-slate-300">Use behavior</p><div className="grid gap-4 md:grid-cols-3"><Field label="Target stat"><select className={inputClass} value={definitionForm.use_stat_id} onChange={(e) => setDefinitionForm((value) => ({ ...value, use_stat_id: e.target.value }))}><option value="">No use action</option>{stats.map((stat) => <option key={stat.id} value={stat.id}>{stat.name}</option>)}</select></Field><Field label="Value change"><input type="number" className={inputClass} value={definitionForm.use_delta} onChange={(e) => setDefinitionForm((value) => ({ ...value, use_delta: e.target.value }))} /></Field><div className="flex items-end"><Check label="Consume one on use" checked={definitionForm.use_consume} onChange={(use_consume) => setDefinitionForm((value) => ({ ...value, use_consume }))} /></div></div></div>
@@ -422,22 +626,98 @@ export default function RpgSystemsEditor({ enabled }) {
 
             {activeTab === 'stats' && (
                 <div className="grid gap-6 p-4 sm:p-6 lg:grid-cols-[340px_1fr]">
-                    <div className="space-y-2">{stats.map((stat) => <button key={stat.id} type="button" aria-pressed={editingStat === stat.id} onClick={() => { setEditingStat(stat.id); setStatForm({ ...emptyStat(), ...stat, role: stat.role || '' }); }} className={`w-full rounded-lg border p-4 text-left ${editingStat === stat.id ? 'border-purple-300 bg-purple-500/15' : 'border-slate-700/70 bg-slate-950/40 hover:border-slate-500'}`}><span className="text-sm text-slate-100">{stat.name}</span><span className="mt-1 block text-xs text-slate-500">{stat.default_value} default · {stat.minimum}–{stat.maximum}{stat.role ? ` · ${stat.role}` : ''}</span></button>)}</div>
+                    <div className="space-y-2">{stats.map((stat) => <button key={stat.id} type="button" aria-pressed={editingStat === stat.id} onClick={() => { setEditingStat(stat.id); setStatForm({ ...emptyStat(), ...stat, role: stat.role || '' }); }} className={`w-full rounded-lg border p-4 text-left ${editingStat === stat.id ? 'border-purple-300 bg-purple-500/15' : 'border-slate-700/70 bg-slate-950/40 hover:border-slate-500'}`}><span className="text-sm text-slate-100">{stat.name}</span><span className="mt-1 block text-xs text-slate-500">{stat.default_value} base · +{stat.per_level_gain || 0}/level · {stat.regeneration_per_second || 0}/sec{stat.role ? ` · ${stat.role}` : ''}</span></button>)}</div>
                     <div className="space-y-5 rounded-xl border border-slate-700/70 bg-slate-950/35 p-5">
                         <div className="flex items-center justify-between"><h3 className="text-sm uppercase tracking-[0.25em] text-purple-200">{editingStat ? 'Edit hero stat' : 'New hero stat'}</h3>{editingStat && <button type="button" onClick={() => { setEditingStat(null); setStatForm(emptyStat()); }} className="text-xs text-slate-400">New</button>}</div>
                         <div className="grid gap-4 md:grid-cols-2"><Field label="Name"><input className={inputClass} value={statForm.name} onChange={(e) => setStatForm((value) => ({ ...value, name: e.target.value }))} /></Field><Field label="Stable id"><input disabled={Boolean(editingStat)} className={inputClass} value={statForm.id} onChange={(e) => setStatForm((value) => ({ ...value, id: e.target.value }))} /></Field></div>
                         <Field label="Description"><textarea className={`${inputClass} min-h-24`} value={statForm.description} onChange={(e) => setStatForm((value) => ({ ...value, description: e.target.value }))} /></Field>
-                        <div className="grid gap-4 md:grid-cols-4"><Field label="System role"><select className={inputClass} value={statForm.role} onChange={(e) => setStatForm((value) => ({ ...value, role: e.target.value }))}><option value="">Custom</option><option value="health">Health</option><option value="power">Combat power</option><option value="defense">Defense</option></select></Field><Field label="Minimum"><input type="number" className={inputClass} value={statForm.minimum} onChange={(e) => setStatForm((value) => ({ ...value, minimum: e.target.value }))} /></Field><Field label="Maximum"><input type="number" className={inputClass} value={statForm.maximum} onChange={(e) => setStatForm((value) => ({ ...value, maximum: e.target.value }))} /></Field><Field label="Default"><input type="number" className={inputClass} value={statForm.default_value} onChange={(e) => setStatForm((value) => ({ ...value, default_value: e.target.value }))} /></Field></div>
+                        <div className="grid gap-4 md:grid-cols-3"><Field label="System role"><select className={inputClass} value={statForm.role} onChange={(e) => setStatForm((value) => ({ ...value, role: e.target.value }))}><option value="">Custom</option><option value="health">Health / HP</option><option value="mana">Mana / MP</option><option value="energy">Energy</option><option value="focus">Focus</option><option value="power">Combat power</option><option value="defense">Defense</option></select></Field><Field label="Minimum"><input type="number" className={inputClass} value={statForm.minimum} onChange={(e) => setStatForm((value) => ({ ...value, minimum: e.target.value }))} /></Field><Field label="Hard maximum"><input type="number" className={inputClass} value={statForm.maximum} onChange={(e) => setStatForm((value) => ({ ...value, maximum: e.target.value }))} /></Field><Field label="Level 1 base"><input type="number" className={inputClass} value={statForm.default_value} onChange={(e) => setStatForm((value) => ({ ...value, default_value: e.target.value }))} /></Field><Field label="Gain per level"><input type="number" className={inputClass} value={statForm.per_level_gain} onChange={(e) => setStatForm((value) => ({ ...value, per_level_gain: e.target.value }))} /></Field><Field label="Regenerate / second"><input type="number" min="0" className={inputClass} value={statForm.regeneration_per_second} onChange={(e) => setStatForm((value) => ({ ...value, regeneration_per_second: e.target.value }))} /></Field></div>
                         <Check label="Visible on the hero sheet" checked={statForm.visible} onChange={(visible) => setStatForm((value) => ({ ...value, visible }))} />
                         <div className="flex justify-end gap-3">{editingStat && <button type="button" disabled={busy} onClick={() => remove('stat_definitions', editingStat, 'Hero stat').then(() => { setEditingStat(null); setStatForm(emptyStat()); })} className="rounded-md border border-rose-400/50 px-4 py-2 text-xs uppercase tracking-[0.18em] text-rose-200">Delete</button>}<button type="button" disabled={busy} onClick={saveStat} className={buttonClass}>Save stat</button></div>
                     </div>
                 </div>
             )}
 
+            {activeTab === 'abilities' && (
+                <div className="grid gap-6 p-4 sm:p-6 xl:grid-cols-[360px_1fr]">
+                    <div className="space-y-4">
+                        <div className="rounded-xl border border-fuchsia-400/20 bg-fuchsia-500/[0.04] p-4 text-xs leading-5 text-slate-400">Abilities are server-authoritative actions. Players use <span className="text-fuchsia-200">abilities</span> to inspect them and <span className="text-fuchsia-200">cast &lt;ability&gt; at &lt;target&gt;</span> to act.</div>
+                        <div className="space-y-2">{abilities.map((ability) => <button key={ability.id} type="button" aria-pressed={editingAbility === ability.id} onClick={() => { setEditingAbility(ability.id); setAbilityForm({ ...emptyAbility(), ...ability, resource_stat_id: ability.resource_stat_id || '', scales_with_stat: ability.scales_with_stat || '', effect_stat_id: ability.effect_stat_id || '' }); }} className={`w-full rounded-xl border p-4 text-left ${editingAbility === ability.id ? 'border-fuchsia-300 bg-fuchsia-500/15' : 'border-slate-700/70 bg-slate-950/40 hover:border-fuchsia-400/40'}`}><span className="flex items-center justify-between gap-3"><span className="text-sm text-slate-100">{ability.icon} {ability.name}</span><span className={ability.enabled ? 'text-[0.6rem] uppercase tracking-wider text-emerald-300' : 'text-[0.6rem] uppercase tracking-wider text-slate-600'}>{ability.enabled ? 'Enabled' : 'Disabled'}</span></span><span className="mt-1 block text-xs text-slate-500">Level {ability.required_level} · {ability.effect_type} · {ability.target_type} · {ability.cooldown_ms}ms</span></button>)}</div>
+                    </div>
+                    <div className="space-y-6">
+                        <div className="space-y-5 rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5">
+                            <div className="flex items-center justify-between"><h3 className="text-sm uppercase tracking-[0.25em] text-fuchsia-200">{editingAbility ? 'Edit ability' : 'New ability'}</h3>{editingAbility && <button type="button" onClick={() => { setEditingAbility(null); setAbilityForm(emptyAbility()); }} className="text-xs text-slate-400">New</button>}</div>
+                            <div className="grid gap-4 sm:grid-cols-[90px_1fr_1fr]"><Field label="Icon"><input className={inputClass} value={abilityForm.icon} onChange={(event) => setAbilityForm((value) => ({ ...value, icon: event.target.value }))} /></Field><Field label="Name"><input className={inputClass} value={abilityForm.name} onChange={(event) => setAbilityForm((value) => ({ ...value, name: event.target.value }))} /></Field><Field label="Stable id"><input disabled={Boolean(editingAbility)} className={inputClass} value={abilityForm.id} onChange={(event) => setAbilityForm((value) => ({ ...value, id: event.target.value }))} placeholder="firebolt" /></Field></div>
+                            <Field label="Description"><textarea className={`${inputClass} min-h-20`} value={abilityForm.description} onChange={(event) => setAbilityForm((value) => ({ ...value, description: event.target.value }))} /></Field>
+                            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Field label="School"><input className={inputClass} value={abilityForm.school} onChange={(event) => setAbilityForm((value) => ({ ...value, school: event.target.value }))} placeholder="fire, physical, arcane" /></Field><Field label="Effect"><select className={inputClass} value={abilityForm.effect_type} onChange={(event) => setAbilityForm((value) => ({ ...value, effect_type: event.target.value }))}><option value="damage">Damage</option><option value="heal">Heal</option><option value="restore">Restore resource</option></select></Field><Field label="Target"><select className={inputClass} value={abilityForm.target_type} onChange={(event) => setAbilityForm((value) => ({ ...value, target_type: event.target.value }))}><option value="enemy">Enemy</option><option value="self">Self</option><option value="ally">Ally</option></select></Field><Field label="Mitigation"><select className={inputClass} value={abilityForm.mitigation_type} onChange={(event) => setAbilityForm((value) => ({ ...value, mitigation_type: event.target.value }))}><option value="none">Direct / none</option><option value="armor">Defense + armor</option></select></Field></div>
+                            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Field label="Cost resource"><select className={inputClass} value={abilityForm.resource_stat_id} onChange={(event) => setAbilityForm((value) => ({ ...value, resource_stat_id: event.target.value }))}><option value="">Free</option>{stats.map((stat) => <option key={stat.id} value={stat.id}>{stat.name}</option>)}</select></Field><Field label="Resource cost"><input type="number" min="0" className={inputClass} value={abilityForm.resource_cost} onChange={(event) => setAbilityForm((value) => ({ ...value, resource_cost: event.target.value }))} /></Field><Field label="Cooldown (ms)"><input type="number" min="0" step="100" className={inputClass} value={abilityForm.cooldown_ms} onChange={(event) => setAbilityForm((value) => ({ ...value, cooldown_ms: event.target.value }))} /></Field><Field label="Cast time (ms)"><input type="number" min="0" step="100" className={inputClass} value={abilityForm.cast_time_ms} onChange={(event) => setAbilityForm((value) => ({ ...value, cast_time_ms: event.target.value }))} /></Field></div>
+                            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5"><Field label="Power minimum"><input type="number" min="0" className={inputClass} value={abilityForm.power_min} onChange={(event) => setAbilityForm((value) => ({ ...value, power_min: event.target.value }))} /></Field><Field label="Power maximum"><input type="number" min="0" className={inputClass} value={abilityForm.power_max} onChange={(event) => setAbilityForm((value) => ({ ...value, power_max: event.target.value }))} /></Field><Field label="Scale stat"><select className={inputClass} value={abilityForm.scales_with_stat} onChange={(event) => setAbilityForm((value) => ({ ...value, scales_with_stat: event.target.value }))}><option value="">No scaling</option>{stats.map((stat) => <option key={stat.id} value={stat.id}>{stat.name}</option>)}</select></Field><Field label="Scaling %"><input type="number" min="0" className={inputClass} value={abilityForm.scaling_percent} onChange={(event) => setAbilityForm((value) => ({ ...value, scaling_percent: event.target.value }))} /></Field><Field label="Affected stat"><select className={inputClass} value={abilityForm.effect_stat_id} onChange={(event) => setAbilityForm((value) => ({ ...value, effect_stat_id: event.target.value }))}><option value="">Health role fallback</option>{stats.map((stat) => <option key={stat.id} value={stat.id}>{stat.name}</option>)}</select></Field></div>
+                            <div className="grid gap-4 sm:grid-cols-3"><Field label="Required level"><input type="number" min="1" className={inputClass} value={abilityForm.required_level} onChange={(event) => setAbilityForm((value) => ({ ...value, required_level: event.target.value }))} /></Field><div className="flex items-end"><Check label="Learn automatically at level" checked={abilityForm.auto_learn} onChange={(auto_learn) => setAbilityForm((value) => ({ ...value, auto_learn }))} /></div><div className="flex items-end"><Check label="Enabled in the world" checked={abilityForm.enabled} onChange={(enabledValue) => setAbilityForm((value) => ({ ...value, enabled: enabledValue }))} /></div></div>
+                            <div className="flex justify-end gap-3">{editingAbility && <button type="button" disabled={busy} onClick={() => remove('ability_definitions', editingAbility, 'Ability').then(() => { setEditingAbility(null); setAbilityForm(emptyAbility()); })} className="rounded-md border border-rose-400/50 px-4 py-2 text-xs uppercase tracking-[0.18em] text-rose-200">Delete</button>}<button type="button" disabled={busy} onClick={saveAbility} className={buttonClass}>Save ability</button></div>
+                        </div>
+                        <div className="space-y-4 rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5"><div><h3 className="text-sm uppercase tracking-[0.22em] text-fuchsia-200">Explicit grants</h3><p className="mt-1 text-xs leading-5 text-slate-500">Grant a non-auto-learned ability, or grant one early. Level-based abilities do not need rows here.</p></div><div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]"><Field label="Actor"><select className={inputClass} value={grantForm.actor_id} onChange={(event) => setGrantForm((value) => ({ ...value, actor_id: event.target.value }))}><option value="">Choose actor…</option>{actors.map((actor) => <option key={actor.id} value={actor.id}>{actor.label}</option>)}</select></Field><Field label="Ability"><select className={inputClass} value={grantForm.ability_id} onChange={(event) => setGrantForm((value) => ({ ...value, ability_id: event.target.value }))}><option value="">Choose ability…</option>{abilities.map((ability) => <option key={ability.id} value={ability.id}>{ability.icon} {ability.name}</option>)}</select></Field><div className="flex items-end"><button type="button" disabled={busy} onClick={saveGrant} className={buttonClass}>Grant</button></div></div><div className="flex flex-wrap gap-2">{abilityGrants.map((grant) => <button key={grant.id} type="button" disabled={busy} onClick={() => remove('actor_abilities', grant.id, 'Ability grant')} className="rounded-full border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-rose-400 hover:text-rose-200">{actorsById.get(grant.actor_id)?.name || grant.actor_id} · {abilities.find((ability) => ability.id === grant.ability_id)?.name || grant.ability_id} ×</button>)}</div></div>
+                    </div>
+                </div>
+            )}
+
+            {activeTab === 'factions' && (
+                <div className="space-y-6 p-4 sm:p-6">
+                    <div className="grid gap-6 xl:grid-cols-[340px_1fr]">
+                        <div className="space-y-2">{factions.map((faction) => <button key={faction.id} type="button" onClick={() => { setEditingFaction(faction.id); setFactionForm({ ...emptyFaction(), ...faction }); }} className={`w-full rounded-xl border p-4 text-left ${editingFaction === faction.id ? 'border-cyan-300 bg-cyan-500/15' : 'border-slate-700/70 bg-slate-950/40 hover:border-cyan-400/40'}`}><span className="block text-sm text-slate-100">{faction.name}</span><span className="mt-1 block text-xs text-slate-500">{faction.id} Â· hostile â‰¤ {faction.hostile_threshold} Â· friendly â‰¥ {faction.friendly_threshold}</span></button>)}</div>
+                        <div className="space-y-5 rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5">
+                            <div className="flex items-center justify-between"><div><h3 className="text-sm uppercase tracking-[0.22em] text-cyan-200">{editingFaction ? 'Edit faction' : 'New faction'}</h3><p className="mt-1 text-xs text-slate-500">NPC faction ids connect combat consequences, guards, quest requirements, and rewards.</p></div>{editingFaction && <button type="button" onClick={() => { setEditingFaction(null); setFactionForm(emptyFaction()); }} className="text-xs text-slate-400">New</button>}</div>
+                            <div className="grid gap-4 sm:grid-cols-2"><Field label="Name"><input className={inputClass} value={factionForm.name} onChange={(event) => setFactionForm((value) => ({ ...value, name: event.target.value }))} /></Field><Field label="Stable id"><input disabled={Boolean(editingFaction)} className={inputClass} value={factionForm.id} onChange={(event) => setFactionForm((value) => ({ ...value, id: event.target.value }))} placeholder="settlement-watch" /></Field></div>
+                            <Field label="Description"><textarea className={`${inputClass} min-h-20`} value={factionForm.description} onChange={(event) => setFactionForm((value) => ({ ...value, description: event.target.value }))} /></Field>
+                            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Field label="Starting"><input type="number" className={inputClass} value={factionForm.starting_reputation} onChange={(event) => setFactionForm((value) => ({ ...value, starting_reputation: event.target.value }))} /></Field><Field label="Minimum"><input type="number" className={inputClass} value={factionForm.minimum_reputation} onChange={(event) => setFactionForm((value) => ({ ...value, minimum_reputation: event.target.value }))} /></Field><Field label="Maximum"><input type="number" className={inputClass} value={factionForm.maximum_reputation} onChange={(event) => setFactionForm((value) => ({ ...value, maximum_reputation: event.target.value }))} /></Field><Field label="Hostile at / below"><input type="number" className={inputClass} value={factionForm.hostile_threshold} onChange={(event) => setFactionForm((value) => ({ ...value, hostile_threshold: event.target.value }))} /></Field><Field label="Friendly at / above"><input type="number" className={inputClass} value={factionForm.friendly_threshold} onChange={(event) => setFactionForm((value) => ({ ...value, friendly_threshold: event.target.value }))} /></Field><Field label="Attack change"><input type="number" className={inputClass} value={factionForm.attack_penalty} onChange={(event) => setFactionForm((value) => ({ ...value, attack_penalty: event.target.value }))} /></Field><Field label="Kill change"><input type="number" className={inputClass} value={factionForm.kill_penalty} onChange={(event) => setFactionForm((value) => ({ ...value, kill_penalty: event.target.value }))} /></Field></div>
+                            <div className="flex justify-end gap-3">{editingFaction && <button type="button" disabled={busy} onClick={() => remove('faction_definitions', editingFaction, 'Faction').then(() => { setEditingFaction(null); setFactionForm(emptyFaction()); })} className="rounded-md border border-rose-400/50 px-4 py-2 text-xs uppercase tracking-[0.18em] text-rose-200">Delete</button>}<button type="button" disabled={busy} onClick={saveFaction} className={buttonClass}>Save faction</button></div>
+                        </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5"><h3 className="text-sm uppercase tracking-[0.22em] text-cyan-200">Actor standings</h3><p className="mt-1 text-xs text-slate-500">Rows appear after an actor first encounters a faction or receives a reputation change.</p><div className="mt-4 grid gap-3 lg:grid-cols-2">{actorReputations.map((row) => <div key={row.id} className="grid gap-3 rounded-lg border border-slate-800 bg-black/20 p-3 sm:grid-cols-[1fr_140px_auto] sm:items-end"><div><span className={labelClass}>Actor / faction</span><p className="mt-2 text-sm text-slate-200">{actorsById.get(row.actor_id)?.name || row.actor_id} Â· {factions.find((faction) => faction.id === row.faction_id)?.name || row.faction_id}</p></div><Field label="Reputation"><input type="number" className={inputClass} value={row.reputation} onChange={(event) => setActorReputations((values) => values.map((value) => value.id === row.id ? { ...value, reputation: event.target.value } : value))} /></Field><button type="button" disabled={busy} onClick={() => saveActorReputation(row)} className={buttonClass}>Save</button></div>)}</div></div>
+                </div>
+            )}
+
+            {activeTab === 'quests' && (
+                <div className="space-y-6 p-4 sm:p-6">
+                    <div className="grid gap-6 xl:grid-cols-[340px_1fr]">
+                        <div className="space-y-2">{quests.map((quest) => <button key={quest.id} type="button" onClick={() => { setEditingQuest(quest.id); setQuestForm({ ...emptyQuest(), ...quest, required_faction_id: quest.required_faction_id || '', reputation_faction_id: quest.reputation_faction_id || '' }); setObjectiveForm((value) => ({ ...value, quest_id: quest.id })); setQuestRewardForm((value) => ({ ...value, quest_id: quest.id })); }} className={`w-full rounded-xl border p-4 text-left ${editingQuest === quest.id ? 'border-amber-300 bg-amber-500/15' : 'border-slate-700/70 bg-slate-950/40 hover:border-amber-400/40'}`}><span className="flex items-center justify-between gap-3"><span className="text-sm text-slate-100">{quest.title}</span><span className={quest.active ? 'text-[0.6rem] uppercase text-emerald-300' : 'text-[0.6rem] uppercase text-slate-600'}>{quest.active ? 'Active' : 'Draft'}</span></span><span className="mt-1 block text-xs text-slate-500">{quest.id} Â· {quest.xp_reward} XP Â· {quest.gold_reward} gold</span></button>)}</div>
+                        <div className="space-y-5 rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5">
+                            <div className="flex items-center justify-between"><div><h3 className="text-sm uppercase tracking-[0.22em] text-amber-200">{editingQuest ? 'Edit quest' : 'New quest'}</h3><p className="mt-1 text-xs text-slate-500">Players accept from the giver, complete server-observed objectives, and report to the turn-in NPC.</p></div>{editingQuest && <button type="button" onClick={() => { setEditingQuest(null); setQuestForm(emptyQuest()); }} className="text-xs text-slate-400">New</button>}</div>
+                            <div className="grid gap-4 sm:grid-cols-2"><Field label="Title"><input className={inputClass} value={questForm.title} onChange={(event) => setQuestForm((value) => ({ ...value, title: event.target.value }))} /></Field><Field label="Stable id"><input disabled={Boolean(editingQuest)} className={inputClass} value={questForm.id} onChange={(event) => setQuestForm((value) => ({ ...value, id: event.target.value }))} placeholder="watch-first-patrol" /></Field></div>
+                            <Field label="Description"><textarea className={`${inputClass} min-h-24`} value={questForm.description} onChange={(event) => setQuestForm((value) => ({ ...value, description: event.target.value }))} /></Field>
+                            <div className="grid gap-4 sm:grid-cols-2"><Field label="Quest giver"><select className={inputClass} value={questForm.quest_giver_npc_id} onChange={(event) => setQuestForm((value) => ({ ...value, quest_giver_npc_id: event.target.value }))}><option value="">Choose NPCâ€¦</option>{npcs.map((npc) => <option key={npc.id} value={npc.id}>{npc.name}</option>)}</select></Field><Field label="Turn-in NPC"><select className={inputClass} value={questForm.turn_in_npc_id} onChange={(event) => setQuestForm((value) => ({ ...value, turn_in_npc_id: event.target.value }))}><option value="">Choose NPCâ€¦</option>{npcs.map((npc) => <option key={npc.id} value={npc.id}>{npc.name}</option>)}</select></Field></div>
+                            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Field label="Required level"><input type="number" min="1" className={inputClass} value={questForm.required_level} onChange={(event) => setQuestForm((value) => ({ ...value, required_level: event.target.value }))} /></Field><Field label="Required faction"><select className={inputClass} value={questForm.required_faction_id} onChange={(event) => setQuestForm((value) => ({ ...value, required_faction_id: event.target.value }))}><option value="">None</option>{factions.map((faction) => <option key={faction.id} value={faction.id}>{faction.name}</option>)}</select></Field><Field label="Required reputation"><input type="number" className={inputClass} value={questForm.required_reputation} onChange={(event) => setQuestForm((value) => ({ ...value, required_reputation: event.target.value }))} /></Field><Field label="XP reward"><input type="number" min="0" className={inputClass} value={questForm.xp_reward} onChange={(event) => setQuestForm((value) => ({ ...value, xp_reward: event.target.value }))} /></Field><Field label="Gold reward"><input type="number" min="0" className={inputClass} value={questForm.gold_reward} onChange={(event) => setQuestForm((value) => ({ ...value, gold_reward: event.target.value }))} /></Field><Field label="Reward faction"><select className={inputClass} value={questForm.reputation_faction_id} onChange={(event) => setQuestForm((value) => ({ ...value, reputation_faction_id: event.target.value }))}><option value="">None</option>{factions.map((faction) => <option key={faction.id} value={faction.id}>{faction.name}</option>)}</select></Field><Field label="Reputation reward"><input type="number" className={inputClass} value={questForm.reputation_reward} onChange={(event) => setQuestForm((value) => ({ ...value, reputation_reward: event.target.value }))} /></Field></div>
+                            <div className="grid gap-2 sm:grid-cols-2"><Check label="Repeatable" checked={questForm.repeatable} onChange={(repeatable) => setQuestForm((value) => ({ ...value, repeatable }))} /><Check label="Active / visible to players" checked={questForm.active} onChange={(active) => setQuestForm((value) => ({ ...value, active }))} /></div>
+                            <div className="flex justify-end gap-3">{editingQuest && <button type="button" disabled={busy} onClick={() => remove('quest_definitions', editingQuest, 'Quest').then(() => { setEditingQuest(null); setQuestForm(emptyQuest()); })} className="rounded-md border border-rose-400/50 px-4 py-2 text-xs uppercase tracking-[0.18em] text-rose-200">Delete</button>}<button type="button" disabled={busy} onClick={saveQuest} className={buttonClass}>Save quest</button></div>
+                        </div>
+                    </div>
+                    <div className="grid gap-6 xl:grid-cols-2">
+                        <div className="space-y-4 rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5"><div><h3 className="text-sm uppercase tracking-[0.22em] text-amber-200">Objectives</h3><p className="mt-1 text-xs text-slate-500">Explore rooms, acquire items, defeat an NPC or faction member, or speak to an NPC.</p></div><div className="flex flex-wrap gap-2">{questObjectives.filter((row) => !editingQuest || row.quest_id === editingQuest).map((row) => <button key={row.id} type="button" onClick={() => { setEditingObjective(row.id); setObjectiveForm({ ...emptyObjective(), ...row }); }} className="rounded-full border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-amber-400">{row.description || row.objective_type} Ã—{row.required_count}</button>)}</div><div className="grid gap-4 sm:grid-cols-2"><Field label="Quest"><select className={inputClass} value={objectiveForm.quest_id} onChange={(event) => setObjectiveForm((value) => ({ ...value, quest_id: event.target.value }))}><option value="">Choose questâ€¦</option>{quests.map((quest) => <option key={quest.id} value={quest.id}>{quest.title}</option>)}</select></Field><Field label="Objective type"><select className={inputClass} value={objectiveForm.objective_type} onChange={(event) => setObjectiveForm((value) => ({ ...value, objective_type: event.target.value, target_id: '' }))}><option value="explore_room">Explore a room</option><option value="acquire_item">Acquire an item</option><option value="kill_npc">Defeat an NPC</option><option value="kill_faction">Defeat faction members</option><option value="talk_npc">Speak to an NPC</option></select></Field><Field label="Target"><select className={inputClass} value={objectiveForm.target_id} onChange={(event) => setObjectiveForm((value) => ({ ...value, target_id: event.target.value }))}><option value="">Choose targetâ€¦</option>{objectiveTargets.map((target) => <option key={target.id} value={target.id}>{target.name}</option>)}</select></Field><Field label="Required count"><input type="number" min="1" className={inputClass} value={objectiveForm.required_count} onChange={(event) => setObjectiveForm((value) => ({ ...value, required_count: event.target.value }))} /></Field><Field label="Display order"><input type="number" min="0" className={inputClass} value={objectiveForm.sort_order} onChange={(event) => setObjectiveForm((value) => ({ ...value, sort_order: event.target.value }))} /></Field></div><Field label="Player-facing description"><input className={inputClass} value={objectiveForm.description} onChange={(event) => setObjectiveForm((value) => ({ ...value, description: event.target.value }))} placeholder="Leave blank for an automatic label" /></Field>{objectiveForm.objective_type === 'acquire_item' && <Check label="Consume required items on turn-in" checked={objectiveForm.consume_on_turn_in} onChange={(consume_on_turn_in) => setObjectiveForm((value) => ({ ...value, consume_on_turn_in }))} />}<div className="flex justify-end gap-3">{editingObjective && <button type="button" disabled={busy} onClick={() => remove('quest_objectives', editingObjective, 'Quest objective').then(() => { setEditingObjective(null); setObjectiveForm({ ...emptyObjective(), quest_id: editingQuest || '' }); })} className="rounded-md border border-rose-400/50 px-4 py-2 text-xs uppercase text-rose-200">Delete</button>}<button type="button" disabled={busy} onClick={saveObjective} className={buttonClass}>Save objective</button></div></div>
+                        <div className="space-y-4 rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5"><div><h3 className="text-sm uppercase tracking-[0.22em] text-amber-200">Item rewards</h3><p className="mt-1 text-xs text-slate-500">XP, gold, and reputation are configured above; add any number of inventory item rewards here.</p></div><div className="flex flex-wrap gap-2">{questRewards.filter((row) => !editingQuest || row.quest_id === editingQuest).map((row) => <button key={row.id} type="button" onClick={() => { setEditingQuestReward(row.id); setQuestRewardForm({ ...emptyQuestReward(), ...row }); }} className="rounded-full border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-amber-400">{definitionsById.get(row.definition_id)?.name || row.definition_id} Ã—{row.quantity}</button>)}</div><Field label="Quest"><select className={inputClass} value={questRewardForm.quest_id} onChange={(event) => setQuestRewardForm((value) => ({ ...value, quest_id: event.target.value }))}><option value="">Choose questâ€¦</option>{quests.map((quest) => <option key={quest.id} value={quest.id}>{quest.title}</option>)}</select></Field><Field label="Reward item"><select className={inputClass} value={questRewardForm.definition_id} onChange={(event) => setQuestRewardForm((value) => ({ ...value, definition_id: event.target.value }))}><option value="">Choose itemâ€¦</option>{definitions.filter((definition) => definition.portable).map((definition) => <option key={definition.id} value={definition.id}>{definition.icon} {definition.name}</option>)}</select></Field><Field label="Quantity"><input type="number" min="1" className={inputClass} value={questRewardForm.quantity} onChange={(event) => setQuestRewardForm((value) => ({ ...value, quantity: event.target.value }))} /></Field><div className="flex justify-end gap-3">{editingQuestReward && <button type="button" disabled={busy} onClick={() => remove('quest_item_rewards', editingQuestReward, 'Quest item reward').then(() => { setEditingQuestReward(null); setQuestRewardForm({ ...emptyQuestReward(), quest_id: editingQuest || '' }); })} className="rounded-md border border-rose-400/50 px-4 py-2 text-xs uppercase text-rose-200">Delete</button>}<button type="button" disabled={busy} onClick={saveQuestReward} className={buttonClass}>Save item reward</button></div></div>
+                    </div>
+                </div>
+            )}
+
+            {activeTab === 'progression' && (
+                <div className="space-y-6 p-4 sm:p-6">
+                    <div className="grid gap-6 xl:grid-cols-[1fr_420px]">
+                        <div className="space-y-5 rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5"><div><h3 className="text-sm uppercase tracking-[0.24em] text-amber-200">World progression curve</h3><p className="mt-1 text-xs leading-5 text-slate-500">XP is progress within the current level. Each next threshold grows by the configured percentage, so changing the formula does not rewrite accumulated character history.</p></div><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><Field label="Maximum level"><input type="number" min="1" className={inputClass} value={progressionForm.max_level} onChange={(event) => setProgressionForm((value) => ({ ...value, max_level: event.target.value }))} /></Field><Field label="XP for level 2"><input type="number" min="1" className={inputClass} value={progressionForm.base_xp} onChange={(event) => setProgressionForm((value) => ({ ...value, base_xp: event.target.value }))} /></Field><Field label="Threshold growth %"><input type="number" min="0" className={inputClass} value={progressionForm.growth_percent} onChange={(event) => setProgressionForm((value) => ({ ...value, growth_percent: event.target.value }))} /></Field><Field label="Base inventory slots"><input type="number" min="0" className={inputClass} value={progressionForm.base_inventory_slots} onChange={(event) => setProgressionForm((value) => ({ ...value, base_inventory_slots: event.target.value }))} /></Field><Field label="Slots gained / level"><input type="number" min="0" className={inputClass} value={progressionForm.inventory_slots_per_level} onChange={(event) => setProgressionForm((value) => ({ ...value, inventory_slots_per_level: event.target.value }))} /></Field><Field label="Stat points / level"><input type="number" min="0" className={inputClass} value={progressionForm.stat_points_per_level} onChange={(event) => setProgressionForm((value) => ({ ...value, stat_points_per_level: event.target.value }))} /></Field></div><div className="flex justify-end"><button type="button" disabled={busy} onClick={saveProgression} className={buttonClass}>Save progression rules</button></div></div>
+                        <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.04] p-4 sm:p-5"><h3 className="text-xs uppercase tracking-[0.22em] text-amber-200">Curve preview</h3><div className="mt-3 space-y-2">{curvePreview.length === 0 && <p className="text-xs text-slate-500">Level cap is 1.</p>}{curvePreview.map((entry) => <div key={entry.level} className="flex items-center justify-between rounded-lg border border-slate-800 bg-black/20 px-3 py-2 text-xs"><span className="text-slate-400">Level {entry.level} → {entry.level + 1}</span><strong className="text-amber-100">{entry.required.toLocaleString()} XP</strong></div>)}</div></div>
+                    </div>
+                    <div className="rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5"><div><h3 className="text-sm uppercase tracking-[0.22em] text-purple-200">Actor levels</h3><p className="mt-1 text-xs leading-5 text-slate-500">Runtime XP advances these automatically. Direct editing is useful for testing, moderation, and imported worlds.</p></div><div className="mt-4 grid gap-3 lg:grid-cols-2">{actorProgressions.filter((row) => actorsById.has(row.actor_id)).map((row) => <div key={row.id} className="grid gap-3 rounded-xl border border-slate-800 bg-black/20 p-3 sm:grid-cols-[1fr_90px_110px_110px_auto] sm:items-end"><div><span className={labelClass}>Actor</span><p className="mt-2 truncate text-sm text-slate-100">{actorsById.get(row.actor_id)?.label || row.actor_id}</p></div><Field label="Level"><input type="number" min="1" className={inputClass} value={row.level} onChange={(event) => setActorProgressions((values) => values.map((value) => value.id === row.id ? { ...value, level: event.target.value } : value))} /></Field><Field label="Current XP"><input type="number" min="0" className={inputClass} value={row.experience} onChange={(event) => setActorProgressions((values) => values.map((value) => value.id === row.id ? { ...value, experience: event.target.value } : value))} /></Field><Field label="Stat points"><input type="number" min="0" className={inputClass} value={row.unspent_stat_points} onChange={(event) => setActorProgressions((values) => values.map((value) => value.id === row.id ? { ...value, unspent_stat_points: event.target.value } : value))} /></Field><button type="button" disabled={busy} onClick={() => saveActorProgression(row)} className={buttonClass}>Save</button></div>)}</div></div>
+                </div>
+            )}
+
+            {activeTab === 'slots' && (
+                <div className="grid gap-6 p-4 sm:p-6 lg:grid-cols-[1fr_420px]">
+                    <div><div className="mb-4 rounded-xl border border-cyan-400/20 bg-cyan-500/[0.04] p-4 text-xs leading-5 text-slate-400">Each wearable primitive points to one slot id. Capacity controls multiplicity—use 2 for rings or trinkets and 1 for ordinary armor and weapons.</div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{equipmentSlots.map((slot) => <button key={slot.id} type="button" aria-pressed={editingSlot === slot.id} onClick={() => { setEditingSlot(slot.id); setSlotForm({ ...emptySlot(), ...slot }); }} className={`rounded-xl border p-4 text-left ${editingSlot === slot.id ? 'border-cyan-300 bg-cyan-500/15' : 'border-slate-700/70 bg-slate-950/40 hover:border-cyan-400/40'}`}><span className="block text-sm text-slate-100">{slot.name}</span><span className="mt-1 block text-xs text-slate-500">{slot.id} · capacity {slot.capacity} · order {slot.sort_order}</span></button>)}</div></div>
+                    <div className="space-y-4 rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5"><div className="flex items-center justify-between"><h3 className="text-sm uppercase tracking-[0.22em] text-cyan-200">{editingSlot ? 'Edit equipment slot' : 'New equipment slot'}</h3>{editingSlot && <button type="button" onClick={() => { setEditingSlot(null); setSlotForm(emptySlot()); }} className="text-xs text-slate-400">New</button>}</div><Field label="Display name"><input className={inputClass} value={slotForm.name} onChange={(event) => setSlotForm((value) => ({ ...value, name: event.target.value }))} placeholder="Finger" /></Field><Field label="Stable id"><input disabled={Boolean(editingSlot)} className={inputClass} value={slotForm.id} onChange={(event) => setSlotForm((value) => ({ ...value, id: event.target.value }))} placeholder="finger" /></Field><div className="grid grid-cols-2 gap-4"><Field label="Capacity"><input type="number" min="1" className={inputClass} value={slotForm.capacity} onChange={(event) => setSlotForm((value) => ({ ...value, capacity: event.target.value }))} /></Field><Field label="Display order"><input type="number" min="0" className={inputClass} value={slotForm.sort_order} onChange={(event) => setSlotForm((value) => ({ ...value, sort_order: event.target.value }))} /></Field></div><div className="flex justify-end gap-3">{editingSlot && <button type="button" disabled={busy} onClick={() => remove('equipment_slot_definitions', editingSlot, 'Equipment slot').then(() => { setEditingSlot(null); setSlotForm(emptySlot()); })} className="rounded-md border border-rose-400/50 px-4 py-2 text-xs uppercase tracking-[0.18em] text-rose-200">Delete</button>}<button type="button" disabled={busy} onClick={saveSlot} className={buttonClass}>Save slot</button></div></div>
+                </div>
+            )}
+
             {activeTab === 'instances' && (
                 <div className="grid gap-6 p-4 sm:p-6 xl:grid-cols-[1fr_420px]">
                     <div className="overflow-x-auto rounded-xl border border-slate-700/70"><div className="grid min-w-[680px] grid-cols-[1.2fr_1fr_1fr_auto] gap-3 border-b border-slate-700 bg-slate-950/60 px-4 py-3 text-[0.62rem] uppercase tracking-[0.16em] text-slate-500"><span>Object</span><span>Location</span><span>State</span><span /></div><div className="max-h-[560px] min-w-[680px] overflow-y-auto">{instances.map((instance) => { const definition = definitionsById.get(instance.definition_id); return <button key={instance.id} type="button" aria-pressed={editingInstance === instance.id} onClick={() => { setEditingInstance(instance.id); setInstanceForm({ ...emptyInstance(), ...instance, state_json: JSON.stringify(jsonObject(instance.state_json), null, 2), equipped_slot: instance.equipped_slot || '' }); }} className={`grid w-full grid-cols-[1.2fr_1fr_1fr_auto] gap-3 border-b border-slate-800 px-4 py-3 text-left text-xs ${editingInstance === instance.id ? 'bg-purple-500/15' : 'hover:bg-slate-800/50'}`}><span className="text-slate-100">{definition?.icon} {definition?.name || instance.definition_id} {instance.quantity > 1 ? `×${instance.quantity}` : ''}</span><span className="text-slate-400">{instance.location_kind} · {locationLabel(instance)}</span><span className="text-slate-400">{instance.is_active ? 'active' : 'idle'}{instance.fuel_remaining > 0 ? ` · fuel ${instance.fuel_remaining}` : ''}</span><span className="text-purple-300">Edit</span></button>; })}</div></div>
-                    <div className="space-y-4 rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5"><div className="flex items-center justify-between"><h3 className="text-sm uppercase tracking-[0.22em] text-purple-200">{editingInstance ? 'Edit instance' : 'Place object'}</h3>{editingInstance && <button type="button" onClick={() => { setEditingInstance(null); setInstanceForm(emptyInstance()); }} className="text-xs text-slate-400">New</button>}</div><Field label="Definition"><select className={inputClass} value={instanceForm.definition_id} onChange={(e) => setInstanceForm((value) => ({ ...value, definition_id: e.target.value }))}><option value="">Choose primitive…</option>{definitions.map((definition) => <option key={definition.id} value={definition.id}>{definition.icon} {definition.name}</option>)}</select></Field><div className="grid gap-4 sm:grid-cols-2"><Field label="Location type"><select className={inputClass} value={instanceForm.location_kind} onChange={(e) => setInstanceForm((value) => ({ ...value, location_kind: e.target.value, location_id: '' }))}><option value="room">Room</option><option value="inventory">Actor inventory</option><option value="equipped">Equipped by actor</option><option value="container">Inside container</option></select></Field><Field label="Location"><select className={inputClass} value={instanceForm.location_id} onChange={(e) => setInstanceForm((value) => ({ ...value, location_id: e.target.value }))}><option value="">Choose…</option>{validLocationTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</select></Field></div><div className="grid gap-4 sm:grid-cols-3"><Field label="Quantity"><input type="number" min="1" className={inputClass} value={instanceForm.quantity} onChange={(e) => setInstanceForm((value) => ({ ...value, quantity: e.target.value }))} /></Field><Field label="Durability"><input type="number" min="0" className={inputClass} value={instanceForm.durability} onChange={(e) => setInstanceForm((value) => ({ ...value, durability: e.target.value }))} /></Field><Field label="Fuel"><input type="number" min="0" className={inputClass} value={instanceForm.fuel_remaining} onChange={(e) => setInstanceForm((value) => ({ ...value, fuel_remaining: e.target.value }))} /></Field></div>{instanceForm.location_kind === 'equipped' && <Field label="Equipment slot"><input className={inputClass} value={instanceForm.equipped_slot} onChange={(e) => setInstanceForm((value) => ({ ...value, equipped_slot: e.target.value }))} /></Field>}<Check label="Active / burning" checked={instanceForm.is_active} onChange={(is_active) => setInstanceForm((value) => ({ ...value, is_active }))} /><Field label="Custom state (JSON)"><textarea className={`${inputClass} min-h-24 font-mono text-xs`} value={instanceForm.state_json} onChange={(e) => setInstanceForm((value) => ({ ...value, state_json: e.target.value }))} /></Field><div className="flex justify-end gap-3">{editingInstance && <button type="button" disabled={busy} onClick={() => remove('world_objects', editingInstance, 'Object instance').then(() => { setEditingInstance(null); setInstanceForm(emptyInstance()); })} className="rounded-md border border-rose-400/50 px-4 py-2 text-xs uppercase tracking-[0.18em] text-rose-200">Delete</button>}<button type="button" disabled={busy} onClick={saveInstance} className={buttonClass}>Save placement</button></div></div>
+                    <div className="space-y-4 rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5"><div className="flex items-center justify-between"><h3 className="text-sm uppercase tracking-[0.22em] text-purple-200">{editingInstance ? 'Edit instance' : 'Place object'}</h3>{editingInstance && <button type="button" onClick={() => { setEditingInstance(null); setInstanceForm(emptyInstance()); }} className="text-xs text-slate-400">New</button>}</div><Field label="Definition"><select className={inputClass} value={instanceForm.definition_id} onChange={(e) => setInstanceForm((value) => ({ ...value, definition_id: e.target.value }))}><option value="">Choose primitive…</option>{definitions.map((definition) => <option key={definition.id} value={definition.id}>{definition.icon} {definition.name}</option>)}</select></Field><div className="grid gap-4 sm:grid-cols-2"><Field label="Location type"><select className={inputClass} value={instanceForm.location_kind} onChange={(e) => setInstanceForm((value) => ({ ...value, location_kind: e.target.value, location_id: '' }))}><option value="room">Room</option><option value="inventory">Actor inventory</option><option value="equipped">Equipped by actor</option><option value="container">Inside container</option></select></Field><Field label="Location"><select className={inputClass} value={instanceForm.location_id} onChange={(e) => setInstanceForm((value) => ({ ...value, location_id: e.target.value }))}><option value="">Choose…</option>{validLocationTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</select></Field></div><div className="grid gap-4 sm:grid-cols-3"><Field label="Quantity"><input type="number" min="1" className={inputClass} value={instanceForm.quantity} onChange={(e) => setInstanceForm((value) => ({ ...value, quantity: e.target.value }))} /></Field><Field label="Durability"><input type="number" min="0" className={inputClass} value={instanceForm.durability} onChange={(e) => setInstanceForm((value) => ({ ...value, durability: e.target.value }))} /></Field><Field label="Fuel"><input type="number" min="0" className={inputClass} value={instanceForm.fuel_remaining} onChange={(e) => setInstanceForm((value) => ({ ...value, fuel_remaining: e.target.value }))} /></Field></div>{instanceForm.location_kind === 'equipped' && <Field label="Equipment slot"><select className={inputClass} value={instanceForm.equipped_slot} onChange={(e) => setInstanceForm((value) => ({ ...value, equipped_slot: e.target.value }))}><option value="">Use primitive default</option>{equipmentSlots.map((slot) => <option key={slot.id} value={slot.id}>{slot.name}</option>)}</select></Field>}<Check label="Active / burning" checked={instanceForm.is_active} onChange={(is_active) => setInstanceForm((value) => ({ ...value, is_active }))} /><Field label="Custom state (JSON)"><textarea className={`${inputClass} min-h-24 font-mono text-xs`} value={instanceForm.state_json} onChange={(e) => setInstanceForm((value) => ({ ...value, state_json: e.target.value }))} /></Field><div className="flex justify-end gap-3">{editingInstance && <button type="button" disabled={busy} onClick={() => remove('world_objects', editingInstance, 'Object instance').then(() => { setEditingInstance(null); setInstanceForm(emptyInstance()); })} className="rounded-md border border-rose-400/50 px-4 py-2 text-xs uppercase tracking-[0.18em] text-rose-200">Delete</button>}<button type="button" disabled={busy} onClick={saveInstance} className={buttonClass}>Save placement</button></div></div>
                 </div>
             )}
 

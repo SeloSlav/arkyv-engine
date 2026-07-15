@@ -33,4 +33,6 @@ export default __t.row({
   createdAt: __t.timestamp().name("created_at"),
   updatedAt: __t.timestamp().name("updated_at"),
   imageUrl: __t.option(__t.string()).name("image_url"),
+  attackCooldownMs: __t.u32().name("attack_cooldown_ms"),
+  inventorySlotsBonus: __t.u32().name("inventory_slots_bonus"),
 });

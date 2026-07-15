@@ -14,8 +14,8 @@ This repository uses **SpacetimeDB 2.0.1** for its authoritative backend. The pr
 - Visual region, room, exit, NPC, and RPG systems editor
 - Admin-authored NPC patrol routes, friendly/neutral/hostile disposition, attack-on-sight behavior, combat cadence, and respawning
 - Region-level safe/PvP rules with configurable player recovery rooms
-- Admin-defined items, containers, fuel burners, weapons, armor, consumables, equipment slots, and hero stats
-- Authoritative inventory, equipment, fuel consumption, stat effects, combat, defeat, chest, and enemy-loot reducers
+- Admin-defined levels, XP curve, HP/MP/energy/focus resources, regeneration, abilities, magic, items, equipment slots, and hero stats
+- Authoritative inventory limits, multi-item ring/trinket slots, weapon attack speed, ability costs/cooldowns, combat, defeat, chests, and enemy loot
 - Local saved worlds backed by persistent SpacetimeDB identity tokens
 - Multiple characters per saved world
 - Optional RetroDiffusion room scenes, NPC portraits, and inventory item art
@@ -141,17 +141,23 @@ The Rust module in `spacetimedb/src/lib.rs` defines these public replicated tabl
 | `region` | Region metadata, color themes, PvP policy, and defeat recovery room |
 | `room` | Locations, descriptions, images, and elevation |
 | `exit` | Directed room connections |
-| `npc` | Placement, personality, patrol, disposition, aggression, defeat, respawn, and portraits |
+| `npc` | Placement, personality, patrol, disposition, aggression, XP reward, defeat, respawn, and portraits |
 | `profile` | One identity-owned saved-world profile |
 | `character` | Identity-owned player characters |
 | `command` | Private command audit and pending AI work |
 | `room_message` | Realtime terminal messages |
 | `region_chat` | Realtime regional chat |
-| `stat_definition` | Admin-defined hero attributes and optional health/power/defense roles |
-| `object_definition` | Reusable item, container, fixture, weapon, armor, and consumable primitives |
+| `stat_definition` | Admin-defined attributes, resource roles, level growth, and regeneration |
+| `object_definition` | Reusable item, container, fixture, weapon, armor, and consumable primitives, including attack speed and inventory bonuses |
 | `world_object` | Concrete objects placed in rooms, containers, inventories, or equipment slots |
 | `actor_stat` | Sparse character/NPC stat overrides; absent rows inherit definition defaults |
 | `loot_table_entry` | Independently rolled object drops for defeated NPCs |
+| `progression_config` | Maximum level, XP curve formula, stat-point awards, and inventory capacity rules |
+| `actor_progression` | Persistent actor level, XP within the current level, and unspent stat points |
+| `ability_definition` | Authored magic/techniques with targeting, costs, pacing, power, scaling, and mitigation |
+| `actor_ability` | Explicit ability grants in addition to automatic level unlocks |
+| `actor_cooldown` | Server-authoritative readiness for basic attacks and abilities |
+| `equipment_slot_definition` | Wearable slot names, order, and capacity, such as two rings or two trinkets |
 
 Reducers are the only write path. They validate identity ownership for profiles and characters, require admin status for world editing, process deterministic commands server-side, and complete AI NPC responses returned by the stateless Next.js AI route.
 
@@ -159,19 +165,26 @@ The frontend consumes generated bindings in `generated/`. The client data layer 
 
 ## RPG systems studio
 
-Administrators can open `/admin` and use **RPG Systems Studio** to create game rules from reusable primitives. The built-in starter kit is optional and contains Health, Strength, Defense, firewood, a wooden box, a fuel-burning campfire, a sword, armor, and a healing potion. It can be installed repeatedly without overwriting edited definitions.
+Administrators can open `/admin` and use **RPG Systems Studio** to create game rules from reusable primitives. The built-in starter kit is optional and contains Health, Mana, Energy, Focus, Strength, Defense, starter abilities, wearable slots, firewood, a wooden box, a fuel-burning campfire, a sword, armor, and a healing potion. It can be installed repeatedly without overwriting edited definitions.
 
-The studio has five authoring surfaces:
+The studio has eight authoring surfaces:
 
-- **Object primitives** define presentation and pixel-art imagery, portability, stacking, container capacity, fuel production/acceptance, elapsed-time burn rate, equipment slot, weapon and armor values, stat scaling, equipment modifiers, and consumable stat effects.
-- **Hero stats** define numeric ranges, defaults, visibility, and optional system roles. Combat discovers Health, Combat Power, and Defense through these roles, so display names and additional custom stats remain game-specific.
+- **Object primitives** define presentation and pixel-art imagery, portability, stacking, container capacity, fuel production/acceptance, elapsed-time burn rate, wearable slot, weapon damage, armor, basic-attack cooldown, inventory-slot bonuses, stat scaling, equipment modifiers, and consumable effects.
+- **Hero stats** define numeric ranges, level-one bases, per-level gains, passive regeneration, visibility, and optional Health, Mana, Energy, Focus, Combat Power, and Defense roles. Additional resources and attributes can remain fully custom.
+- **Abilities & magic** define damage, healing, or resource restoration; enemy/self/ally targeting; resource stat and cost; cooldown and cast pacing; power range; stat scaling; affected stat; armor mitigation; required level; automatic learning; and explicit actor grants.
+- **Levels & inventory** defines the level cap, XP needed for level two, percentage threshold growth, stat points per level, base inventory slots, and slots gained per level. A live preview shows the first ten thresholds, and actor levels can be adjusted for testing or moderation.
+- **Equipment slots** define stable wearable locations, display order, and capacity. Ordinary slots default to one object, while the starter Finger and Trinket slots accept two.
 - **Placed objects** instantiate a primitive in a room, actor inventory, equipment slot, or another container. Instance state includes quantity, durability, remaining fuel, active/burning state, and a JSON extension object.
 - **Enemy loot** assigns portable object definitions to NPCs with independent drop chances and minimum/maximum quantities.
 - **Actor values** optionally override defaults for a particular hero or NPC. Actors without overrides automatically use the stat definition defaults.
 
-Region dialogs define whether player-versus-player combat is allowed throughout that region and where defeated players recover. NPC dialogs define whether an NPC is friendly, neutral, or hostile; whether a hostile NPC attacks on sight; its attack and respawn timing; and an ordered patrol route. Patrol stops must be joined by directed exits. World behavior advances deterministically as players issue commands, and `wait` explicitly advances a turn without taking another action.
+The XP requirement for each level starts at `base_xp` and is multiplied by `100% + growth_percent` for each subsequent level. XP is stored as progress within the current level, so changing the curve does not rewrite historical totals. When an NPC is defeated, its authored XP reward goes to the defeating player; crossing one or more thresholds applies every stat's per-level gain and reveals auto-learned abilities.
 
-Friendly NPCs cannot be attacked. Neutral NPCs can be attacked and retaliate. Hostile NPCs may attack automatically when configured. On defeat, players keep their inventory, recover their authored base health, and move to the region recovery room. Defeated NPCs leave authored drops in the room and either remain defeated or return to their spawn room after their configured delay.
+Region dialogs define whether player-versus-player combat is allowed throughout that region and where defeated players recover. NPC dialogs define whether an NPC is friendly, neutral, or hostile; whether a hostile NPC attacks on sight; its attack and respawn timing; XP reward; and an ordered patrol route. Patrol stops must be joined by directed exits. World behavior advances deterministically as players issue commands, and `wait` explicitly advances a turn without taking another action.
+
+Friendly NPCs cannot be attacked. Neutral NPCs can be attacked and retaliate. Hostile NPCs may attack automatically when configured. Basic attacks use the equipped weapon's server-enforced cooldown. Abilities separately enforce learning, valid targets, costs, cooldown/cast pacing, scaling, and mitigation. On defeat, players keep their inventory, recover their level-scaled base health, and move to the region recovery room. Defeated NPCs leave authored drops in the room and either remain defeated or return to their spawn room after their configured delay.
+
+Inventory capacity counts top-level stacks, not individual units in a stack. Level rules and equipped items can add capacity. Taking loot or unequipping a capacity-granting item is rejected when it would overflow the pack. Equipping respects the authored slot capacity and replaces the oldest occupied item only once that capacity is full.
 
 Chests use the same primitives as every other container: place a container instance in a room, then place object instances inside it. Players can inspect the chest, take individual contents, or collect all portable contents. No separate chest-only item model is required.
 
@@ -180,8 +193,10 @@ Fuel burners consume fuel according to elapsed server time whenever their state 
 Players can use the inventory/stat panel on `/play` or the corresponding terminal commands:
 
 ```text
-inventory                     list carried and equipped objects
-stats                         show visible hero stats and equipment bonuses
+inventory                     list carried/equipped objects and used/available slots
+stats                         show level, XP, resource pools, growth, and equipment bonuses
+abilities                     list learned, locked, granted, ready, and cooling-down abilities
+cast <ability> at <target>    use an enemy/ally ability; self abilities omit the target
 take <item>                   move a portable room object into inventory
 drop <item>                   place a carried object in the current room
 examine <object>              inspect state, fuel, or container contents
@@ -196,9 +211,9 @@ unequip <item-or-slot>        return equipped gear to inventory
 light <object>                start a fueled burner
 extinguish <object>           stop burning without discarding fuel
 use <item>                    apply its configured stat effect
-attack <target>               resolve configured stats, weapon, and armor
+attack <target>               resolve configured stats, weapon, armor, and attack speed
 combat                        show zone PvP rules and visible enemies
-rest                          restore base health when no hostile is present
+rest                          restore configured HP/MP/energy/focus pools when safe
 wait                          pass a turn and advance NPC behavior
 flee <direction>              leave combat through an authored exit
 ```
@@ -218,7 +233,7 @@ npm run smoke:rpg:compile         # Compile the isolated RPG reducer smoke test
 npm run smoke:rpg                 # Run it against arkyv-engine-runtime-test
 ```
 
-The smoke test expects a fresh local database named `arkyv-engine-runtime-test`. Publish the module to that name before running it, then delete the test database afterward. It verifies authoritative room checks, safe and open PvP, chest pickup, patrol movement, hostile attacks, player recovery, and enemy drops without touching the main `arkyv-engine` world.
+The smoke test expects a fresh local database named `arkyv-engine-runtime-test`. Publish the module to that name before running it, then delete the test database afterward. It verifies authoritative room checks, safe/open PvP, attack cooldowns, inventory overflow, patrol movement, XP and level growth, ability costs, resource regeneration, two-item equipment slots, hostile attacks, player recovery, and enemy drops without touching the main `arkyv-engine` world.
 
 The PowerShell deploy scripts invoke the installed Windows CLI at `SpacetimeDB/bin/2.0.1`. On macOS or Linux, run the equivalent commands directly:
 

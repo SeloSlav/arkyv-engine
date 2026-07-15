@@ -5,6 +5,7 @@
 
 use serde_json::Value;
 use spacetimedb::{reducer, Identity, ReducerContext, Table, Timestamp};
+use std::collections::BTreeMap;
 
 const CREATION_ROOM_ID: &str = "e58caed0-8268-419e-abe8-faa3833a1de6";
 const STARTING_ROOM_ID: &str = "a1b2c3d4-5678-90ab-cdef-123456789abc";
@@ -106,6 +107,16 @@ pub struct Npc {
     pub defeated_at: Option<Timestamp>,
     #[default(25)]
     pub xp_reward: u32,
+    #[default(false)]
+    pub is_guard: bool,
+    #[default(None::<String>)]
+    pub guard_greeting: Option<String>,
+    #[default(true)]
+    pub protect_players: bool,
+    #[default(true)]
+    pub protect_faction_members: bool,
+    #[default(120)]
+    pub guard_wanted_seconds: u32,
 }
 
 #[spacetimedb::table(accessor = exit, public)]
@@ -374,6 +385,139 @@ pub struct ActorCooldown {
     pub actor_id: String,
     pub action_id: String,
     pub ready_at_micros: i64,
+    pub updated_at: Timestamp,
+}
+
+/// An admin-authored political or social group. Reputation thresholds are
+/// inclusive: values at or below hostile are treated as hostile, while values
+/// at or above friendly are treated as friendly.
+#[spacetimedb::table(accessor = faction_definition, public)]
+#[derive(Clone)]
+pub struct FactionDefinition {
+    #[primary_key]
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub starting_reputation: i32,
+    pub minimum_reputation: i32,
+    pub maximum_reputation: i32,
+    pub hostile_threshold: i32,
+    pub friendly_threshold: i32,
+    pub attack_penalty: i32,
+    pub kill_penalty: i32,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = actor_faction_reputation, public)]
+#[derive(Clone)]
+pub struct ActorFactionReputation {
+    #[primary_key]
+    pub id: String,
+    pub actor_id: String,
+    pub faction_id: String,
+    pub reputation: i32,
+    pub updated_at: Timestamp,
+}
+
+/// Safe-region offenses persist briefly so guards can pursue an offender
+/// across rooms in the same region rather than responding only to one command.
+#[spacetimedb::table(accessor = actor_crime, public)]
+#[derive(Clone)]
+pub struct ActorCrime {
+    #[primary_key]
+    pub id: String,
+    pub actor_id: String,
+    pub region_id: String,
+    pub faction_id: Option<String>,
+    pub severity: u32,
+    pub wanted_until_micros: i64,
+    pub updated_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = quest_definition, public)]
+#[derive(Clone)]
+pub struct QuestDefinition {
+    #[primary_key]
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub quest_giver_npc_id: String,
+    pub turn_in_npc_id: String,
+    pub required_level: u32,
+    pub required_faction_id: Option<String>,
+    pub required_reputation: i32,
+    pub repeatable: bool,
+    pub active: bool,
+    pub xp_reward: u32,
+    pub gold_reward: i32,
+    pub reputation_faction_id: Option<String>,
+    pub reputation_reward: i32,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = quest_objective, public)]
+#[derive(Clone)]
+pub struct QuestObjective {
+    #[primary_key]
+    pub id: String,
+    pub quest_id: String,
+    pub objective_type: String,
+    pub target_id: String,
+    pub description: String,
+    pub required_count: u32,
+    pub sort_order: u32,
+    pub consume_on_turn_in: bool,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = quest_item_reward, public)]
+#[derive(Clone)]
+pub struct QuestItemReward {
+    #[primary_key]
+    pub id: String,
+    pub quest_id: String,
+    pub definition_id: String,
+    pub quantity: u32,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = actor_quest, public)]
+#[derive(Clone)]
+pub struct ActorQuest {
+    #[primary_key]
+    pub id: String,
+    pub actor_id: String,
+    pub quest_id: String,
+    pub status: String,
+    pub completion_count: u32,
+    pub accepted_at: Timestamp,
+    pub updated_at: Timestamp,
+    pub completed_at: Option<Timestamp>,
+}
+
+#[spacetimedb::table(accessor = actor_quest_progress, public)]
+#[derive(Clone)]
+pub struct ActorQuestProgress {
+    #[primary_key]
+    pub id: String,
+    pub actor_id: String,
+    pub quest_id: String,
+    pub objective_id: String,
+    pub progress: u32,
+    pub updated_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = actor_wallet, public)]
+#[derive(Clone)]
+pub struct ActorWallet {
+    #[primary_key]
+    pub id: String,
+    pub actor_id: String,
+    pub gold: i32,
     pub updated_at: Timestamp,
 }
 
@@ -682,6 +826,24 @@ fn seed_rpg_definitions(ctx: &ReducerContext) {
             ctx.db.ability_definition().insert(ability);
         }
     }
+
+    let watch_id = "settlement-watch".to_string();
+    if ctx.db.faction_definition().id().find(&watch_id).is_none() {
+        ctx.db.faction_definition().insert(FactionDefinition {
+            id: watch_id,
+            name: "Settlement Watch".to_string(),
+            description: "Guards and civic officials who keep the peace in settled regions.".to_string(),
+            starting_reputation: 0,
+            minimum_reputation: -3000,
+            maximum_reputation: 3000,
+            hostile_threshold: -1000,
+            friendly_threshold: 1000,
+            attack_penalty: -100,
+            kill_penalty: -500,
+            created_at: ctx.timestamp,
+            updated_at: ctx.timestamp,
+        });
+    }
 }
 
 fn seed_world(ctx: &ReducerContext) {
@@ -776,6 +938,11 @@ fn seed_world(ctx: &ReducerContext) {
             spawn_room: Some(CREATION_ROOM_ID.to_string()),
             defeated_at: None,
             xp_reward: 0,
+            is_guard: false,
+            guard_greeting: None,
+            protect_players: true,
+            protect_faction_members: true,
+            guard_wanted_seconds: 120,
         });
     }
 }
@@ -787,6 +954,12 @@ pub fn init(ctx: &ReducerContext) {
 
 #[reducer(client_connected)]
 pub fn client_connected(ctx: &ReducerContext) {
+    // Existing databases do not rerun `init` after a compatible schema publish.
+    // Seed the new progression layer once, without resurrecting starter content
+    // that an administrator deliberately removes later.
+    if ctx.db.progression_config().iter().next().is_none() {
+        seed_rpg_definitions(ctx);
+    }
     ensure_profile(ctx);
 }
 
@@ -970,6 +1143,11 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                 }
                 let power_min = i32_value(&row, "power_min", 1).max(0);
                 let power_max = i32_value(&row, "power_max", power_min).max(power_min);
+                for stat_id in [optional_string(&row, "resource_stat_id"), optional_string(&row, "scales_with_stat"), optional_string(&row, "effect_stat_id")].into_iter().flatten().filter(|value| !value.trim().is_empty()) {
+                    if ctx.db.stat_definition().id().find(&stat_id).is_none() {
+                        return Err(format!("Ability references missing stat: {stat_id}"));
+                    }
+                }
                 ctx.db.ability_definition().insert(AbilityDefinition {
                     id,
                     name: string(&row, "name", "Untitled ability"),
@@ -1026,6 +1204,134 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                     unspent_stat_points: u32_value(&row, "unspent_stat_points", 0),
                     updated_at: ctx.timestamp,
                 });
+            }
+        }
+        "faction_definitions" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = normalized_key(&string(&row, "id", &string(&row, "name", "")));
+                if id.is_empty() || ctx.db.faction_definition().id().find(&id).is_some() {
+                    return Err("Faction id is missing or already exists.".to_string());
+                }
+                let minimum_reputation = i32_value(&row, "minimum_reputation", -3000);
+                let maximum_reputation = i32_value(&row, "maximum_reputation", 3000).max(minimum_reputation);
+                ctx.db.faction_definition().insert(FactionDefinition {
+                    id,
+                    name: string(&row, "name", "Untitled faction"),
+                    description: string(&row, "description", ""),
+                    starting_reputation: i32_value(&row, "starting_reputation", 0).clamp(minimum_reputation, maximum_reputation),
+                    minimum_reputation,
+                    maximum_reputation,
+                    hostile_threshold: i32_value(&row, "hostile_threshold", -1000).clamp(minimum_reputation, maximum_reputation),
+                    friendly_threshold: i32_value(&row, "friendly_threshold", 1000).clamp(minimum_reputation, maximum_reputation),
+                    attack_penalty: i32_value(&row, "attack_penalty", -100).min(0),
+                    kill_penalty: i32_value(&row, "kill_penalty", -500).min(0),
+                    created_at: ctx.timestamp,
+                    updated_at: ctx.timestamp,
+                });
+            }
+        }
+        "actor_faction_reputations" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let actor_id = string(&row, "actor_id", "");
+                let faction_id = string(&row, "faction_id", "");
+                let faction = ctx.db.faction_definition().id().find(&faction_id).ok_or_else(|| "Faction does not exist.".to_string())?;
+                if !actor_exists(ctx, &actor_id) { return Err("Actor does not exist.".to_string()); }
+                let id = format!("{actor_id}::{faction_id}");
+                if ctx.db.actor_faction_reputation().id().find(&id).is_some() { return Err("That actor already has a reputation row for this faction.".to_string()); }
+                ctx.db.actor_faction_reputation().insert(ActorFactionReputation {
+                    id, actor_id, faction_id,
+                    reputation: i32_value(&row, "reputation", faction.starting_reputation).clamp(faction.minimum_reputation, faction.maximum_reputation),
+                    updated_at: ctx.timestamp,
+                });
+            }
+        }
+        "quest_definitions" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = normalized_key(&string(&row, "id", &string(&row, "title", "")));
+                let quest_giver_npc_id = string(&row, "quest_giver_npc_id", "");
+                let turn_in_npc_id = string(&row, "turn_in_npc_id", &quest_giver_npc_id);
+                if id.is_empty() || ctx.db.quest_definition().id().find(&id).is_some() { return Err("Quest id is missing or already exists.".to_string()); }
+                if ctx.db.npc().id().find(&quest_giver_npc_id).is_none() || ctx.db.npc().id().find(&turn_in_npc_id).is_none() {
+                    return Err("Quest giver and turn-in NPC must exist.".to_string());
+                }
+                for faction_id in [optional_string(&row, "required_faction_id"), optional_string(&row, "reputation_faction_id")].into_iter().flatten().filter(|value| !value.trim().is_empty()) {
+                    if ctx.db.faction_definition().id().find(&faction_id).is_none() { return Err(format!("Quest references missing faction: {faction_id}")); }
+                }
+                ctx.db.quest_definition().insert(QuestDefinition {
+                    id,
+                    title: string(&row, "title", "Untitled quest"),
+                    description: string(&row, "description", ""),
+                    quest_giver_npc_id,
+                    turn_in_npc_id,
+                    required_level: u32_value(&row, "required_level", 1).max(1),
+                    required_faction_id: optional_string(&row, "required_faction_id").filter(|value| !value.trim().is_empty()),
+                    required_reputation: i32_value(&row, "required_reputation", 0),
+                    repeatable: bool_value(&row, "repeatable", false),
+                    active: bool_value(&row, "active", true),
+                    xp_reward: u32_value(&row, "xp_reward", 0),
+                    gold_reward: i32_value(&row, "gold_reward", 0).max(0),
+                    reputation_faction_id: optional_string(&row, "reputation_faction_id").filter(|value| !value.trim().is_empty()),
+                    reputation_reward: i32_value(&row, "reputation_reward", 0),
+                    created_at: ctx.timestamp,
+                    updated_at: ctx.timestamp,
+                });
+            }
+        }
+        "quest_objectives" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = string(&row, "id", "");
+                let quest_id = string(&row, "quest_id", "");
+                let objective_type = string(&row, "objective_type", "explore_room").to_lowercase();
+                let target_id = string(&row, "target_id", "");
+                if id.is_empty() || ctx.db.quest_objective().id().find(&id).is_some() { return Err("Quest objective id is missing or already exists.".to_string()); }
+                if ctx.db.quest_definition().id().find(&quest_id).is_none() { return Err("Quest does not exist.".to_string()); }
+                let target_exists = match objective_type.as_str() {
+                    "explore_room" => ctx.db.room().id().find(&target_id).is_some(),
+                    "acquire_item" => ctx.db.object_definition().id().find(&target_id).is_some(),
+                    "kill_npc" | "talk_npc" => ctx.db.npc().id().find(&target_id).is_some(),
+                    "kill_faction" => ctx.db.faction_definition().id().find(&target_id).is_some(),
+                    _ => return Err("Objective type must be explore_room, acquire_item, kill_npc, kill_faction, or talk_npc.".to_string()),
+                };
+                if !target_exists { return Err("Quest objective target does not exist.".to_string()); }
+                ctx.db.quest_objective().insert(QuestObjective {
+                    id, quest_id, objective_type, target_id,
+                    description: string(&row, "description", ""),
+                    required_count: u32_value(&row, "required_count", 1).max(1),
+                    sort_order: u32_value(&row, "sort_order", 100),
+                    consume_on_turn_in: bool_value(&row, "consume_on_turn_in", false),
+                    created_at: ctx.timestamp,
+                    updated_at: ctx.timestamp,
+                });
+            }
+        }
+        "quest_item_rewards" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = string(&row, "id", "");
+                let quest_id = string(&row, "quest_id", "");
+                let definition_id = string(&row, "definition_id", "");
+                if id.is_empty() || ctx.db.quest_item_reward().id().find(&id).is_some() { return Err("Quest item reward id is missing or already exists.".to_string()); }
+                if ctx.db.quest_definition().id().find(&quest_id).is_none() || ctx.db.object_definition().id().find(&definition_id).is_none() {
+                    return Err("Quest reward requires an existing quest and object definition.".to_string());
+                }
+                ctx.db.quest_item_reward().insert(QuestItemReward {
+                    id, quest_id, definition_id,
+                    quantity: u32_value(&row, "quantity", 1).max(1),
+                    created_at: ctx.timestamp,
+                    updated_at: ctx.timestamp,
+                });
+            }
+        }
+        "actor_wallets" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let actor_id = string(&row, "actor_id", "");
+                if !actor_exists(ctx, &actor_id) || ctx.db.actor_wallet().id().find(&actor_id).is_some() { return Err("Wallet requires an existing actor without a wallet.".to_string()); }
+                ctx.db.actor_wallet().insert(ActorWallet { id: actor_id.clone(), actor_id, gold: i32_value(&row, "gold", 0).max(0), updated_at: ctx.timestamp });
             }
         }
         "world_objects" => {
@@ -1160,6 +1466,11 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                     spawn_room: optional_string(&row, "spawn_room").or_else(|| optional_string(&row, "current_room")),
                     defeated_at: None,
                     xp_reward: u32_value(&row, "xp_reward", 25),
+                    is_guard: bool_value(&row, "is_guard", false),
+                    guard_greeting: optional_string(&row, "guard_greeting"),
+                    protect_players: bool_value(&row, "protect_players", true),
+                    protect_faction_members: bool_value(&row, "protect_faction_members", true),
+                    guard_wanted_seconds: u32_value(&row, "guard_wanted_seconds", 120),
                 });
             }
         }
@@ -1352,8 +1663,9 @@ pub fn update_rows(
             require_admin(ctx)?;
             for id in ids {
                 let Some(existing) = ctx.db.progression_config().id().find(&id) else { continue };
+                let max_level = payload.get("max_level").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.max_level).max(1);
                 ctx.db.progression_config().id().update(ProgressionConfig {
-                    max_level: payload.get("max_level").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.max_level).max(1),
+                    max_level,
                     base_xp: payload.get("base_xp").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.base_xp).max(1),
                     growth_percent: payload.get("growth_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.growth_percent),
                     base_inventory_slots: payload.get("base_inventory_slots").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.base_inventory_slots),
@@ -1362,6 +1674,10 @@ pub fn update_rows(
                     updated_at: ctx.timestamp,
                     ..existing
                 });
+                let progressions = ctx.db.actor_progression().iter().filter(|row| row.level > max_level).collect::<Vec<_>>();
+                for progression in progressions {
+                    ctx.db.actor_progression().id().update(ActorProgression { level: max_level, experience: 0, updated_at: ctx.timestamp, ..progression });
+                }
             }
         }
         "equipment_slot_definitions" => {
@@ -1391,6 +1707,14 @@ pub fn update_rows(
                 }
                 let power_min = payload.get("power_min").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.power_min).max(0);
                 let power_max = payload.get("power_max").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.power_max).max(power_min);
+                let resource_stat_id = payload.get("resource_stat_id").map(|_| optional_string(&payload, "resource_stat_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.resource_stat_id.clone());
+                let scales_with_stat = payload.get("scales_with_stat").map(|_| optional_string(&payload, "scales_with_stat").filter(|value| !value.trim().is_empty())).unwrap_or(existing.scales_with_stat.clone());
+                let effect_stat_id = payload.get("effect_stat_id").map(|_| optional_string(&payload, "effect_stat_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.effect_stat_id.clone());
+                for stat_id in [resource_stat_id.as_ref(), scales_with_stat.as_ref(), effect_stat_id.as_ref()].into_iter().flatten() {
+                    if ctx.db.stat_definition().id().find(stat_id).is_none() {
+                        return Err(format!("Ability references missing stat: {stat_id}"));
+                    }
+                }
                 ctx.db.ability_definition().id().update(AbilityDefinition {
                     name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(),
                     description: payload.get("description").and_then(Value::as_str).unwrap_or(&existing.description).to_string(),
@@ -1398,15 +1722,15 @@ pub fn update_rows(
                     school: payload.get("school").and_then(Value::as_str).unwrap_or(&existing.school).to_string(),
                     effect_type,
                     target_type,
-                    resource_stat_id: payload.get("resource_stat_id").map(|_| optional_string(&payload, "resource_stat_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.resource_stat_id),
+                    resource_stat_id,
                     resource_cost: payload.get("resource_cost").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.resource_cost).max(0),
                     cooldown_ms: payload.get("cooldown_ms").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.cooldown_ms),
                     cast_time_ms: payload.get("cast_time_ms").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.cast_time_ms),
                     power_min,
                     power_max,
-                    scales_with_stat: payload.get("scales_with_stat").map(|_| optional_string(&payload, "scales_with_stat").filter(|value| !value.trim().is_empty())).unwrap_or(existing.scales_with_stat),
+                    scales_with_stat,
                     scaling_percent: payload.get("scaling_percent").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.scaling_percent).max(0),
-                    effect_stat_id: payload.get("effect_stat_id").map(|_| optional_string(&payload, "effect_stat_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.effect_stat_id),
+                    effect_stat_id,
                     mitigation_type,
                     required_level: payload.get("required_level").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.required_level).max(1),
                     auto_learn: payload.get("auto_learn").and_then(Value::as_bool).unwrap_or(existing.auto_learn),
@@ -1492,6 +1816,139 @@ pub fn update_rows(
                     respawn_seconds: payload.get("respawn_seconds").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.respawn_seconds),
                     spawn_room: payload.get("spawn_room").map(|_| optional_string(&payload, "spawn_room")).unwrap_or(existing.spawn_room),
                     xp_reward: payload.get("xp_reward").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.xp_reward),
+                    is_guard: payload.get("is_guard").and_then(Value::as_bool).unwrap_or(existing.is_guard),
+                    guard_greeting: payload.get("guard_greeting").map(|_| optional_string(&payload, "guard_greeting")).unwrap_or(existing.guard_greeting),
+                    protect_players: payload.get("protect_players").and_then(Value::as_bool).unwrap_or(existing.protect_players),
+                    protect_faction_members: payload.get("protect_faction_members").and_then(Value::as_bool).unwrap_or(existing.protect_faction_members),
+                    guard_wanted_seconds: payload.get("guard_wanted_seconds").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.guard_wanted_seconds),
+                    ..existing
+                });
+            }
+        }
+        "faction_definitions" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.faction_definition().id().find(&id) else { continue };
+                let minimum_reputation = payload.get("minimum_reputation").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.minimum_reputation);
+                let maximum_reputation = payload.get("maximum_reputation").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.maximum_reputation).max(minimum_reputation);
+                let hostile_threshold = payload.get("hostile_threshold").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.hostile_threshold).clamp(minimum_reputation, maximum_reputation);
+                let friendly_threshold = payload.get("friendly_threshold").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.friendly_threshold).clamp(hostile_threshold, maximum_reputation);
+                let updated = FactionDefinition {
+                    name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(),
+                    description: payload.get("description").and_then(Value::as_str).unwrap_or(&existing.description).to_string(),
+                    starting_reputation: payload.get("starting_reputation").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.starting_reputation).clamp(minimum_reputation, maximum_reputation),
+                    minimum_reputation,
+                    maximum_reputation,
+                    hostile_threshold,
+                    friendly_threshold,
+                    attack_penalty: payload.get("attack_penalty").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.attack_penalty),
+                    kill_penalty: payload.get("kill_penalty").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.kill_penalty),
+                    updated_at: ctx.timestamp,
+                    ..existing
+                };
+                ctx.db.faction_definition().id().update(updated.clone());
+                let standings = ctx.db.actor_faction_reputation().iter().filter(|row| row.faction_id == id).collect::<Vec<_>>();
+                for standing in standings {
+                    ctx.db.actor_faction_reputation().id().update(ActorFactionReputation {
+                        reputation: standing.reputation.clamp(updated.minimum_reputation, updated.maximum_reputation),
+                        updated_at: ctx.timestamp,
+                        ..standing
+                    });
+                }
+            }
+        }
+        "actor_faction_reputations" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.actor_faction_reputation().id().find(&id) else { continue };
+                let definition = ctx.db.faction_definition().id().find(&existing.faction_id).ok_or_else(|| "Faction does not exist.".to_string())?;
+                ctx.db.actor_faction_reputation().id().update(ActorFactionReputation {
+                    reputation: payload.get("reputation").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.reputation).clamp(definition.minimum_reputation, definition.maximum_reputation),
+                    updated_at: ctx.timestamp,
+                    ..existing
+                });
+            }
+        }
+        "quest_definitions" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.quest_definition().id().find(&id) else { continue };
+                let quest_giver_npc_id = payload.get("quest_giver_npc_id").and_then(Value::as_str).unwrap_or(&existing.quest_giver_npc_id).to_string();
+                let turn_in_npc_id = payload.get("turn_in_npc_id").and_then(Value::as_str).unwrap_or(&existing.turn_in_npc_id).to_string();
+                if ctx.db.npc().id().find(&quest_giver_npc_id).is_none() || ctx.db.npc().id().find(&turn_in_npc_id).is_none() {
+                    return Err("Quest giver and turn-in NPC must exist.".to_string());
+                }
+                let required_faction_id = payload.get("required_faction_id").map(|_| optional_string(&payload, "required_faction_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.required_faction_id.clone());
+                let reputation_faction_id = payload.get("reputation_faction_id").map(|_| optional_string(&payload, "reputation_faction_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.reputation_faction_id.clone());
+                for faction_id in [required_faction_id.as_ref(), reputation_faction_id.as_ref()].into_iter().flatten() {
+                    if ctx.db.faction_definition().id().find(faction_id).is_none() { return Err(format!("Quest references missing faction: {faction_id}")); }
+                }
+                ctx.db.quest_definition().id().update(QuestDefinition {
+                    title: payload.get("title").and_then(Value::as_str).unwrap_or(&existing.title).to_string(),
+                    description: payload.get("description").and_then(Value::as_str).unwrap_or(&existing.description).to_string(),
+                    quest_giver_npc_id,
+                    turn_in_npc_id,
+                    required_level: payload.get("required_level").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.required_level).max(1),
+                    required_faction_id,
+                    required_reputation: payload.get("required_reputation").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.required_reputation),
+                    repeatable: payload.get("repeatable").and_then(Value::as_bool).unwrap_or(existing.repeatable),
+                    active: payload.get("active").and_then(Value::as_bool).unwrap_or(existing.active),
+                    xp_reward: payload.get("xp_reward").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.xp_reward),
+                    gold_reward: payload.get("gold_reward").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.gold_reward).max(0),
+                    reputation_faction_id,
+                    reputation_reward: payload.get("reputation_reward").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.reputation_reward),
+                    updated_at: ctx.timestamp,
+                    ..existing
+                });
+            }
+        }
+        "quest_objectives" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.quest_objective().id().find(&id) else { continue };
+                let objective_type = payload.get("objective_type").and_then(Value::as_str).unwrap_or(&existing.objective_type).to_lowercase();
+                let target_id = payload.get("target_id").and_then(Value::as_str).unwrap_or(&existing.target_id).to_string();
+                let target_exists = match objective_type.as_str() {
+                    "explore_room" => ctx.db.room().id().find(&target_id).is_some(),
+                    "acquire_item" => ctx.db.object_definition().id().find(&target_id).is_some(),
+                    "kill_npc" | "talk_npc" => ctx.db.npc().id().find(&target_id).is_some(),
+                    "kill_faction" => ctx.db.faction_definition().id().find(&target_id).is_some(),
+                    _ => return Err("Objective type must be explore_room, acquire_item, kill_npc, kill_faction, or talk_npc.".to_string()),
+                };
+                if !target_exists { return Err("Quest objective target does not exist.".to_string()); }
+                ctx.db.quest_objective().id().update(QuestObjective {
+                    objective_type,
+                    target_id,
+                    description: payload.get("description").and_then(Value::as_str).unwrap_or(&existing.description).to_string(),
+                    required_count: payload.get("required_count").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.required_count).max(1),
+                    sort_order: payload.get("sort_order").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.sort_order),
+                    consume_on_turn_in: payload.get("consume_on_turn_in").and_then(Value::as_bool).unwrap_or(existing.consume_on_turn_in),
+                    updated_at: ctx.timestamp,
+                    ..existing
+                });
+            }
+        }
+        "quest_item_rewards" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.quest_item_reward().id().find(&id) else { continue };
+                let definition_id = payload.get("definition_id").and_then(Value::as_str).unwrap_or(&existing.definition_id).to_string();
+                if ctx.db.object_definition().id().find(&definition_id).is_none() { return Err("Quest reward item does not exist.".to_string()); }
+                ctx.db.quest_item_reward().id().update(QuestItemReward {
+                    definition_id,
+                    quantity: payload.get("quantity").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.quantity).max(1),
+                    updated_at: ctx.timestamp,
+                    ..existing
+                });
+            }
+        }
+        "actor_wallets" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.actor_wallet().id().find(&id) else { continue };
+                ctx.db.actor_wallet().id().update(ActorWallet {
+                    gold: payload.get("gold").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.gold).max(0),
+                    updated_at: ctx.timestamp,
                     ..existing
                 });
             }
@@ -1527,6 +1984,20 @@ fn delete_actor_rpg_state(ctx: &ReducerContext, actor_id: &String) {
     for stat_id in stat_ids {
         ctx.db.actor_stat().id().delete(&stat_id);
     }
+    let ability_ids = ctx.db.actor_ability().iter().filter(|row| row.actor_id == *actor_id).map(|row| row.id).collect::<Vec<_>>();
+    for ability_id in ability_ids { ctx.db.actor_ability().id().delete(&ability_id); }
+    let cooldown_ids = ctx.db.actor_cooldown().iter().filter(|row| row.actor_id == *actor_id).map(|row| row.id).collect::<Vec<_>>();
+    for cooldown_id in cooldown_ids { ctx.db.actor_cooldown().id().delete(&cooldown_id); }
+    let reputation_ids = ctx.db.actor_faction_reputation().iter().filter(|row| row.actor_id == *actor_id).map(|row| row.id).collect::<Vec<_>>();
+    for reputation_id in reputation_ids { ctx.db.actor_faction_reputation().id().delete(&reputation_id); }
+    let crime_ids = ctx.db.actor_crime().iter().filter(|row| row.actor_id == *actor_id).map(|row| row.id).collect::<Vec<_>>();
+    for crime_id in crime_ids { ctx.db.actor_crime().id().delete(&crime_id); }
+    let quest_ids = ctx.db.actor_quest().iter().filter(|row| row.actor_id == *actor_id).map(|row| row.id).collect::<Vec<_>>();
+    for quest_id in quest_ids { ctx.db.actor_quest().id().delete(&quest_id); }
+    let progress_ids = ctx.db.actor_quest_progress().iter().filter(|row| row.actor_id == *actor_id).map(|row| row.id).collect::<Vec<_>>();
+    for progress_id in progress_ids { ctx.db.actor_quest_progress().id().delete(&progress_id); }
+    ctx.db.actor_wallet().id().delete(actor_id);
+    ctx.db.actor_progression().id().delete(actor_id);
 }
 
 #[reducer]
@@ -1564,12 +2035,31 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
                 for definition in definitions {
                     ctx.db.object_definition().id().update(ObjectDefinition { scales_with_stat: None, updated_at: ctx.timestamp, ..definition });
                 }
+                let abilities = ctx.db.ability_definition().iter().filter(|ability| {
+                    ability.resource_stat_id.as_deref() == Some(id.as_str())
+                        || ability.scales_with_stat.as_deref() == Some(id.as_str())
+                        || ability.effect_stat_id.as_deref() == Some(id.as_str())
+                }).collect::<Vec<_>>();
+                for ability in abilities {
+                    ctx.db.ability_definition().id().update(AbilityDefinition {
+                        resource_stat_id: ability.resource_stat_id.clone().filter(|value| value != &id),
+                        scales_with_stat: ability.scales_with_stat.clone().filter(|value| value != &id),
+                        effect_stat_id: ability.effect_stat_id.clone().filter(|value| value != &id),
+                        updated_at: ctx.timestamp,
+                        ..ability
+                    });
+                }
                 ctx.db.stat_definition().id().delete(&id);
             }
         }
         "object_definitions" => {
             require_admin(ctx)?;
             for id in ids {
+                if ctx.db.quest_objective().iter().any(|objective| objective.objective_type == "acquire_item" && objective.target_id == id) {
+                    return Err("This item is used by a quest objective. Reassign or delete that objective first.".to_string());
+                }
+                let reward_ids = ctx.db.quest_item_reward().iter().filter(|reward| reward.definition_id == id).map(|reward| reward.id).collect::<Vec<_>>();
+                for reward_id in reward_ids { ctx.db.quest_item_reward().id().delete(&reward_id); }
                 let loot_ids = ctx.db.loot_table_entry().iter().filter(|entry| entry.definition_id == id).map(|entry| entry.id).collect::<Vec<_>>();
                 for loot_id in loot_ids { ctx.db.loot_table_entry().id().delete(&loot_id); }
                 let object_ids = ctx.db.world_object().iter().filter(|object| object.definition_id == id).map(|object| object.id).collect::<Vec<_>>();
@@ -1589,9 +2079,39 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
             require_admin(ctx)?;
             for id in ids { ctx.db.loot_table_entry().id().delete(&id); }
         }
+        "progression_configs" => {
+            require_admin(ctx)?;
+            for id in ids { ctx.db.progression_config().id().delete(&id); }
+        }
+        "equipment_slot_definitions" => {
+            require_admin(ctx)?;
+            for id in ids { ctx.db.equipment_slot_definition().id().delete(&id); }
+        }
+        "ability_definitions" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let grants = ctx.db.actor_ability().iter().filter(|grant| grant.ability_id == id).map(|grant| grant.id).collect::<Vec<_>>();
+                for grant in grants { ctx.db.actor_ability().id().delete(&grant); }
+                let action_id = format!("ability:{id}");
+                let cooldowns = ctx.db.actor_cooldown().iter().filter(|cooldown| cooldown.action_id == action_id).map(|cooldown| cooldown.id).collect::<Vec<_>>();
+                for cooldown in cooldowns { ctx.db.actor_cooldown().id().delete(&cooldown); }
+                ctx.db.ability_definition().id().delete(&id);
+            }
+        }
+        "actor_abilities" => {
+            require_admin(ctx)?;
+            for id in ids { ctx.db.actor_ability().id().delete(&id); }
+        }
+        "actor_progressions" => {
+            require_admin(ctx)?;
+            for id in ids { ctx.db.actor_progression().id().delete(&id); }
+        }
         "rooms" => {
             require_admin(ctx)?;
             for id in ids {
+                if ctx.db.quest_objective().iter().any(|objective| objective.objective_type == "explore_room" && objective.target_id == id) {
+                    return Err("This room is used by a quest objective. Reassign or delete that objective first.".to_string());
+                }
                 let exits = ctx.db.exit().iter().filter(|exit| exit.from_room.as_deref() == Some(id.as_str()) || exit.to_room.as_deref() == Some(id.as_str())).map(|exit| exit.id).collect::<Vec<_>>();
                 for exit_id in exits { ctx.db.exit().id().delete(&exit_id); }
                 let object_ids = ctx.db.world_object().iter().filter(|object| object.location_kind == "room" && object.location_id == id).map(|object| object.id).collect::<Vec<_>>();
@@ -1623,11 +2143,66 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
         "npcs" => {
             require_admin(ctx)?;
             for id in ids {
+                if ctx.db.quest_definition().iter().any(|quest| quest.quest_giver_npc_id == id || quest.turn_in_npc_id == id)
+                    || ctx.db.quest_objective().iter().any(|objective| matches!(objective.objective_type.as_str(), "kill_npc" | "talk_npc") && objective.target_id == id) {
+                    return Err("This NPC is used by a quest. Reassign or delete that quest content first.".to_string());
+                }
                 let loot_ids = ctx.db.loot_table_entry().iter().filter(|entry| entry.npc_id == id).map(|entry| entry.id).collect::<Vec<_>>();
                 for loot_id in loot_ids { ctx.db.loot_table_entry().id().delete(&loot_id); }
                 delete_actor_rpg_state(ctx, &id);
                 ctx.db.npc().id().delete(&id);
             }
+        }
+        "faction_definitions" => {
+            require_admin(ctx)?;
+            for id in ids {
+                if ctx.db.npc().iter().any(|npc| npc.faction.as_deref() == Some(id.as_str()))
+                    || ctx.db.quest_definition().iter().any(|quest| quest.required_faction_id.as_deref() == Some(id.as_str()) || quest.reputation_faction_id.as_deref() == Some(id.as_str()))
+                    || ctx.db.quest_objective().iter().any(|objective| objective.objective_type == "kill_faction" && objective.target_id == id) {
+                    return Err("This faction is used by an NPC or quest. Reassign those references first.".to_string());
+                }
+                let standings = ctx.db.actor_faction_reputation().iter().filter(|row| row.faction_id == id).map(|row| row.id).collect::<Vec<_>>();
+                for standing in standings { ctx.db.actor_faction_reputation().id().delete(&standing); }
+                let crimes = ctx.db.actor_crime().iter().filter(|row| row.faction_id.as_deref() == Some(id.as_str())).map(|row| row.id).collect::<Vec<_>>();
+                for crime in crimes { ctx.db.actor_crime().id().delete(&crime); }
+                ctx.db.faction_definition().id().delete(&id);
+            }
+        }
+        "actor_faction_reputations" => {
+            require_admin(ctx)?;
+            for id in ids { ctx.db.actor_faction_reputation().id().delete(&id); }
+        }
+        "quest_definitions" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let objective_ids = ctx.db.quest_objective().iter().filter(|row| row.quest_id == id).map(|row| row.id).collect::<Vec<_>>();
+                for objective_id in objective_ids {
+                    let progress_ids = ctx.db.actor_quest_progress().iter().filter(|row| row.objective_id == objective_id).map(|row| row.id).collect::<Vec<_>>();
+                    for progress_id in progress_ids { ctx.db.actor_quest_progress().id().delete(&progress_id); }
+                    ctx.db.quest_objective().id().delete(&objective_id);
+                }
+                let reward_ids = ctx.db.quest_item_reward().iter().filter(|row| row.quest_id == id).map(|row| row.id).collect::<Vec<_>>();
+                for reward_id in reward_ids { ctx.db.quest_item_reward().id().delete(&reward_id); }
+                let actor_quest_ids = ctx.db.actor_quest().iter().filter(|row| row.quest_id == id).map(|row| row.id).collect::<Vec<_>>();
+                for actor_quest_id in actor_quest_ids { ctx.db.actor_quest().id().delete(&actor_quest_id); }
+                ctx.db.quest_definition().id().delete(&id);
+            }
+        }
+        "quest_objectives" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let progress_ids = ctx.db.actor_quest_progress().iter().filter(|row| row.objective_id == id).map(|row| row.id).collect::<Vec<_>>();
+                for progress_id in progress_ids { ctx.db.actor_quest_progress().id().delete(&progress_id); }
+                ctx.db.quest_objective().id().delete(&id);
+            }
+        }
+        "quest_item_rewards" => {
+            require_admin(ctx)?;
+            for id in ids { ctx.db.quest_item_reward().id().delete(&id); }
+        }
+        "actor_wallets" => {
+            require_admin(ctx)?;
+            for id in ids { ctx.db.actor_wallet().id().delete(&id); }
         }
         "exits" => {
             require_admin(ctx)?;
@@ -1975,7 +2550,9 @@ fn list_inventory(ctx: &ReducerContext, room_id: &str, actor_id: &str) {
         }
     }
     let mut sections = Vec::new();
-    sections.push(if inventory.is_empty() { "[INVENTORY]\n• Empty".to_string() } else { format!("[INVENTORY]\n{}", inventory.join("\n")) });
+    let used = inventory_used(ctx, actor_id);
+    let slots = inventory_slots(ctx, actor_id);
+    sections.push(if inventory.is_empty() { format!("[INVENTORY · {used}/{slots} SLOTS]\n• Empty") } else { format!("[INVENTORY · {used}/{slots} SLOTS]\n{}", inventory.join("\n")) });
     if !equipment.is_empty() { sections.push(format!("[EQUIPMENT]\n{}", equipment.join("\n"))); }
     rpg_message(ctx, room_id, actor_id, "system", sections.join("\n\n"));
 }
@@ -1991,12 +2568,19 @@ fn list_stats(ctx: &ReducerContext, room_id: &str, actor_id: &str) {
         let row = actor_stat_row(ctx, actor_id, &definition);
         let bonus = equipment_stat_bonus(ctx, actor_id, &definition.id);
         if bonus == 0 {
-            format!("• {}: {}/{}", definition.name, row.current_value, definition.maximum)
+            format!("• {}: {}/{}", definition.name, row.current_value, row.base_value)
         } else {
-            format!("• {}: {} ({:+} equipment) / {}", definition.name, row.current_value.saturating_add(bonus), bonus, definition.maximum)
+            format!("• {}: {} ({:+} equipment) / {}", definition.name, row.current_value.saturating_add(bonus), bonus, row.base_value.saturating_add(bonus))
         }
     }).collect::<Vec<_>>();
-    rpg_message(ctx, room_id, actor_id, "system", format!("[HERO STATS]\n{}", lines.join("\n")));
+    let config = world_progression_config(ctx);
+    let progression = ensure_actor_progression(ctx, actor_id);
+    let xp = if progression.level >= config.max_level.max(1) {
+        "LEVEL CAP".to_string()
+    } else {
+        format!("{} / {} XP", progression.experience, xp_for_next_level(&config, progression.level))
+    };
+    rpg_message(ctx, room_id, actor_id, "system", format!("[LEVEL {} · {}]\n\n[HERO STATS]\n{}", progression.level, xp, lines.join("\n")));
 }
 
 fn describe_object(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &str) {
@@ -2058,6 +2642,414 @@ fn actor_current_room(ctx: &ReducerContext, actor_id: &str) -> Option<String> {
         .or_else(|| ctx.db.profile().id().find(&actor_id).and_then(|actor| actor.current_room))
 }
 
+fn reputation_id(actor_id: &str, faction_id: &str) -> String {
+    format!("{actor_id}::{faction_id}")
+}
+
+fn actor_reputation(ctx: &ReducerContext, actor_id: &str, faction_id: &str) -> i32 {
+    let id = reputation_id(actor_id, faction_id);
+    if let Some(row) = ctx.db.actor_faction_reputation().id().find(&id) { return row.reputation; }
+    let Some(faction) = ctx.db.faction_definition().id().find(&faction_id.to_string()) else { return 0 };
+    ctx.db.actor_faction_reputation().insert(ActorFactionReputation {
+        id,
+        actor_id: actor_id.to_string(),
+        faction_id: faction_id.to_string(),
+        reputation: faction.starting_reputation,
+        updated_at: ctx.timestamp,
+    });
+    faction.starting_reputation
+}
+
+fn change_reputation(ctx: &ReducerContext, actor_id: &str, faction_id: &str, delta: i32) -> Option<i32> {
+    let faction = ctx.db.faction_definition().id().find(&faction_id.to_string())?;
+    let id = reputation_id(actor_id, faction_id);
+    let current = actor_reputation(ctx, actor_id, faction_id);
+    let reputation = current.saturating_add(delta).clamp(faction.minimum_reputation, faction.maximum_reputation);
+    let row = ActorFactionReputation {
+        id: id.clone(), actor_id: actor_id.to_string(), faction_id: faction_id.to_string(), reputation, updated_at: ctx.timestamp,
+    };
+    if ctx.db.actor_faction_reputation().id().find(&id).is_some() { ctx.db.actor_faction_reputation().id().update(row); } else { ctx.db.actor_faction_reputation().insert(row); }
+    Some(reputation)
+}
+
+fn faction_standing(faction: &FactionDefinition, reputation: i32) -> &'static str {
+    if reputation <= faction.hostile_threshold { "Hostile" }
+    else if reputation >= faction.friendly_threshold { "Friendly" }
+    else { "Neutral" }
+}
+
+fn list_reputation(ctx: &ReducerContext, room_id: &str, actor_id: &str) {
+    let mut factions = ctx.db.faction_definition().iter().collect::<Vec<_>>();
+    factions.sort_by(|left, right| left.name.cmp(&right.name));
+    if factions.is_empty() {
+        rpg_message(ctx, room_id, actor_id, "system", "This world has no factions yet.".to_string());
+        return;
+    }
+    let lines = factions.into_iter().map(|faction| {
+        let value = actor_reputation(ctx, actor_id, &faction.id);
+        format!("- {}: {} ({:+})", faction.name, faction_standing(&faction, value), value)
+    }).collect::<Vec<_>>();
+    rpg_message(ctx, room_id, actor_id, "system", format!("[FACTION REPUTATION]\n{}", lines.join("\n")));
+}
+
+fn ensure_wallet(ctx: &ReducerContext, actor_id: &str) -> ActorWallet {
+    let id = actor_id.to_string();
+    if let Some(wallet) = ctx.db.actor_wallet().id().find(&id) { return wallet; }
+    let wallet = ActorWallet { id: id.clone(), actor_id: id, gold: 0, updated_at: ctx.timestamp };
+    ctx.db.actor_wallet().insert(wallet.clone());
+    wallet
+}
+
+fn object_belongs_to_actor(ctx: &ReducerContext, object: &WorldObject, actor_id: &str) -> bool {
+    let mut current = object.clone();
+    let mut visited = Vec::new();
+    loop {
+        if matches!(current.location_kind.as_str(), "inventory" | "equipped") { return current.location_id == actor_id; }
+        if current.location_kind != "container" || visited.contains(&current.id) { return false; }
+        visited.push(current.id.clone());
+        let Some(parent) = ctx.db.world_object().id().find(&current.location_id) else { return false };
+        current = parent;
+    }
+}
+
+fn actor_item_quantity(ctx: &ReducerContext, actor_id: &str, definition_id: &str) -> u32 {
+    ctx.db.world_object().iter()
+        .filter(|object| object.definition_id == definition_id && object_belongs_to_actor(ctx, object, actor_id))
+        .map(|object| object.quantity)
+        .fold(0u32, u32::saturating_add)
+}
+
+fn consume_actor_items(ctx: &ReducerContext, actor_id: &str, definition_id: &str, mut quantity: u32) -> bool {
+    if actor_item_quantity(ctx, actor_id, definition_id) < quantity { return false; }
+    let objects = ctx.db.world_object().iter()
+        .filter(|object| object.definition_id == definition_id && object_belongs_to_actor(ctx, object, actor_id))
+        .collect::<Vec<_>>();
+    for object in objects {
+        if quantity == 0 { break; }
+        let consumed = object.quantity.min(quantity);
+        quantity -= consumed;
+        consume_object_quantity(ctx, object, consumed);
+    }
+    quantity == 0
+}
+
+fn actor_quest_id(actor_id: &str, quest_id: &str) -> String { format!("{actor_id}::{quest_id}") }
+fn quest_progress_id(actor_id: &str, objective_id: &str) -> String { format!("{actor_id}::{objective_id}") }
+
+fn quest_objective_label(ctx: &ReducerContext, objective: &QuestObjective) -> String {
+    if !objective.description.trim().is_empty() { return objective.description.clone(); }
+    let target = match objective.objective_type.as_str() {
+        "explore_room" => ctx.db.room().id().find(&objective.target_id).map(|row| row.name),
+        "acquire_item" => ctx.db.object_definition().id().find(&objective.target_id).map(|row| row.name),
+        "kill_npc" | "talk_npc" => ctx.db.npc().id().find(&objective.target_id).map(|row| row.name),
+        "kill_faction" => ctx.db.faction_definition().id().find(&objective.target_id).map(|row| row.name),
+        _ => None,
+    }.unwrap_or_else(|| objective.target_id.clone());
+    match objective.objective_type.as_str() {
+        "explore_room" => format!("Explore {target}"),
+        "acquire_item" => format!("Acquire {target}"),
+        "kill_npc" => format!("Defeat {target}"),
+        "kill_faction" => format!("Defeat members of {target}"),
+        "talk_npc" => format!("Speak with {target}"),
+        _ => target,
+    }
+}
+
+fn objective_progress(ctx: &ReducerContext, actor_id: &str, objective: &QuestObjective) -> u32 {
+    if objective.objective_type == "acquire_item" {
+        return actor_item_quantity(ctx, actor_id, &objective.target_id).min(objective.required_count);
+    }
+    ctx.db.actor_quest_progress().id().find(&quest_progress_id(actor_id, &objective.id)).map(|row| row.progress).unwrap_or(0).min(objective.required_count)
+}
+
+fn set_objective_progress(ctx: &ReducerContext, actor_id: &str, objective: &QuestObjective, progress: u32) {
+    let id = quest_progress_id(actor_id, &objective.id);
+    let row = ActorQuestProgress {
+        id: id.clone(), actor_id: actor_id.to_string(), quest_id: objective.quest_id.clone(), objective_id: objective.id.clone(),
+        progress: progress.min(objective.required_count), updated_at: ctx.timestamp,
+    };
+    if ctx.db.actor_quest_progress().id().find(&id).is_some() { ctx.db.actor_quest_progress().id().update(row); } else { ctx.db.actor_quest_progress().insert(row); }
+}
+
+fn refresh_actor_quest(ctx: &ReducerContext, actor_id: &str, quest_id: &str) -> Option<ActorQuest> {
+    let id = actor_quest_id(actor_id, quest_id);
+    let mut actor_quest = ctx.db.actor_quest().id().find(&id)?;
+    if actor_quest.status == "completed" { return Some(actor_quest); }
+    let objectives = ctx.db.quest_objective().iter().filter(|objective| objective.quest_id == quest_id).collect::<Vec<_>>();
+    let mut complete = true;
+    for objective in objectives {
+        let progress = objective_progress(ctx, actor_id, &objective);
+        set_objective_progress(ctx, actor_id, &objective, progress);
+        if progress < objective.required_count { complete = false; }
+    }
+    actor_quest.status = if complete { "ready".to_string() } else { "active".to_string() };
+    actor_quest.updated_at = ctx.timestamp;
+    ctx.db.actor_quest().id().update(actor_quest.clone());
+    Some(actor_quest)
+}
+
+fn refresh_actor_acquire_quests(ctx: &ReducerContext, actor_id: &str) {
+    let quest_ids = ctx.db.actor_quest().iter().filter(|row| row.actor_id == actor_id && row.status != "completed").map(|row| row.quest_id).collect::<Vec<_>>();
+    for quest_id in quest_ids { refresh_actor_quest(ctx, actor_id, &quest_id); }
+}
+
+fn advance_quest_event(ctx: &ReducerContext, actor_id: &str, event_type: &str, target_id: &str, amount: u32) {
+    let active_quests = ctx.db.actor_quest().iter().filter(|row| row.actor_id == actor_id && row.status != "completed").collect::<Vec<_>>();
+    for actor_quest in active_quests {
+        let objectives = ctx.db.quest_objective().iter().filter(|objective| {
+            objective.quest_id == actor_quest.quest_id && objective.objective_type == event_type && objective.target_id == target_id
+        }).collect::<Vec<_>>();
+        for objective in objectives {
+            let progress = objective_progress(ctx, actor_id, &objective).saturating_add(amount).min(objective.required_count);
+            set_objective_progress(ctx, actor_id, &objective, progress);
+        }
+        refresh_actor_quest(ctx, actor_id, &actor_quest.quest_id);
+    }
+}
+
+fn quest_matches(quest: &QuestDefinition, query: &str) -> bool {
+    quest.id.eq_ignore_ascii_case(query) || quest.title.eq_ignore_ascii_case(query) || quest.title.to_lowercase().starts_with(&query.to_lowercase())
+}
+
+fn npc_matches(npc: &Npc, query: &str) -> bool {
+    npc.id.eq_ignore_ascii_case(query) || npc.name.eq_ignore_ascii_case(query)
+        || npc.alias.as_deref().map(|alias| alias.eq_ignore_ascii_case(query)).unwrap_or(false)
+}
+
+fn quest_requirement_error(ctx: &ReducerContext, actor_id: &str, quest: &QuestDefinition) -> Option<String> {
+    let level = ensure_actor_progression(ctx, actor_id).level;
+    if level < quest.required_level { return Some(format!("Requires level {}.", quest.required_level)); }
+    if let Some(faction_id) = quest.required_faction_id.as_ref() {
+        let reputation = actor_reputation(ctx, actor_id, faction_id);
+        if reputation < quest.required_reputation { return Some(format!("Requires {:+} reputation with {}.", quest.required_reputation, ctx.db.faction_definition().id().find(faction_id).map(|row| row.name).unwrap_or_else(|| faction_id.clone()))); }
+    }
+    None
+}
+
+fn accept_quest(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &str) {
+    let nearby_givers = ctx.db.npc().iter().filter(|npc| npc.current_room.as_deref() == Some(room_id)).map(|npc| npc.id).collect::<Vec<_>>();
+    let Some(quest) = ctx.db.quest_definition().iter().find(|quest| quest.active && nearby_givers.contains(&quest.quest_giver_npc_id) && quest_matches(quest, query)) else {
+        rpg_message(ctx, room_id, actor_id, "error", format!("No nearby quest giver offers \"{}\".", query.trim()));
+        return;
+    };
+    if let Some(reason) = quest_requirement_error(ctx, actor_id, &quest) {
+        rpg_message(ctx, room_id, actor_id, "error", format!("You cannot accept {}: {reason}", quest.title));
+        return;
+    }
+    let id = actor_quest_id(actor_id, &quest.id);
+    let existing = ctx.db.actor_quest().id().find(&id);
+    if existing.as_ref().map(|row| row.status != "completed").unwrap_or(false) {
+        rpg_message(ctx, room_id, actor_id, "error", format!("{} is already in your quest log.", quest.title));
+        return;
+    }
+    if existing.is_some() && !quest.repeatable {
+        rpg_message(ctx, room_id, actor_id, "error", format!("You have already completed {}.", quest.title));
+        return;
+    }
+    let completion_count = existing.as_ref().map(|row| row.completion_count).unwrap_or(0);
+    if existing.is_some() { ctx.db.actor_quest().id().delete(&id); }
+    let stale = ctx.db.actor_quest_progress().iter().filter(|row| row.actor_id == actor_id && row.quest_id == quest.id).map(|row| row.id).collect::<Vec<_>>();
+    for progress_id in stale { ctx.db.actor_quest_progress().id().delete(&progress_id); }
+    ctx.db.actor_quest().insert(ActorQuest {
+        id, actor_id: actor_id.to_string(), quest_id: quest.id.clone(), status: "active".to_string(), completion_count,
+        accepted_at: ctx.timestamp, updated_at: ctx.timestamp, completed_at: None,
+    });
+    let objectives = ctx.db.quest_objective().iter().filter(|objective| objective.quest_id == quest.id).collect::<Vec<_>>();
+    for objective in objectives { set_objective_progress(ctx, actor_id, &objective, 0); }
+    advance_quest_event(ctx, actor_id, "explore_room", room_id, 1);
+    refresh_actor_quest(ctx, actor_id, &quest.id);
+    rpg_message(ctx, room_id, actor_id, "system", format!("[QUEST ACCEPTED] {}\n{}", quest.title, quest.description));
+}
+
+fn grant_quest_item(ctx: &ReducerContext, actor_id: &str, reward: &QuestItemReward, completion_count: u32) -> Option<String> {
+    let definition = ctx.db.object_definition().id().find(&reward.definition_id)?;
+    if definition.stackable {
+        if let Some(existing) = ctx.db.world_object().iter().find(|object| object.location_kind == "inventory" && object.location_id == actor_id && object.definition_id == reward.definition_id) {
+            ctx.db.world_object().id().update(WorldObject { quantity: existing.quantity.saturating_add(reward.quantity), updated_at: ctx.timestamp, ..existing });
+            return Some(format!("{} x{}", definition.name, reward.quantity));
+        }
+    }
+    let timestamp = ctx.timestamp.to_micros_since_unix_epoch();
+    ctx.db.world_object().insert(WorldObject {
+        id: format!("quest-reward-{}-{}-{completion_count}-{timestamp}", actor_id, reward.id),
+        definition_id: reward.definition_id.clone(), location_kind: "inventory".to_string(), location_id: actor_id.to_string(),
+        quantity: reward.quantity, equipped_slot: None, durability: 100, fuel_remaining: 0, is_active: false,
+        state_json: format!(r#"{{"quest_reward":"{}"}}"#, reward.quest_id), created_at: ctx.timestamp, updated_at: ctx.timestamp,
+    });
+    Some(format!("{} x{}", definition.name, reward.quantity))
+}
+
+fn turn_in_quest(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &str) {
+    let Some(quest) = ctx.db.quest_definition().iter().find(|quest| quest_matches(quest, query)) else {
+        rpg_message(ctx, room_id, actor_id, "error", format!("There is no quest named \"{}\".", query.trim()));
+        return;
+    };
+    let Some(turn_in_npc) = ctx.db.npc().id().find(&quest.turn_in_npc_id).filter(|npc| npc.current_room.as_deref() == Some(room_id)) else {
+        rpg_message(ctx, room_id, actor_id, "error", "The quest's turn-in NPC is not here.".to_string());
+        return;
+    };
+    let id = actor_quest_id(actor_id, &quest.id);
+    if ctx.db.actor_quest().id().find(&id).is_none() {
+        rpg_message(ctx, room_id, actor_id, "error", format!("You have not accepted {}.", quest.title));
+        return;
+    }
+    refresh_actor_quest(ctx, actor_id, &quest.id);
+    let Some(mut actor_quest) = ctx.db.actor_quest().id().find(&id) else { return };
+    if actor_quest.status != "ready" {
+        rpg_message(ctx, room_id, actor_id, "error", format!("{} is not complete yet. Use `quests` to review its objectives.", quest.title));
+        return;
+    }
+    let rewards = ctx.db.quest_item_reward().iter().filter(|reward| reward.quest_id == quest.id).collect::<Vec<_>>();
+    let needed_stacks = rewards.iter().filter(|reward| {
+        ctx.db.object_definition().id().find(&reward.definition_id).map(|definition| !definition.stackable || !ctx.db.world_object().iter().any(|object| object.location_kind == "inventory" && object.location_id == actor_id && object.definition_id == reward.definition_id)).unwrap_or(false)
+    }).count() as u32;
+    if !inventory_has_space(ctx, actor_id, needed_stacks) {
+        rpg_message(ctx, room_id, actor_id, "error", format!("You need {needed_stacks} free inventory stack(s) to receive the quest rewards."));
+        return;
+    }
+    let objectives = ctx.db.quest_objective().iter().filter(|objective| objective.quest_id == quest.id && objective.objective_type == "acquire_item" && objective.consume_on_turn_in).collect::<Vec<_>>();
+    let mut required_items = BTreeMap::<String, u32>::new();
+    for objective in objectives {
+        required_items.entry(objective.target_id).and_modify(|quantity| *quantity = quantity.saturating_add(objective.required_count)).or_insert(objective.required_count);
+    }
+    if required_items.iter().any(|(definition_id, quantity)| actor_item_quantity(ctx, actor_id, definition_id) < *quantity) {
+        rpg_message(ctx, room_id, actor_id, "error", "A required quest item is no longer in your inventory.".to_string());
+        refresh_actor_quest(ctx, actor_id, &quest.id);
+        return;
+    }
+    for (definition_id, quantity) in required_items {
+        consume_actor_items(ctx, actor_id, &definition_id, quantity);
+    }
+    let mut wallet = ensure_wallet(ctx, actor_id);
+    wallet.gold = wallet.gold.saturating_add(quest.gold_reward).max(0);
+    wallet.updated_at = ctx.timestamp;
+    ctx.db.actor_wallet().id().update(wallet.clone());
+    let xp_message = if quest.xp_reward > 0 { Some(award_experience(ctx, actor_id, quest.xp_reward)) } else { None };
+    let reputation_message = quest.reputation_faction_id.as_ref().and_then(|faction_id| {
+        change_reputation(ctx, actor_id, faction_id, quest.reputation_reward).map(|value| {
+            let name = ctx.db.faction_definition().id().find(faction_id).map(|row| row.name).unwrap_or_else(|| faction_id.clone());
+            format!("{name} reputation {:+} (now {:+})", quest.reputation_reward, value)
+        })
+    });
+    actor_quest.status = "completed".to_string();
+    actor_quest.completion_count = actor_quest.completion_count.saturating_add(1);
+    actor_quest.completed_at = Some(ctx.timestamp);
+    actor_quest.updated_at = ctx.timestamp;
+    ctx.db.actor_quest().id().update(actor_quest.clone());
+    let item_names = rewards.iter().filter_map(|reward| grant_quest_item(ctx, actor_id, reward, actor_quest.completion_count)).collect::<Vec<_>>();
+    let mut reward_lines = vec![format!("{} gold (wallet: {})", quest.gold_reward, wallet.gold)];
+    if let Some(message) = xp_message { reward_lines.push(message); }
+    if let Some(message) = reputation_message { reward_lines.push(message); }
+    if !item_names.is_empty() { reward_lines.push(format!("Items: {}", item_names.join(", "))); }
+    rpg_message(ctx, room_id, actor_id, "system", format!("[QUEST COMPLETE] {}\n{} accepts your report.\n{}", quest.title, turn_in_npc.name, reward_lines.join("\n")));
+}
+
+fn list_quests(ctx: &ReducerContext, room_id: &str, actor_id: &str) {
+    refresh_actor_acquire_quests(ctx, actor_id);
+    let wallet = ensure_wallet(ctx, actor_id);
+    let active = ctx.db.actor_quest().iter().filter(|row| row.actor_id == actor_id && row.status != "completed").collect::<Vec<_>>();
+    let mut sections = Vec::new();
+    for actor_quest in active {
+        let Some(quest) = ctx.db.quest_definition().id().find(&actor_quest.quest_id) else { continue };
+        let mut objectives = ctx.db.quest_objective().iter().filter(|objective| objective.quest_id == quest.id).collect::<Vec<_>>();
+        objectives.sort_by_key(|objective| objective.sort_order);
+        let lines = objectives.into_iter().map(|objective| format!("{} {}/{}", quest_objective_label(ctx, &objective), objective_progress(ctx, actor_id, &objective), objective.required_count)).collect::<Vec<_>>();
+        sections.push(format!("[{} - {}]\n{}\nTurn in to: {}", quest.title, actor_quest.status.to_uppercase(), if lines.is_empty() { "No objectives".to_string() } else { lines.join("\n") }, ctx.db.npc().id().find(&quest.turn_in_npc_id).map(|npc| npc.name).unwrap_or_else(|| quest.turn_in_npc_id.clone())));
+    }
+    let nearby_npcs = ctx.db.npc().iter().filter(|npc| npc.current_room.as_deref() == Some(room_id)).map(|npc| npc.id).collect::<Vec<_>>();
+    let offers = ctx.db.quest_definition().iter().filter(|quest| {
+        if !quest.active || !nearby_npcs.contains(&quest.quest_giver_npc_id) || quest_requirement_error(ctx, actor_id, quest).is_some() { return false; }
+        let state = ctx.db.actor_quest().id().find(&actor_quest_id(actor_id, &quest.id));
+        state.is_none() || (state.map(|row| row.status == "completed").unwrap_or(false) && quest.repeatable)
+    }).map(|quest| format!("- {} from {}", quest.title, ctx.db.npc().id().find(&quest.quest_giver_npc_id).map(|npc| npc.name).unwrap_or_else(|| quest.quest_giver_npc_id.clone()))).collect::<Vec<_>>();
+    if !offers.is_empty() { sections.push(format!("[AVAILABLE HERE]\n{}\nUse `accept <quest>`.", offers.join("\n"))); }
+    if sections.is_empty() { sections.push("No active quests or nearby offers.".to_string()); }
+    rpg_message(ctx, room_id, actor_id, "system", format!("[QUEST LOG - {} GOLD]\n\n{}", wallet.gold, sections.join("\n\n")));
+}
+
+fn list_npc_quests(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &str) {
+    let Some(npc) = ctx.db.npc().iter().find(|npc| npc.current_room.as_deref() == Some(room_id) && npc_matches(npc, query)) else {
+        rpg_message(ctx, room_id, actor_id, "error", format!("There is no NPC named \"{}\" here.", query.trim()));
+        return;
+    };
+    let mut lines = Vec::new();
+    for quest in ctx.db.quest_definition().iter().filter(|quest| quest.active && quest.quest_giver_npc_id == npc.id) {
+        let state = ctx.db.actor_quest().id().find(&actor_quest_id(actor_id, &quest.id));
+        let status = if let Some(row) = state {
+            if row.status == "completed" && !quest.repeatable { "completed".to_string() } else { row.status }
+        } else { quest_requirement_error(ctx, actor_id, &quest).unwrap_or_else(|| "available".to_string()) };
+        lines.push(format!("- {} [{}]\n  {}", quest.title, status, quest.description));
+    }
+    for quest in ctx.db.quest_definition().iter().filter(|quest| quest.turn_in_npc_id == npc.id) {
+        if let Some(row) = ctx.db.actor_quest().id().find(&actor_quest_id(actor_id, &quest.id)).filter(|row| row.status != "completed") {
+            lines.push(format!("- {} [{} - turn in here]", quest.title, row.status));
+        }
+    }
+    rpg_message(ctx, room_id, actor_id, "system", if lines.is_empty() { format!("{} has no quest business with you.", npc.name) } else { format!("[QUESTS - {}]\n{}", npc.name, lines.join("\n")) });
+}
+
+fn guard_is_hostile_to_actor(ctx: &ReducerContext, guard: &Npc, actor_id: &str, room_id: &str) -> bool {
+    let wanted = region_for_room(ctx, room_id).map(|region| {
+        ctx.db.actor_crime().id().find(&format!("{actor_id}::{}", region.name)).map(|crime| crime.wanted_until_micros > ctx.timestamp.to_micros_since_unix_epoch()).unwrap_or(false)
+    }).unwrap_or(false);
+    if wanted { return true; }
+    guard.faction.as_ref().and_then(|faction_id| ctx.db.faction_definition().id().find(faction_id).map(|faction| actor_reputation(ctx, actor_id, faction_id) <= faction.hostile_threshold)).unwrap_or(false)
+}
+
+fn record_safe_zone_crime(ctx: &ReducerContext, room_id: &str, actor_id: &str, actor_name: &str, victim_faction: Option<&str>, victim_is_player: bool, severity: u32) {
+    let Some(region) = region_for_room(ctx, room_id) else { return };
+    if region.pvp_enabled { return; }
+    let guards_in_region = ctx.db.npc().iter().filter(|guard| guard.is_guard && guard.defeated_at.is_none() && guard.current_room.as_ref().and_then(|guard_room| region_for_room(ctx, guard_room)).map(|guard_region| guard_region.name == region.name).unwrap_or(false)).collect::<Vec<_>>();
+    let wanted_seconds = guards_in_region.iter().map(|guard| guard.guard_wanted_seconds).max().unwrap_or(120);
+    let id = format!("{actor_id}::{}", region.name);
+    let existing = ctx.db.actor_crime().id().find(&id);
+    let row = ActorCrime {
+        id: id.clone(), actor_id: actor_id.to_string(), region_id: region.name.clone(), faction_id: victim_faction.map(str::to_string),
+        severity: existing.as_ref().map(|crime| crime.severity).unwrap_or(0).saturating_add(severity),
+        wanted_until_micros: existing.as_ref().map(|crime| crime.wanted_until_micros).unwrap_or(0).max(ctx.timestamp.to_micros_since_unix_epoch().saturating_add(i64::from(wanted_seconds) * 1_000_000)),
+        updated_at: ctx.timestamp,
+    };
+    if existing.is_some() { ctx.db.actor_crime().id().update(row); } else { ctx.db.actor_crime().insert(row); }
+    rpg_message(ctx, room_id, actor_id, "error", format!("That is a crime in this safe region. You are wanted for {wanted_seconds} seconds."));
+    let Some(health) = stat_definition_by_role(ctx, "health") else { return };
+    for guard in guards_in_region.into_iter().filter(|guard| {
+        guard.current_room.as_deref() == Some(room_id) && ((victim_is_player && guard.protect_players) || (!victim_is_player && guard.protect_faction_members && (guard.faction.is_none() || guard.faction.as_deref() == victim_faction)))
+    }) {
+        add_message(ctx, Some(room_id.to_string()), Some(guard.id.clone()), Some(guard.name.clone()), None, "npc_speech", format!("{}: \"Stop! You have broken the peace, {actor_name}!\"", guard.name), None, None);
+        npc_attack_player(ctx, guard, room_id, actor_id, actor_name, &health);
+        if actor_current_room(ctx, actor_id).as_deref() != Some(room_id) { break; }
+    }
+}
+
+fn penalize_npc_attack(ctx: &ReducerContext, room_id: &str, actor_id: &str, actor_name: &str, npc: &Npc, killing: bool) {
+    if npc_disposition(npc) == "hostile" { return; }
+    if let Some(faction_id) = npc.faction.as_ref() {
+        if let Some(faction) = ctx.db.faction_definition().id().find(faction_id) {
+            let delta = if killing { faction.kill_penalty } else { faction.attack_penalty };
+            if delta != 0 {
+                if let Some(value) = change_reputation(ctx, actor_id, faction_id, delta) {
+                    rpg_message(ctx, room_id, actor_id, "error", format!("{} reputation {:+} (now {:+}).", faction.name, delta, value));
+                }
+            }
+        }
+    }
+    record_safe_zone_crime(ctx, room_id, actor_id, actor_name, npc.faction.as_deref(), false, if killing { 2 } else { 1 });
+}
+
+fn handle_room_entry(ctx: &ReducerContext, room_id: &str, actor_id: &str, actor_name: &str, character_id: Option<String>, is_profile: bool) {
+    advance_quest_event(ctx, actor_id, "explore_room", room_id, 1);
+    let npcs = ctx.db.npc().iter().filter(|npc| npc.current_room.as_deref() == Some(room_id) && npc.defeated_at.is_none()).collect::<Vec<_>>();
+    for npc in npcs {
+        if npc.is_guard {
+            let greeting = npc.guard_greeting.clone().filter(|value| !value.trim().is_empty()).unwrap_or_else(|| format!("Halt and state your business, {actor_name}. Keep the peace while you are here."));
+            add_message(ctx, Some(room_id.to_string()), Some(npc.id.clone()), Some(npc.name.clone()), None, "npc_speech", format!("{}: \"{}\"", npc.name, greeting), None, None);
+        } else if npc.greeting_behavior != "none" {
+            let private = !is_profile && npc.greeting_behavior == "private";
+            add_message(ctx, Some(room_id.to_string()), Some(actor_id.to_string()), None, if private { character_id.clone() } else { None }, if private { "npc_whisper" } else { "npc_speech" }, if private { format!("{} whispers to you: \"Welcome, {}.\"", npc.name, actor_name) } else { format!("{}: \"Welcome, {}.\"", npc.name, actor_name) }, None, None);
+        }
+    }
+}
+
 fn actor_health_max(ctx: &ReducerContext, actor_id: &str, definition: &StatDefinition) -> i32 {
     actor_stat_row(ctx, actor_id, definition).base_value.clamp(definition.minimum, definition.maximum)
 }
@@ -2089,10 +3081,208 @@ fn combat_damage(ctx: &ReducerContext, attacker_id: &str, target_id: &str) -> (i
     )
 }
 
+fn basic_attack_cooldown_ms(ctx: &ReducerContext, actor_id: &str) -> u32 {
+    ctx.db.world_object().iter()
+        .filter(|object| object.location_kind == "equipped" && object.location_id == actor_id)
+        .filter_map(|object| object_definition_for(ctx, &object))
+        .find(|definition| definition.weapon_damage > 0)
+        .map(|weapon| weapon.attack_cooldown_ms)
+        .unwrap_or(2000)
+}
+
 fn deterministic_roll(seed: &str) -> u32 {
     seed.as_bytes().iter().fold(2_166_136_261u32, |hash, byte| {
         hash.wrapping_mul(16_777_619) ^ u32::from(*byte)
     })
+}
+
+fn ability_is_available(ctx: &ReducerContext, actor_id: &str, ability: &AbilityDefinition, level: u32) -> bool {
+    if !ability.enabled { return false; }
+    (ability.auto_learn && level >= ability.required_level)
+        || ctx.db.actor_ability().id().find(&format!("{actor_id}::{}", ability.id)).is_some()
+}
+
+fn find_ability(ctx: &ReducerContext, query: &str) -> Option<AbilityDefinition> {
+    let query = query.trim();
+    ctx.db.ability_definition().iter().find(|ability| {
+        ability.id.eq_ignore_ascii_case(query)
+            || ability.name.eq_ignore_ascii_case(query)
+            || ability.name.to_lowercase().starts_with(&query.to_lowercase())
+    })
+}
+
+fn list_abilities(ctx: &ReducerContext, room_id: &str, actor_id: &str) {
+    let progression = ensure_actor_progression(ctx, actor_id);
+    let mut abilities = ctx.db.ability_definition().iter().filter(|ability| ability.enabled).collect::<Vec<_>>();
+    abilities.sort_by(|left, right| left.required_level.cmp(&right.required_level).then(left.name.cmp(&right.name)));
+    if abilities.is_empty() {
+        rpg_message(ctx, room_id, actor_id, "system", "This world has no enabled abilities yet.".to_string());
+        return;
+    }
+    let lines = abilities.into_iter().map(|ability| {
+        let available = ability_is_available(ctx, actor_id, &ability, progression.level);
+        let cost = ability.resource_stat_id.as_ref()
+            .and_then(|id| ctx.db.stat_definition().id().find(id))
+            .map(|stat| format!("{} {}", ability.resource_cost, stat.name))
+            .unwrap_or_else(|| "free".to_string());
+        let state = if available {
+            let remaining = cooldown_remaining_ms(ctx, actor_id, &format!("ability:{}", ability.id));
+            if remaining == 0 { "ready".to_string() } else { format!("{:.1}s cooldown", remaining as f32 / 1000.0) }
+        } else if ability.auto_learn {
+            format!("unlocks at level {}", ability.required_level)
+        } else {
+            "requires an admin grant".to_string()
+        };
+        format!("• {} {} — {} · {} · {}", ability.icon, ability.name, cost, ability.target_type, state)
+    }).collect::<Vec<_>>();
+    rpg_message(ctx, room_id, actor_id, "system", format!("[ABILITIES · LEVEL {}]\n{}\n\nUse `cast <ability> at <target>`; self abilities need no target.", progression.level, lines.join("\n")));
+}
+
+fn ability_power(ctx: &ReducerContext, actor_id: &str, ability: &AbilityDefinition) -> i32 {
+    let range = ability.power_max.saturating_sub(ability.power_min).saturating_add(1).max(1) as u32;
+    let rolled = ability.power_min.saturating_add((deterministic_roll(&format!("{actor_id}:{}:{}", ability.id, ctx.timestamp.to_micros_since_unix_epoch())) % range) as i32);
+    let scaling = ability.scales_with_stat.as_ref()
+        .and_then(|stat_id| ctx.db.stat_definition().id().find(stat_id))
+        .map(|definition| actor_stat_value(ctx, actor_id, &definition).saturating_mul(ability.scaling_percent) / 100)
+        .unwrap_or(0);
+    rolled.saturating_add(scaling).max(0)
+}
+
+fn cast_ability(
+    ctx: &ReducerContext,
+    room_id: &str,
+    actor_id: &str,
+    actor_name: &str,
+    ability_query: &str,
+    target_query: Option<&str>,
+) {
+    let progression = ensure_actor_progression(ctx, actor_id);
+    let Some(ability) = find_ability(ctx, ability_query) else {
+        rpg_message(ctx, room_id, actor_id, "error", format!("There is no ability named \"{}\".", ability_query.trim()));
+        return;
+    };
+    if !ability_is_available(ctx, actor_id, &ability, progression.level) {
+        let reason = if ability.auto_learn { format!("It unlocks at level {}.", ability.required_level) } else { "It must be granted by an administrator.".to_string() };
+        rpg_message(ctx, room_id, actor_id, "error", format!("You have not learned {}. {reason}", ability.name));
+        return;
+    }
+    let action_id = format!("ability:{}", ability.id);
+    let remaining = cooldown_remaining_ms(ctx, actor_id, &action_id);
+    if remaining > 0 {
+        rpg_message(ctx, room_id, actor_id, "error", format!("{} will be ready in {:.1} seconds.", ability.name, remaining as f32 / 1000.0));
+        return;
+    }
+
+    let target_query = target_query.map(str::trim).filter(|value| !value.is_empty());
+    let target = match ability.target_type.as_str() {
+        "self" => Some((actor_id.to_string(), actor_name.to_string(), false)),
+        "ally" if target_query.is_none() || target_query.map(|value| value.eq_ignore_ascii_case("self") || value.eq_ignore_ascii_case("me") || value.eq_ignore_ascii_case(actor_name)).unwrap_or(false) => {
+            Some((actor_id.to_string(), actor_name.to_string(), false))
+        }
+        "ally" => target_actor_in_room(ctx, room_id, actor_id, target_query.unwrap_or_default())
+            .filter(|(target_id, _, target_is_npc)| *target_id == actor_id || !*target_is_npc || ctx.db.npc().id().find(target_id).map(|npc| npc_disposition(&npc) != "hostile").unwrap_or(false)),
+        "enemy" => target_query.and_then(|query| target_actor_in_room(ctx, room_id, actor_id, query)),
+        _ => None,
+    };
+    let Some((target_id, target_name, target_is_npc)) = target else {
+        let usage = if ability.target_type == "self" { format!("cast {}", ability.name) } else { format!("cast {} at <target>", ability.name) };
+        rpg_message(ctx, room_id, actor_id, "error", format!("No valid {} target was found. Use `{usage}`.", ability.target_type));
+        return;
+    };
+    let target_npc = if target_is_npc { ctx.db.npc().id().find(&target_id) } else { None };
+    if ability.target_type == "enemy" {
+        if let Some(npc) = target_npc.as_ref() {
+            penalize_npc_attack(ctx, room_id, actor_id, actor_name, npc, false);
+            if actor_current_room(ctx, actor_id).as_deref() != Some(room_id) { return; }
+        } else if !target_is_npc && !region_for_room(ctx, room_id).map(|region| region.pvp_enabled).unwrap_or(false) {
+            record_safe_zone_crime(ctx, room_id, actor_id, actor_name, None, true, 1);
+        }
+        if target_npc.as_ref().map(|npc| npc_disposition(npc) == "friendly").unwrap_or(false) {
+            rpg_message(ctx, room_id, actor_id, "error", format!("{target_name} is friendly and cannot be targeted by hostile abilities."));
+            return;
+        }
+        if !target_is_npc && !region_for_room(ctx, room_id).map(|region| region.pvp_enabled).unwrap_or(false) {
+            rpg_message(ctx, room_id, actor_id, "error", "Player combat is disabled in this region.".to_string());
+            return;
+        }
+    }
+
+    let resource = ability.resource_stat_id.as_ref().and_then(|id| ctx.db.stat_definition().id().find(id));
+    if ability.resource_stat_id.is_some() && resource.is_none() {
+        rpg_message(ctx, room_id, actor_id, "error", "This ability's resource stat no longer exists.".to_string());
+        return;
+    }
+    if let Some(resource) = resource.as_ref() {
+        let row = actor_stat_row(ctx, actor_id, resource);
+        if row.current_value < ability.resource_cost {
+            rpg_message(ctx, room_id, actor_id, "error", format!("{} needs {} {}, but you have {}.", ability.name, ability.resource_cost, resource.name, row.current_value));
+            return;
+        }
+    }
+    let effect_stat = ability.effect_stat_id.as_ref()
+        .and_then(|id| ctx.db.stat_definition().id().find(id))
+        .or_else(|| if matches!(ability.effect_type.as_str(), "damage" | "heal") { stat_definition_by_role(ctx, "health") } else { None });
+    let Some(effect_stat) = effect_stat else {
+        rpg_message(ctx, room_id, actor_id, "error", "This ability's effect stat is not configured.".to_string());
+        return;
+    };
+    let target_row = actor_stat_row(ctx, &target_id, &effect_stat);
+    if ability.effect_type == "damage" && target_row.current_value <= effect_stat.minimum {
+        rpg_message(ctx, room_id, actor_id, "error", format!("{target_name} is already defeated."));
+        return;
+    }
+
+    if let Some(resource) = resource.as_ref() {
+        let row = actor_stat_row(ctx, actor_id, resource);
+        set_actor_stat_current(ctx, actor_id, resource, row.current_value.saturating_sub(ability.resource_cost));
+    }
+    set_cooldown(ctx, actor_id, &action_id, ability.cooldown_ms.max(ability.cast_time_ms));
+    let mut power = ability_power(ctx, actor_id, &ability);
+    if ability.effect_type == "damage" && ability.mitigation_type == "armor" {
+        let innate_defense = stat_definition_by_role(ctx, "defense").map(|definition| actor_stat_value(ctx, &target_id, &definition)).unwrap_or(0);
+        let armor = ctx.db.world_object().iter()
+            .filter(|object| object.location_kind == "equipped" && object.location_id == target_id)
+            .filter_map(|object| object_definition_for(ctx, &object))
+            .map(|definition| definition.armor_value).sum::<i32>();
+        power = power.saturating_sub(innate_defense.saturating_add(armor)).max(1);
+    }
+
+    match ability.effect_type.as_str() {
+        "damage" => {
+            let next = target_row.current_value.saturating_sub(power).max(effect_stat.minimum);
+            set_actor_stat_current(ctx, &target_id, &effect_stat, next);
+            let result = if next <= effect_stat.minimum { format!(" {target_name} is defeated.") } else { format!(" {target_name} has {next} {} remaining.", effect_stat.name) };
+            add_message(ctx, Some(room_id.to_string()), Some(actor_id.to_string()), Some(actor_name.to_string()), None, "combat",
+                format!("{actor_name} uses {} {} on {target_name} for {power} damage.{result}", ability.icon, ability.name), None, None);
+            if next <= effect_stat.minimum {
+                if let Some(npc) = target_npc {
+                    penalize_npc_attack(ctx, room_id, actor_id, actor_name, &npc, true);
+                    advance_quest_event(ctx, actor_id, "kill_npc", &npc.id, 1);
+                    if let Some(faction_id) = npc.faction.as_ref() { advance_quest_event(ctx, actor_id, "kill_faction", faction_id, 1); }
+                    let xp_reward = npc.xp_reward;
+                    let drops = defeat_npc(ctx, npc, room_id);
+                    rpg_message(ctx, room_id, actor_id, "system", award_experience(ctx, actor_id, xp_reward));
+                    if !drops.is_empty() { rpg_message(ctx, room_id, actor_id, "system", format!("{target_name} drops {}.", drops.join(", "))); }
+                } else {
+                    respawn_player(ctx, &target_id, room_id, &target_name, &effect_stat);
+                }
+            } else if let Some(npc) = target_npc {
+                if npc_disposition(&npc) != "friendly" {
+                    if let Some(health) = stat_definition_by_role(ctx, "health") {
+                        npc_attack_player(ctx, npc, room_id, actor_id, actor_name, &health);
+                    }
+                }
+            }
+        }
+        "heal" | "restore" => {
+            let next = target_row.current_value.saturating_add(power).min(target_row.base_value);
+            let applied = next.saturating_sub(target_row.current_value);
+            set_actor_stat_current(ctx, &target_id, &effect_stat, next);
+            add_message(ctx, Some(room_id.to_string()), Some(actor_id.to_string()), Some(actor_name.to_string()), None, "combat",
+                format!("{actor_name} uses {} {} on {target_name}, restoring {applied} {}.", ability.icon, ability.name, effect_stat.name), None, None);
+        }
+        _ => {}
+    }
 }
 
 fn drop_enemy_loot(ctx: &ReducerContext, npc: &Npc, room_id: &str) -> Vec<String> {
@@ -2241,12 +3431,19 @@ fn advance_world(ctx: &ReducerContext, actor_id: &str, actor_name: &str) {
     let Some(room_id) = actor_current_room(ctx, actor_id) else { return };
     let Some(health) = stat_definition_by_role(ctx, "health") else { return };
     let hostiles = ctx.db.npc().iter()
-        .filter(|npc| npc.current_room.as_deref() == Some(room_id.as_str()) && npc.defeated_at.is_none() && npc_disposition(npc) == "hostile" && npc.attack_on_sight)
+        .filter(|npc| !npc.is_guard && npc.current_room.as_deref() == Some(room_id.as_str()) && npc.defeated_at.is_none() && npc_disposition(npc) == "hostile" && npc.attack_on_sight)
         .collect::<Vec<_>>();
     for npc in hostiles {
         if actor_current_room(ctx, actor_id).as_deref() != Some(room_id.as_str()) { break; }
         if action_is_due(ctx, npc.last_attack_at, npc.attack_interval_seconds) {
             npc_attack_player(ctx, npc, &room_id, actor_id, actor_name, &health);
+        }
+    }
+    let guards = ctx.db.npc().iter().filter(|npc| npc.is_guard && npc.current_room.as_deref() == Some(room_id.as_str()) && npc.defeated_at.is_none()).collect::<Vec<_>>();
+    for guard in guards {
+        if actor_current_room(ctx, actor_id).as_deref() != Some(room_id.as_str()) { break; }
+        if guard_is_hostile_to_actor(ctx, &guard, actor_id, &room_id) && action_is_due(ctx, guard.last_attack_at, guard.attack_interval_seconds) {
+            npc_attack_player(ctx, guard, &room_id, actor_id, actor_name, &health);
         }
     }
 }
@@ -2267,6 +3464,7 @@ fn handle_rpg_command(
     actor_name: &str,
 ) -> Result<bool, String> {
     let lower = raw.to_lowercase();
+    ensure_actor_progression(ctx, actor_id);
 
     if matches!(lower.as_str(), "inventory" | "inv" | "i" | "equipment") {
         list_inventory(ctx, room_id, actor_id);
@@ -2274,6 +3472,35 @@ fn handle_rpg_command(
     }
     if matches!(lower.as_str(), "stats" | "status" | "sheet") {
         list_stats(ctx, room_id, actor_id);
+        return Ok(true);
+    }
+    if matches!(lower.as_str(), "abilities" | "spells" | "skills" | "powers") {
+        list_abilities(ctx, room_id, actor_id);
+        return Ok(true);
+    }
+    if matches!(lower.as_str(), "reputation" | "rep" | "factions") {
+        list_reputation(ctx, room_id, actor_id);
+        return Ok(true);
+    }
+    if matches!(lower.as_str(), "quests" | "quest log" | "journal") {
+        list_quests(ctx, room_id, actor_id);
+        return Ok(true);
+    }
+    if let Some(query) = lower.strip_prefix("quest ") {
+        list_npc_quests(ctx, room_id, actor_id, query.trim());
+        return Ok(true);
+    }
+    if let Some(query) = lower.strip_prefix("accept ") {
+        accept_quest(ctx, room_id, actor_id, query.trim());
+        return Ok(true);
+    }
+    if let Some(query) = lower.strip_prefix("turn in ").or_else(|| lower.strip_prefix("complete ")) {
+        turn_in_quest(ctx, room_id, actor_id, query.trim());
+        return Ok(true);
+    }
+    if let Some(rest) = lower.strip_prefix("cast ").or_else(|| lower.strip_prefix("ability ")) {
+        let (ability, target) = rest.split_once(" at ").map(|(ability, target)| (ability, Some(target))).unwrap_or((rest, None));
+        cast_ability(ctx, room_id, actor_id, actor_name, ability.trim(), target);
         return Ok(true);
     }
     if matches!(lower.as_str(), "exits" | "directions") {
@@ -2307,10 +3534,17 @@ fn handle_rpg_command(
         let threatened = ctx.db.npc().iter().any(|npc| npc.current_room.as_deref() == Some(room_id) && npc.defeated_at.is_none() && npc_disposition(&npc) == "hostile");
         if threatened {
             rpg_message(ctx, room_id, actor_id, "error", "You cannot rest while a hostile enemy is present.".to_string());
-        } else if let Some(health) = stat_definition_by_role(ctx, "health") {
-            let restored = actor_health_max(ctx, actor_id, &health);
-            set_actor_stat_current(ctx, actor_id, &health, restored);
-            rpg_message(ctx, room_id, actor_id, "system", format!("You rest and recover to {restored} {}.", health.name));
+        } else if stat_definition_by_role(ctx, "health").is_some() {
+            let recoverable = ctx.db.stat_definition().iter()
+                .filter(|definition| definition.regeneration_per_second > 0 || matches!(definition.role.as_deref(), Some("health" | "mana" | "energy" | "focus")))
+                .collect::<Vec<_>>();
+            let mut restored = Vec::new();
+            for definition in recoverable {
+                let maximum = actor_stat_row(ctx, actor_id, &definition).base_value;
+                set_actor_stat_current(ctx, actor_id, &definition, maximum);
+                restored.push(format!("{} {maximum}", definition.name));
+            }
+            rpg_message(ctx, room_id, actor_id, "system", format!("You rest and recover {}.", restored.join(", ")));
         } else {
             rpg_message(ctx, room_id, actor_id, "error", "Rest requires a stat with the Health role.".to_string());
         }
@@ -2350,16 +3584,28 @@ fn handle_rpg_command(
                     .filter(|object| object.location_kind == "container" && object.location_id == container.id)
                     .collect::<Vec<_>>();
                 let mut taken = Vec::new();
+                let mut skipped = 0u32;
                 for object in contents {
                     let Some(definition) = object_definition_for(ctx, &object) else { continue };
                     if !definition.portable { continue; }
+                    if !inventory_has_space(ctx, actor_id, 1) { skipped = skipped.saturating_add(1); continue; }
                     ctx.db.world_object().id().update(WorldObject {
                         location_kind: "inventory".to_string(), location_id: actor_id.to_string(), equipped_slot: None,
                         updated_at: ctx.timestamp, ..object
                     });
                     taken.push(definition.name);
                 }
-                rpg_message(ctx, room_id, actor_id, "system", if taken.is_empty() { format!("{} contains nothing you can carry.", container_definition.name) } else { format!("You take {} from {}.", taken.join(", "), container_definition.name) });
+                let message = if taken.is_empty() && skipped > 0 {
+                    format!("Your inventory is full ({}/{} slots).", inventory_used(ctx, actor_id), inventory_slots(ctx, actor_id))
+                } else if taken.is_empty() {
+                    format!("{} contains nothing you can carry.", container_definition.name)
+                } else if skipped > 0 {
+                    format!("You take {} from {}. {skipped} stack(s) remain because your inventory is full.", taken.join(", "), container_definition.name)
+                } else {
+                    format!("You take {} from {}.", taken.join(", "), container_definition.name)
+                };
+                rpg_message(ctx, room_id, actor_id, "system", message);
+                refresh_actor_acquire_quests(ctx, actor_id);
                 return Ok(true);
             }
             let Some((object, definition)) = find_object_at(ctx, "container", &container.id, item_query.trim()) else {
@@ -2370,11 +3616,16 @@ fn handle_rpg_command(
                 rpg_message(ctx, room_id, actor_id, "error", format!("{} cannot be carried.", definition.name));
                 return Ok(true);
             }
+            if !inventory_has_space(ctx, actor_id, 1) {
+                rpg_message(ctx, room_id, actor_id, "error", format!("Your inventory is full ({}/{} slots).", inventory_used(ctx, actor_id), inventory_slots(ctx, actor_id)));
+                return Ok(true);
+            }
             ctx.db.world_object().id().update(WorldObject {
                 location_kind: "inventory".to_string(), location_id: actor_id.to_string(), equipped_slot: None,
                 updated_at: ctx.timestamp, ..object
             });
             rpg_message(ctx, room_id, actor_id, "system", format!("You take {} from {}.", definition.name, container_definition.name));
+            refresh_actor_acquire_quests(ctx, actor_id);
             return Ok(true);
         }
 
@@ -2387,11 +3638,16 @@ fn handle_rpg_command(
             rpg_message(ctx, room_id, actor_id, "error", format!("{} is fixed in place.", definition.name));
             return Ok(true);
         }
+        if !inventory_has_space(ctx, actor_id, 1) {
+            rpg_message(ctx, room_id, actor_id, "error", format!("Your inventory is full ({}/{} slots).", inventory_used(ctx, actor_id), inventory_slots(ctx, actor_id)));
+            return Ok(true);
+        }
         ctx.db.world_object().id().update(WorldObject {
             location_kind: "inventory".to_string(), location_id: actor_id.to_string(), equipped_slot: None,
             is_active: false, updated_at: ctx.timestamp, ..object
         });
         rpg_message(ctx, room_id, actor_id, "system", format!("You take {}.", definition.name));
+        refresh_actor_acquire_quests(ctx, actor_id);
         return Ok(true);
     }
 
@@ -2400,11 +3656,19 @@ fn handle_rpg_command(
             rpg_message(ctx, room_id, actor_id, "error", format!("You are not carrying \"{}\".", query.trim()));
             return Ok(true);
         };
+        if object.location_kind == "equipped" && definition.inventory_slots_bonus > 0 {
+            let post_slots = inventory_slots(ctx, actor_id).saturating_sub(definition.inventory_slots_bonus);
+            if inventory_used(ctx, actor_id) > post_slots {
+                rpg_message(ctx, room_id, actor_id, "error", format!("Dropping {} would reduce your capacity below the {} stacks already carried.", definition.name, inventory_used(ctx, actor_id)));
+                return Ok(true);
+            }
+        }
         ctx.db.world_object().id().update(WorldObject {
             location_kind: "room".to_string(), location_id: room_id.to_string(), equipped_slot: None,
             is_active: false, updated_at: ctx.timestamp, ..object
         });
         rpg_message(ctx, room_id, actor_id, "system", format!("You drop {}.", definition.name));
+        refresh_actor_acquire_quests(ctx, actor_id);
         return Ok(true);
     }
 
@@ -2444,6 +3708,7 @@ fn handle_rpg_command(
             let quantity = item.quantity;
             consume_object_quantity(ctx, item, quantity);
             rpg_message(ctx, room_id, actor_id, "system", format!("You add {} to {} (+{} fuel-seconds).", item_definition.name, container_definition.name, added / container_definition.burn_rate.max(1)));
+            refresh_actor_acquire_quests(ctx, actor_id);
             return Ok(true);
         }
         if container_definition.capacity == 0 {
@@ -2460,6 +3725,7 @@ fn handle_rpg_command(
             updated_at: ctx.timestamp, ..item
         });
         rpg_message(ctx, room_id, actor_id, "system", format!("You put {} in {}.", item_definition.name, container_definition.name));
+        refresh_actor_acquire_quests(ctx, actor_id);
         return Ok(true);
     }
 
@@ -2472,8 +3738,20 @@ fn handle_rpg_command(
             rpg_message(ctx, room_id, actor_id, "error", format!("{} is not equippable.", definition.name));
             return Ok(true);
         };
-        let occupied = ctx.db.world_object().iter().find(|item| item.location_kind == "equipped" && item.location_id == actor_id && item.equipped_slot.as_deref() == Some(slot.as_str()));
-        if let Some(occupied) = occupied {
+        let capacity = equipment_slot_capacity(ctx, &slot);
+        let equipped_in_slot = ctx.db.world_object().iter()
+            .filter(|item| item.location_kind == "equipped" && item.location_id == actor_id && item.equipped_slot.as_deref() == Some(slot.as_str()))
+            .collect::<Vec<_>>();
+        let displaced = if equipped_in_slot.len() as u32 >= capacity { equipped_in_slot.first().cloned() } else { None };
+        let displaced_bonus = displaced.as_ref().and_then(|item| object_definition_for(ctx, item)).map(|value| value.inventory_slots_bonus).unwrap_or(0);
+        let post_used = if displaced.is_some() { inventory_used(ctx, actor_id) } else { inventory_used(ctx, actor_id).saturating_sub(1) };
+        let post_slots = inventory_slots(ctx, actor_id).saturating_sub(displaced_bonus).saturating_add(definition.inventory_slots_bonus);
+        if post_used > post_slots {
+            rpg_message(ctx, room_id, actor_id, "error", format!("Equipping {} would leave {post_used} stacks in only {post_slots} inventory slots.", definition.name));
+            return Ok(true);
+        }
+        if equipped_in_slot.len() as u32 >= capacity {
+            let occupied = displaced.expect("occupied slot has an item");
             ctx.db.world_object().id().update(WorldObject {
                 location_kind: "inventory".to_string(), equipped_slot: None, updated_at: ctx.timestamp, ..occupied
             });
@@ -2481,7 +3759,8 @@ fn handle_rpg_command(
         ctx.db.world_object().id().update(WorldObject {
             location_kind: "equipped".to_string(), equipped_slot: Some(slot.clone()), updated_at: ctx.timestamp, ..object
         });
-        rpg_message(ctx, room_id, actor_id, "system", format!("You equip {} in your {} slot.", definition.name, slot));
+        rpg_message(ctx, room_id, actor_id, "system", format!("You equip {} in your {} slot ({}/{capacity}).", definition.name, slot,
+            ctx.db.world_object().iter().filter(|item| item.location_kind == "equipped" && item.location_id == actor_id && item.equipped_slot.as_deref() == Some(slot.as_str())).count()));
         return Ok(true);
     }
 
@@ -2495,6 +3774,11 @@ fn handle_rpg_command(
             rpg_message(ctx, room_id, actor_id, "error", format!("Nothing matching \"{}\" is equipped.", query.trim()));
             return Ok(true);
         };
+        let post_slots = inventory_slots(ctx, actor_id).saturating_sub(definition.inventory_slots_bonus);
+        if inventory_used(ctx, actor_id).saturating_add(1) > post_slots {
+            rpg_message(ctx, room_id, actor_id, "error", format!("Your inventory is full ({}/{} slots). Drop or store something first.", inventory_used(ctx, actor_id), inventory_slots(ctx, actor_id)));
+            return Ok(true);
+        }
         ctx.db.world_object().id().update(WorldObject {
             location_kind: "inventory".to_string(), equipped_slot: None, updated_at: ctx.timestamp, ..object
         });
@@ -2553,6 +3837,7 @@ fn handle_rpg_command(
         set_actor_stat_current(ctx, actor_id, &stat_definition, current.saturating_add(delta));
         if behavior.get("consume").and_then(Value::as_bool).unwrap_or(true) { consume_object_quantity(ctx, object, 1); }
         rpg_message(ctx, room_id, actor_id, "system", format!("You use {}. {} changes by {:+}.", definition.name, stat_definition.name, delta));
+        refresh_actor_acquire_quests(ctx, actor_id);
         return Ok(true);
     }
 
@@ -2566,6 +3851,12 @@ fn handle_rpg_command(
             return Ok(true);
         };
         let target_npc = if target_is_npc { ctx.db.npc().id().find(&target_id) } else { None };
+        if let Some(npc) = target_npc.as_ref() {
+            penalize_npc_attack(ctx, room_id, actor_id, actor_name, npc, false);
+            if actor_current_room(ctx, actor_id).as_deref() != Some(room_id) { return Ok(true); }
+        } else if !target_is_npc && !region_for_room(ctx, room_id).map(|region| region.pvp_enabled).unwrap_or(false) {
+            record_safe_zone_crime(ctx, room_id, actor_id, actor_name, None, true, 1);
+        }
         if target_npc.as_ref().map(|npc| npc_disposition(npc) == "friendly").unwrap_or(false) {
             rpg_message(ctx, room_id, actor_id, "error", format!("{target_name} is friendly and cannot be attacked."));
             return Ok(true);
@@ -2579,12 +3870,18 @@ fn handle_rpg_command(
             rpg_message(ctx, room_id, actor_id, "error", "You are defeated and cannot attack.".to_string());
             return Ok(true);
         }
+        let remaining = cooldown_remaining_ms(ctx, actor_id, "basic-attack");
+        if remaining > 0 {
+            rpg_message(ctx, room_id, actor_id, "error", format!("Your next attack will be ready in {:.1} seconds.", remaining as f32 / 1000.0));
+            return Ok(true);
+        }
         let (damage, weapon_name) = combat_damage(ctx, actor_id, &target_id);
         let current_health = actor_stat_row(ctx, &target_id, &health_definition).current_value;
         if current_health <= health_definition.minimum {
             rpg_message(ctx, room_id, actor_id, "error", format!("{target_name} is already defeated."));
             return Ok(true);
         }
+        set_cooldown(ctx, actor_id, "basic-attack", basic_attack_cooldown_ms(ctx, actor_id));
         let next_health = current_health.saturating_sub(damage).max(health_definition.minimum);
         set_actor_stat_current(ctx, &target_id, &health_definition, next_health);
         let result = if next_health <= health_definition.minimum { format!(" {target_name} is defeated.") } else { format!(" {target_name} has {next_health} {} remaining.", health_definition.name) };
@@ -2592,7 +3889,12 @@ fn handle_rpg_command(
             format!("{actor_name} attacks {target_name} with {weapon_name} for {damage} damage.{result}"), None, None);
         if next_health <= health_definition.minimum {
             if let Some(npc) = target_npc {
+                penalize_npc_attack(ctx, room_id, actor_id, actor_name, &npc, true);
+                advance_quest_event(ctx, actor_id, "kill_npc", &npc.id, 1);
+                if let Some(faction_id) = npc.faction.as_ref() { advance_quest_event(ctx, actor_id, "kill_faction", faction_id, 1); }
+                let xp_reward = npc.xp_reward;
                 let drops = defeat_npc(ctx, npc, room_id);
+                rpg_message(ctx, room_id, actor_id, "system", award_experience(ctx, actor_id, xp_reward));
                 let loot_message = if drops.is_empty() {
                     format!("{target_name} carried no loot.")
                 } else {
@@ -2662,7 +3964,7 @@ pub fn submit_command(
     }
 
     if raw == "help" {
-        add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", "[AVAILABLE COMMANDS]\n\n• say <message> - Speak to everyone in the room\n• whisper <name> <message> - Send a private message\n• look / who - Examine the room and nearby actors\n• talk <npc> <message> - Speak to an AI-powered NPC\n• inspect <name> - Inspect a character\n• inventory / equipment / stats - View your character\n• take / drop / examine <item> - Interact with objects\n• open / loot <container> - View chest or container contents\n• take all from <container> - Collect portable contents\n• put <item> in <container> - Store an item or add fuel\n• equip / unequip / use <item> - Use gear and consumables\n• light / extinguish <object> - Control fuel-burning objects\n• combat / attack <target> - Check rules or fight\n• rest / wait - Recover safely or let the world advance\n• flee <direction> - Escape through an exit\n• set handle <name> - Set your saved-world handle\n• <direction> - Move through an exit".to_string(), None, None);
+        add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", "[AVAILABLE COMMANDS]\n\n• say <message> - Speak to everyone in the room\n• whisper <name> <message> - Send a private message\n• look / who - Examine the room and nearby actors\n• talk <npc> <message> - Speak to an AI-powered NPC\n• inspect <name> - Inspect a character\n• inventory / equipment / stats - View capacity, level, XP, resources, and gear\n• abilities - View learned and upcoming abilities\n• cast <ability> at <target> - Use magic, techniques, or utility powers\n• take / drop / examine <item> - Interact with objects\n• open / loot <container> - View chest or container contents\n• take all from <container> - Collect portable contents\n• put <item> in <container> - Store an item or add fuel\n• equip / unequip / use <item> - Use gear and consumables\n• light / extinguish <object> - Control fuel-burning objects\n• combat / attack <target> - Check rules or make a weapon-speed-limited attack\n• rest / wait - Recover safely or let the world advance\n• flee <direction> - Escape through an exit\n• set handle <name> - Set your saved-world handle\n• <direction> - Move through an exit".to_string(), None, None);
     } else if let Some(handle) = raw.strip_prefix("set handle ") {
         let handle = handle.trim();
         if !is_profile || handle.is_empty() || handle.len() > 30 {
@@ -2697,7 +3999,7 @@ pub fn submit_command(
             let characters = ctx.db.character().iter().filter(|row| row.current_room.as_deref() == Some(room_id.as_str()) && row.id != actor_id).map(|row| format!("• {}", row.name)).collect::<Vec<_>>();
             if !characters.is_empty() { body.push_str(&format!("\n\n[CHARACTERS]\n{}", characters.join("\n"))); }
             let npcs = ctx.db.npc().iter().filter(|row| row.current_room.as_deref() == Some(room_id.as_str())).map(|row| {
-                let behavior = if npc_disposition(&row) == "hostile" { "ENEMY" } else if row.behavior_type.starts_with("patrol") { "PATROLLING" } else { "NPC" };
+                let behavior = if row.is_guard { "GUARD" } else if npc_disposition(&row) == "hostile" { "ENEMY" } else if row.behavior_type.starts_with("patrol") { "PATROLLING" } else { "NPC" };
                 format!("• {} [{} · {}] - {}", row.name, row.alias.unwrap_or_default(), behavior, row.description.unwrap_or_default())
             }).collect::<Vec<_>>();
             if !npcs.is_empty() { body.push_str(&format!("\n\n[NPCs]\n{}", npcs.join("\n"))); }
@@ -2722,7 +4024,7 @@ pub fn submit_command(
         let characters = ctx.db.character().iter().filter(|row| row.current_room.as_deref() == Some(room_id.as_str()) && row.id != actor_id).map(|row| format!("• {}", row.name)).collect::<Vec<_>>();
         if !characters.is_empty() { lines.push(format!("[CHARACTERS]\n{}", characters.join("\n"))); }
         let npcs = ctx.db.npc().iter().filter(|row| row.current_room.as_deref() == Some(room_id.as_str())).map(|row| {
-            let label = if npc_disposition(&row) == "hostile" { "enemy" } else { "talk" };
+            let label = if row.is_guard { "guard" } else if npc_disposition(&row) == "hostile" { "enemy" } else { "talk" };
             format!("• {} ({label} {})", row.name, row.alias.unwrap_or_default())
         }).collect::<Vec<_>>();
         if !npcs.is_empty() { lines.push(format!("[NPCs]\n{}", npcs.join("\n"))); }
@@ -2750,16 +4052,14 @@ pub fn submit_command(
         }
     } else if let Some(rest) = raw.strip_prefix("talk ") {
         let alias = rest.split_whitespace().next().unwrap_or_default();
-        if let Some(npc) = ctx.db.npc().iter().find(|npc| npc.current_room.as_deref() == Some(room_id.as_str()) && npc.alias.as_deref().map(|value| value.eq_ignore_ascii_case(alias)).unwrap_or(false)) {
+        if let Some(npc) = ctx.db.npc().iter().find(|npc| npc.current_room.as_deref() == Some(room_id.as_str()) && npc_matches(npc, alias)) {
+            advance_quest_event(ctx, &actor_id, "talk_npc", &npc.id, 1);
             add_message(ctx, Some(room_id), Some(actor_id), None, None, "npc_typing", format!("{} is thinking...", npc.name), None, None);
             return Ok(());
         }
         add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", format!("There is no one named \"{alias}\" here to talk to. Use 'who' to see who's present."), None, None);
     } else if raw == "__GREET" {
-        for npc in ctx.db.npc().iter().filter(|npc| npc.current_room.as_deref() == Some(room_id.as_str()) && npc.greeting_behavior != "none") {
-            let private = !is_profile && npc.greeting_behavior == "private";
-            add_message(ctx, Some(room_id.clone()), Some(actor_id.clone()), None, if private { character_id.clone() } else { None }, if private { "npc_whisper" } else { "npc_speech" }, if private { format!("{} whispers to you: \"Welcome, {}.\"", npc.name, actor_name) } else { format!("{}: \"Welcome, {}.\"", npc.name, actor_name) }, None, None);
-        }
+        handle_room_entry(ctx, &room_id, &actor_id, &actor_name, character_id.clone(), is_profile);
     } else if let Some(exit) = ctx.db.exit().iter().find(|exit| {
         let movement = raw.strip_prefix("flee ").unwrap_or(raw.as_str());
         exit.from_room.as_deref() == Some(room_id.as_str()) && exit.verb.eq_ignore_ascii_case(movement)
@@ -2770,7 +4070,8 @@ pub fn submit_command(
             } else if let Some(character) = ctx.db.character().id().find(&actor_id) {
                 ctx.db.character().id().update(Character { current_room: Some(destination.clone()), ..character });
             }
-            add_message(ctx, Some(destination), Some(actor_id), Some(actor_name.clone()), None, "system", format!("{actor_name} arrives."), None, None);
+            handle_room_entry(ctx, &destination, &actor_id, &actor_name, character_id.clone(), is_profile);
+            add_message(ctx, Some(destination), Some(actor_id.clone()), Some(actor_name.clone()), None, "system", format!("{actor_name} arrives."), None, None);
         }
     } else {
         add_message(ctx, Some(room_id), Some(actor_id), None, None, "system", format!("You cannot go \"{raw}\" from here. Type \"exits\" to see available directions."), None, None);

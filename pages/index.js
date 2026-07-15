@@ -12,21 +12,27 @@ const GITHUB_URL = 'https://github.com/SeloSlav/arkyv-engine';
 const CAPABILITIES = [
   { icon: 'world', label: 'World building', title: 'Visual world editor', body: 'Shape regions, rooms, directional exits, NPCs, descriptions, elevation, and atmosphere from one connected canvas.' },
   { icon: 'users', label: 'Multiplayer', title: 'A world that is live', body: 'Room chat, regional chat, movement, characters, and world state update for every connected player in real time.' },
-  { icon: 'spark', label: 'Intelligence', title: 'AI characters with context', body: 'Give NPCs a personality and let players speak with them naturally through OpenAI or Grok-powered conversations.' },
+  { icon: 'spark', label: 'Intelligence', title: 'AI characters with context', body: 'Give NPCs a personality and let players speak with them naturally while recent context keeps each conversation grounded.' },
   { icon: 'sword', label: 'Game systems', title: 'Your rules, not ours', body: 'Define hero stats, weapons, armor, slots, consumables, containers, fuel burners, stat effects, and combat behavior.' },
   { icon: 'shield', label: 'Authority', title: 'Server-owned outcomes', body: 'Rust reducers validate ownership and resolve combat, inventory, equipment, fuel, and stats on the authoritative backend.' },
-  { icon: 'image', label: 'Generative media', title: 'Scenes with a face', body: 'Optionally generate pixel-art rooms, expressive NPC portraits, and readable inventory art with RetroDiffusion.' },
+  { icon: 'image', label: 'Generative media', title: 'Scenes with a face', body: 'Generate pixel-art rooms, expressive NPC portraits, and readable inventory art through the RetroDiffusion API endpoint.' },
   { icon: 'characters', label: 'Identity', title: 'A cast of characters', body: 'Each saved world can hold multiple player characters, with persistent locations, gear, stats, and histories.' },
-  { icon: 'archive', label: 'Persistence', title: 'Saved worlds, no passwords', body: 'Local signed identity tokens make creating, switching, and returning to a world quick—without an account service.' },
+  { icon: 'archive', label: 'Persistence', title: 'Saved worlds, no passwords', body: 'Local signed identity tokens make creating, switching, and returning to a world quick. No account service is required.' },
   { icon: 'terminal', label: 'Play', title: 'A modern command console', body: 'Explore, talk, fight, equip gear, manage inventory, and chat through a responsive terminal built for desktop and mobile.' },
   { icon: 'code', label: 'Ownership', title: 'Open source and self-hosted', body: 'Run the complete Next.js, SpacetimeDB, and Rust stack yourself. Extend the engine instead of renting the world.' },
 ];
 
 const EDITOR_NODES = [
-  { name: 'Whispering Grove', meta: 'Starting room', left: '7%', top: '16%', tone: 'emerald' },
-  { name: 'Moonwell', meta: 'Lore encounter', left: '56%', top: '8%', tone: 'cyan' },
-  { name: 'Old Watchtower', meta: 'Combat area', left: '61%', top: '60%', tone: 'pink' },
-  { name: 'Hearthlight Inn', meta: 'Social hub', left: '9%', top: '69%', tone: 'amber' },
+  { name: 'Whispering Grove', meta: 'Starting room', description: 'Aurora light moves between silver birches as a lone traveler follows the frozen trail.', image: '/starter-images/whispering-wood.png', imageAlt: 'Pixel-art Whispering Grove beneath an aurora', left: '7%', top: '16%', tone: 'emerald' },
+  { name: 'Moonwell', meta: 'Lore encounter', description: 'A mirror of starlight rests beneath the ancient canopy.', image: '/starter-images/moonwell.png', imageAlt: 'Pixel-art Moonwell beneath an ancient starlit canopy', left: '56%', top: '8%', tone: 'cyan' },
+  { name: 'Old Watchtower', meta: 'Combat area', description: 'An old watchtower keeps its vigil where the road disappears into mist.', image: '/starter-images/old-watchtower.png', imageAlt: 'Pixel-art Old Watchtower on a misty forest road', left: '61%', top: '60%', tone: 'pink' },
+  { name: 'Hearthlight Inn', meta: 'Social hub', description: 'Lanterns, stained glass, and a warm hearth welcome travelers beneath a star-filled roof.', image: '/starter-images/hearthlight-inn.png', imageAlt: 'Pixel-art interior of the warm Hearthlight Inn', left: '9%', top: '69%', tone: 'amber' },
+];
+
+const FLOW_STEPS = [
+  { number: '01', icon: 'world', preview: 'author', title: 'Author in the studio', body: 'Design locations, cast NPCs, place objects, and define the mechanics that make this world unique.', meta: 'Next.js · React · Visual editor' },
+  { number: '02', icon: 'shield', preview: 'sync', title: 'Synchronize the truth', body: 'SpacetimeDB replicates live state while Rust reducers validate every mutation and resolve every outcome.', meta: 'SpacetimeDB · Rust · Realtime' },
+  { number: '03', icon: 'terminal', preview: 'play', title: 'Enter from anywhere', body: 'Players explore through a responsive terminal with world visuals, audio, chat, inventory, gear, and stats.', meta: 'Desktop · Mobile · Multiplayer' },
 ];
 
 const ICONS = {
@@ -50,9 +56,60 @@ function Arrow() {
   return <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true"><path d="M4 10h11M11 6l4 4-4 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
+function FlowScreenshot({ type }) {
+  const paths = {
+    author: 'studio / world-map',
+    sync: 'runtime / live-state',
+    play: 'world / whispering-wood',
+  };
+
+  return (
+    <div className={`landing-flow-shot landing-flow-shot--${type}`} aria-hidden="true">
+      <div className="landing-flow-shot__bar">
+        <span className="landing-flow-shot__lights"><i /><i /><i /></span>
+        <span className="landing-flow-shot__path">arkyv://{paths[type]}</span>
+        <span className="landing-flow-shot__live"><i /> live</span>
+      </div>
+
+      {type === 'author' && (
+        <div className="landing-flow-author">
+          <aside><span className="landing-flow-eyebrow">World</span><b>Whispering Wilds</b><span className="landing-flow-menu-item is-active">Map</span><span className="landing-flow-menu-item">Regions</span><span className="landing-flow-menu-item">Actors</span><span className="landing-flow-menu-item">Systems</span></aside>
+          <div className="landing-flow-canvas">
+            <svg viewBox="0 0 260 170" preserveAspectRatio="none"><path d="M52 54 C100 24 132 28 183 52M56 68 C70 110 90 125 126 137M190 68 C187 98 171 116 151 137" /></svg>
+            <span className="landing-flow-map-node node-grove"><i />Whispering Grove</span>
+            <span className="landing-flow-map-node node-moon"><i />Moonwell</span>
+            <span className="landing-flow-map-node node-inn"><i />Hearthlight Inn</span>
+          </div>
+          <aside className="landing-flow-inspector"><span className="landing-flow-eyebrow">Selected room</span><div className="landing-flow-room-thumb" /><b>Moonwell</b><span>Atmosphere</span><span>Actors & objects</span></aside>
+        </div>
+      )}
+
+      {type === 'sync' && (
+        <div className="landing-flow-sync">
+          <div className="landing-flow-sync__summary"><span className="landing-flow-eyebrow">Authoritative runtime</span><b><i /> arkyv-engine</b><div><span>Connected</span><strong>24 ms</strong></div><div><span>Replicated tables</span><strong>17</strong></div><div><span>Online identities</span><strong>4</strong></div></div>
+          <div className="landing-flow-sync__stream"><div className="landing-flow-stream-head"><span>Reducer activity</span><span>just now</span></div>{[
+            ['move_character', 'committed', 'cyan'],
+            ['submit_command', 'validated', 'emerald'],
+            ['update_actor_stat', 'replicated', 'violet'],
+            ['send_room_message', 'committed', 'cyan'],
+          ].map(([name, status, tone]) => <div className="landing-flow-event" key={name}><i className={`is-${tone}`} /><span><b>{name}</b><small>Rust reducer</small></span><em>{status}</em></div>)}</div>
+        </div>
+      )}
+
+      {type === 'play' && (
+        <div className="landing-flow-play">
+          <div className="landing-flow-play__scene"><span><b>Whispering Wood</b><small>Whispering Wilds</small></span></div>
+          <div className="landing-flow-play__terminal"><div><span>WORLD CONSOLE</span><em>SYNCED</em></div><p><i>❯</i> look</p><p className="response">Aurora light moves between the birches. A trail continues north.</p><p><i>❯</i> go north</p><p className="system">◆ You enter the Moonwell.</p><p className="prompt"><i>❯</i><span>type a command...</span></p></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function HomePage({ marketingSite }) {
   const router = useRouter();
   const { user } = useAuth();
+  const [selectedEditorNode, setSelectedEditorNode] = React.useState(EDITOR_NODES[1]);
   const primaryAction = () => router.push(user ? '/play' : '/auth');
   const builderAction = () => router.push(!marketingSite && user ? '/admin' : '/setup');
 
@@ -60,7 +117,7 @@ export default function HomePage({ marketingSite }) {
     <>
       <Head>
         <title>Arkyv Engine | Build worlds that remember</title>
-        <meta name="description" content="Build and host living text worlds with a visual editor, real-time multiplayer, AI NPCs, custom RPG systems, generated pixel art, and an authoritative Rust backend." />
+        <meta name="description" content="Build and host living text worlds with a visual editor, real-time multiplayer, AI NPCs, RetroDiffusion pixel art, custom RPG systems, and an authoritative Rust backend." />
         <meta name="theme-color" content="#050711" />
       </Head>
 
@@ -106,14 +163,14 @@ export default function HomePage({ marketingSite }) {
                 <div className="flex h-10 items-center gap-2 px-2 text-[0.57rem] font-semibold uppercase tracking-[0.18em] text-slate-600"><span className="h-2 w-2 rounded-full bg-rose-400/80" /><span className="h-2 w-2 rounded-full bg-amber-300/80" /><span className="h-2 w-2 rounded-full bg-emerald-300/80" /><span className="ml-2">arkyv://whispering-grove</span><span className="ml-auto flex items-center gap-1.5 text-emerald-300/75"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> 4 online</span></div>
                 <div className="grid min-h-[29rem] overflow-hidden rounded-xl border border-slate-800 bg-slate-950 md:grid-cols-[1.3fr_0.7fr]">
                   <div className="relative min-h-[22rem] overflow-hidden md:min-h-0">
-                    <Image src="/starter-images/town-square.png" alt="Pixel-art town square inside an Arkyv world" fill sizes="(min-width: 768px) 32vw, 100vw" className="object-cover [image-rendering:pixelated]" />
+                    <Image src="/starter-images/whispering-wood.png" alt="Pixel-art birch forest beneath an aurora inside an Arkyv world" fill sizes="(min-width: 768px) 32vw, 100vw" className="object-cover [image-rendering:pixelated]" />
                     <div className="absolute inset-0 bg-gradient-to-t from-[#050812] via-[#050812]/20 to-[#050812]/25" />
-                    <div className="absolute left-4 top-4 rounded-lg border border-cyan-300/20 bg-slate-950/75 px-3 py-2 backdrop-blur-md"><p className="text-[0.5rem] font-bold uppercase tracking-[0.2em] text-cyan-300">Heartlight</p><p className="mt-0.5 text-xs font-semibold text-slate-200">Town Square</p></div>
-                    <div className="absolute inset-x-0 bottom-0 p-4 sm:p-5"><p className="max-w-md text-sm leading-6 text-slate-200">Market voices drift across the cobbles. Archie waits beside the fountain, watching the road north.</p><div className="mt-3 flex flex-wrap gap-2"><span className="arkyv-chip arkyv-chip--accent">go north</span><span className="arkyv-chip">talk archie</span><span className="arkyv-chip">look</span></div></div>
+                    <div className="absolute left-4 top-4 rounded-lg border border-cyan-300/20 bg-slate-950/75 px-3 py-2 backdrop-blur-md"><p className="text-[0.5rem] font-bold uppercase tracking-[0.2em] text-cyan-300">Whispering Wilds</p><p className="mt-0.5 text-xs font-semibold text-slate-200">Whispering Wood</p></div>
+                    <div className="absolute inset-x-0 bottom-0 p-4 sm:p-5"><p className="max-w-md text-sm leading-6 text-slate-200">Aurora light moves between the birches. Archie waits on the frozen trail, watching the road north.</p><div className="mt-3 flex flex-wrap gap-2"><span className="arkyv-chip arkyv-chip--accent">go north</span><span className="arkyv-chip">talk archie</span><span className="arkyv-chip">look</span></div></div>
                   </div>
                   <div className="flex min-h-[17rem] flex-col border-t border-slate-800 bg-[#070a13] p-4 font-terminal md:border-l md:border-t-0">
                     <div className="mb-4 flex items-center justify-between border-b border-slate-800 pb-3"><span className="text-[0.56rem] uppercase tracking-[0.2em] text-slate-500">World console</span><span className="text-[0.52rem] text-emerald-300/70">SYNCHRONIZED</span></div>
-                    <div className="space-y-3 text-[0.67rem] leading-5"><p><span className="text-cyan-300">&gt;</span> <span className="text-slate-300">talk archie</span></p><div className="rounded-lg border border-fuchsia-400/10 bg-fuchsia-400/[0.04] p-3"><div className="mb-2 flex items-center gap-2"><Image src="/starter-images/archie-portrait.png" alt="" width={28} height={28} className="h-7 w-7 rounded-md border border-cyan-300/20 object-cover [image-rendering:pixelated]" /><span className="text-[0.56rem] font-bold uppercase tracking-[0.15em] text-fuchsia-300">Archie · NPC</span></div><p className="text-slate-400">“The archive remembers every road. The question is—which one remembers you?”</p></div><p><span className="text-cyan-300">&gt;</span> <span className="text-slate-300">inventory</span></p><p className="text-slate-500"><span className="text-amber-300">◆</span> Lantern <span className="text-slate-700">·</span> Iron key <span className="text-slate-700">·</span> 3× Tonic</p></div>
+                    <div className="space-y-3 text-[0.67rem] leading-5"><p><span className="text-cyan-300">&gt;</span> <span className="text-slate-300">talk archie</span></p><div className="rounded-lg border border-fuchsia-400/10 bg-fuchsia-400/[0.04] p-3"><div className="mb-2 flex items-center gap-2"><Image src="/starter-images/archie-portrait.png" alt="" width={28} height={28} className="h-7 w-7 rounded-md border border-cyan-300/20 object-cover [image-rendering:pixelated]" /><span className="text-[0.56rem] font-bold uppercase tracking-[0.15em] text-fuchsia-300">Archie · NPC</span></div><p className="text-slate-400">“The archive remembers every road. Which one remembers you?”</p></div><p><span className="text-cyan-300">&gt;</span> <span className="text-slate-300">inventory</span></p><p className="text-slate-500"><span className="text-amber-300">◆</span> Lantern <span className="text-slate-700">·</span> Iron key <span className="text-slate-700">·</span> 3× Tonic</p></div>
                     <div className="mt-auto flex items-center gap-2 border-t border-slate-800 pt-3 text-[0.62rem]"><span className="text-cyan-300">❯</span><span className="text-slate-600">type a command...</span><span className="h-3 w-px animate-pulse bg-cyan-300" /></div>
                   </div>
                 </div>
@@ -122,12 +179,12 @@ export default function HomePage({ marketingSite }) {
             </div>
           </section>
 
-          <section className="border-y border-slate-800/70 bg-slate-950/45 py-4" aria-label="Product capabilities"><div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-center gap-x-3 gap-y-2 px-4 text-[0.58rem] font-bold uppercase tracking-[0.17em] text-slate-500 sm:gap-x-5">{['Visual world builder', 'AI NPCs', 'Realtime multiplayer', 'Custom RPG systems', 'Generated pixel art', 'Self-hosted'].map((item, index) => <React.Fragment key={item}><span>{item}</span>{index < 5 && <span className="text-cyan-400/50" aria-hidden="true">◆</span>}</React.Fragment>)}</div></section>
+          <section className="border-y border-slate-800/70 bg-slate-950/45 py-4" aria-label="Product capabilities"><div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-center gap-x-3 gap-y-2 px-4 text-[0.58rem] font-bold uppercase tracking-[0.17em] text-slate-500 sm:gap-x-5">{['Visual world builder', 'AI NPCs', 'Realtime multiplayer', 'Custom RPG systems', 'RetroDiffusion visuals', 'Self-hosted'].map((item, index) => <React.Fragment key={item}><span>{item}</span>{index < 5 && <span className="text-cyan-400/50" aria-hidden="true">◆</span>}</React.Fragment>)}</div></section>
 
           <section id="builder" className="mx-auto w-full max-w-[1440px] px-4 py-24 sm:px-6 sm:py-28 lg:px-10 lg:py-36">
             <div className="grid items-center gap-14 lg:grid-cols-[0.78fr_1.22fr] lg:gap-20">
               <div className="max-w-xl">
-                <p className="landing-kicker"><span>01</span> World building</p><h2 className="mt-5 text-4xl font-black leading-[1.02] tracking-[-0.04em] text-slate-100 sm:text-5xl">From blank canvas to living world.</h2><p className="mt-6 text-base leading-7 text-slate-400 sm:text-lg">Build the place and the rules in the same studio. Arkyv turns world design into a connected, visual system—then makes it playable immediately.</p>
+                <p className="landing-kicker"><span>01</span> World building</p><h2 className="mt-5 text-4xl font-black leading-[1.02] tracking-[-0.04em] text-slate-100 sm:text-5xl">From blank canvas to living world.</h2><p className="mt-6 text-base leading-7 text-slate-400 sm:text-lg">Build the place and the rules in the same studio. Arkyv turns world design into a connected visual system, then makes it playable immediately.</p>
                 <ul className="mt-8 space-y-4">{['Connect regions and rooms with directional exits', 'Place NPCs, encounters, objects, and generated scenes', 'Create stats, gear, consumables, containers, and fuel systems', 'Edit the shared world while the runtime stays authoritative'].map((item) => <li key={item} className="flex items-start gap-3 text-sm leading-6 text-slate-300"><span className="mt-1 grid h-5 w-5 shrink-0 place-items-center rounded-full border border-cyan-300/25 bg-cyan-300/[0.06] text-[0.6rem] text-cyan-300">✓</span>{item}</li>)}</ul>
                 <button type="button" onClick={builderAction} className="mt-9 inline-flex items-center gap-2 text-sm font-bold text-cyan-300 transition hover:text-cyan-200">{marketingSite ? 'Read the self-hosting guide' : (user ? 'Launch the world editor' : 'Read the setup guide')} <Arrow /></button>
               </div>
@@ -136,10 +193,10 @@ export default function HomePage({ marketingSite }) {
                 <div className="grid min-h-[31rem] md:grid-cols-[1fr_13rem]">
                   <div className="landing-editor-grid relative min-h-[25rem] overflow-hidden border-b border-slate-800 md:border-b-0 md:border-r">
                     <svg className="absolute inset-0 h-full w-full" aria-hidden="true"><path d="M145 125 C230 75 300 75 385 105" fill="none" stroke="rgba(34,211,238,.28)" strokeWidth="1.5" strokeDasharray="5 6" /><path d="M130 160 C150 260 165 315 160 370" fill="none" stroke="rgba(245,158,11,.25)" strokeWidth="1.5" strokeDasharray="5 6" /><path d="M390 135 C390 245 390 285 410 350" fill="none" stroke="rgba(217,70,239,.25)" strokeWidth="1.5" strokeDasharray="5 6" /><path d="M200 390 C275 390 320 385 390 370" fill="none" stroke="rgba(52,211,153,.24)" strokeWidth="1.5" strokeDasharray="5 6" /></svg>
-                    {EDITOR_NODES.map((node) => <div key={node.name} className={`landing-node landing-node--${node.tone}`} style={{ left: node.left, top: node.top }}><span className="landing-node__dot" /><span><span className="block text-[0.68rem] font-bold text-slate-200">{node.name}</span><span className="mt-0.5 block text-[0.5rem] uppercase tracking-[0.12em] text-slate-600">{node.meta}</span></span></div>)}
+                    {EDITOR_NODES.map((node) => <button type="button" key={node.name} onClick={() => setSelectedEditorNode(node)} aria-pressed={selectedEditorNode.name === node.name} className={`landing-node landing-node--${node.tone} ${selectedEditorNode.name === node.name ? 'is-selected' : ''}`} style={{ left: node.left, top: node.top }}><span className="landing-node__dot" /><span><span className="block text-[0.68rem] font-bold text-slate-200">{node.name}</span><span className="mt-0.5 block text-[0.5rem] uppercase tracking-[0.12em] text-slate-600">{node.meta}</span></span></button>)}
                     <div className="absolute bottom-4 left-4 flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/80 px-3 py-2 text-[0.54rem] uppercase tracking-[0.15em] text-slate-500 backdrop-blur"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> 4 rooms · 8 exits · 6 actors</div>
                   </div>
-                  <aside className="bg-slate-950/35 p-4"><p className="text-[0.55rem] font-bold uppercase tracking-[0.18em] text-slate-500">Selected room</p><div className="mt-4 aspect-[4/3] overflow-hidden rounded-lg border border-slate-800"><Image src="/starter-images/character-creation-chamber.png" alt="Generated pixel-art room scene" width={384} height={256} className="h-full w-full object-cover [image-rendering:pixelated]" /></div><p className="mt-4 text-xs font-bold text-slate-200">Moonwell</p><p className="mt-2 text-[0.66rem] leading-5 text-slate-500">A mirror of starlight rests beneath the ancient canopy.</p><div className="mt-4 space-y-2">{['Description', 'Actors & objects', 'Exits', 'Atmosphere'].map((item, index) => <div key={item} className={`flex items-center rounded-md border px-2.5 py-2 text-[0.58rem] ${index === 1 ? 'border-cyan-300/20 bg-cyan-300/[0.05] text-cyan-200' : 'border-slate-800 text-slate-500'}`}><span>{item}</span><span className="ml-auto">›</span></div>)}</div></aside>
+                  <aside className="bg-slate-950/35 p-4" aria-live="polite"><p className="text-[0.55rem] font-bold uppercase tracking-[0.18em] text-slate-500">Selected room</p><div className="mt-4 aspect-[4/3] overflow-hidden rounded-lg border border-slate-800"><Image key={selectedEditorNode.image} src={selectedEditorNode.image} alt={selectedEditorNode.imageAlt} width={384} height={256} className="h-full w-full object-cover [image-rendering:pixelated]" /></div><p className="mt-4 text-xs font-bold text-slate-200">{selectedEditorNode.name}</p><p className="mt-2 text-[0.66rem] leading-5 text-slate-500">{selectedEditorNode.description}</p><div className="mt-4 space-y-2">{['Description', 'Actors & objects', 'Exits', 'Atmosphere'].map((item, index) => <div key={item} className={`flex items-center rounded-md border px-2.5 py-2 text-[0.58rem] ${index === 1 ? 'border-cyan-300/20 bg-cyan-300/[0.05] text-cyan-200' : 'border-slate-800 text-slate-500'}`}><span>{item}</span><span className="ml-auto">›</span></div>)}</div></aside>
                 </div>
               </div>
             </div>
@@ -147,21 +204,17 @@ export default function HomePage({ marketingSite }) {
 
           <section className="border-y border-slate-800/70 bg-slate-950/40"><div className="mx-auto grid w-full max-w-[1440px] items-center gap-12 px-4 py-24 sm:px-6 sm:py-28 lg:grid-cols-2 lg:gap-20 lg:px-10 lg:py-32">
             <div className="relative mx-auto w-full max-w-xl"><div className="absolute -inset-12 rounded-full bg-fuchsia-500/[0.06] blur-3xl" aria-hidden="true" /><div className="relative grid grid-cols-[0.78fr_1.22fr] gap-3"><div className="overflow-hidden rounded-2xl border border-slate-700/70 bg-slate-900 p-2 shadow-2xl shadow-black/50"><Image src="/starter-images/archie-portrait.png" alt="Pixel-art portrait of Archie, an AI-powered NPC" width={256} height={256} className="aspect-square h-auto w-full rounded-xl object-cover [image-rendering:pixelated]" /><div className="p-3"><p className="text-sm font-bold text-slate-100">Archie</p><p className="mt-1 text-[0.55rem] font-bold uppercase tracking-[0.15em] text-fuchsia-300">Archive keeper</p><div className="mt-3 flex gap-1.5"><span className="arkyv-chip">Curious</span><span className="arkyv-chip hidden sm:inline-flex">Cryptic</span></div></div></div><div className="flex flex-col justify-end gap-3 py-4"><div className="mr-6 rounded-2xl rounded-bl-sm border border-slate-700/70 bg-slate-900/90 p-3 text-[0.68rem] leading-5 text-slate-300 sm:p-4 sm:text-xs">The northern road is gone. Did the storm take it?</div><div className="ml-3 rounded-2xl rounded-br-sm border border-fuchsia-400/20 bg-fuchsia-400/[0.07] p-3 text-[0.68rem] leading-5 text-slate-200 sm:p-4 sm:text-xs">Roads do not disappear. They simply decide who they will carry. Bring me the iron key, and I’ll remind it of you.</div><div className="mr-10 flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/70 px-3 py-2 text-[0.55rem] uppercase tracking-[0.14em] text-slate-600"><span className="flex gap-1"><span className="h-1 w-1 animate-pulse rounded-full bg-fuchsia-300" /><span className="h-1 w-1 animate-pulse rounded-full bg-fuchsia-300 [animation-delay:150ms]" /><span className="h-1 w-1 animate-pulse rounded-full bg-fuchsia-300 [animation-delay:300ms]" /></span> NPC reasoning from personality</div></div></div></div>
-            <div className="max-w-xl lg:ml-auto"><p className="landing-kicker landing-kicker--pink"><span>02</span> Living characters</p><h2 className="mt-5 text-4xl font-black leading-[1.02] tracking-[-0.04em] text-slate-100 sm:text-5xl">NPCs that are more than dialogue trees.</h2><p className="mt-6 text-base leading-7 text-slate-400 sm:text-lg">Write a personality, place the character in your world, and let every encounter unfold naturally. Recent conversation context keeps the exchange coherent without handing over your game state.</p><div className="mt-8 grid gap-3 sm:grid-cols-2"><div className="landing-mini-card"><Icon name="spark" className="h-5 w-5 text-fuchsia-300" /><div><p>Natural conversation</p><span>OpenAI or Grok</span></div></div><div className="landing-mini-card"><Icon name="image" className="h-5 w-5 text-cyan-300" /><div><p>Generated portraits</p><span>Optional pixel art</span></div></div></div></div>
+            <div className="max-w-xl lg:ml-auto"><p className="landing-kicker landing-kicker--pink"><span>02</span> Living characters</p><h2 className="mt-5 text-4xl font-black leading-[1.02] tracking-[-0.04em] text-slate-100 sm:text-5xl">NPCs that are more than dialogue trees.</h2><p className="mt-6 text-base leading-7 text-slate-400 sm:text-lg">Write a personality, place the character in your world, and let every encounter unfold naturally. Recent conversation context keeps the exchange coherent. RetroDiffusion gives characters and rooms a visual identity through its API.</p><div className="mt-8 grid gap-3 sm:grid-cols-2"><div className="landing-mini-card"><Icon name="spark" className="h-5 w-5 text-fuchsia-300" /><div><p>Natural conversation</p><span>OpenAI or Grok</span></div></div><div className="landing-mini-card"><Icon name="image" className="h-5 w-5 text-cyan-300" /><div><p>Generated visuals</p><span>RetroDiffusion API</span></div></div></div></div>
           </div></section>
 
           <section id="features" className="mx-auto w-full max-w-[1440px] px-4 py-24 sm:px-6 sm:py-28 lg:px-10 lg:py-36">
-            <div className="mx-auto max-w-3xl text-center"><p className="landing-kicker justify-center"><span>03</span> Complete engine</p><h2 className="mt-5 text-4xl font-black leading-[1.02] tracking-[-0.04em] text-slate-100 sm:text-5xl">Everything a world needs to keep turning.</h2><p className="mt-5 text-base leading-7 text-slate-500 sm:text-lg">From the first room to a shared, persistent campaign—every system belongs to the same runtime.</p></div>
+            <div className="mx-auto max-w-3xl text-center"><p className="landing-kicker justify-center"><span>03</span> Complete engine</p><h2 className="mt-5 text-4xl font-black leading-[1.02] tracking-[-0.04em] text-slate-100 sm:text-5xl">Everything a world needs to keep turning.</h2><p className="mt-5 text-base leading-7 text-slate-500 sm:text-lg">Every system belongs to the same runtime, from the first room to a shared persistent campaign.</p></div>
             <div className="mt-14 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">{CAPABILITIES.map((feature, index) => <article key={feature.title} className={`landing-feature-card group ${index === 0 || index === 9 ? 'sm:col-span-2 lg:col-span-1' : ''}`}><div className="flex items-start justify-between"><span className="grid h-10 w-10 place-items-center rounded-xl border border-slate-700/70 bg-slate-950 text-cyan-300 transition group-hover:border-cyan-300/30 group-hover:bg-cyan-300/[0.06]"><Icon name={feature.icon} /></span><span className="text-[0.52rem] font-bold tracking-[0.16em] text-slate-700">{String(index + 1).padStart(2, '0')}</span></div><p className="mt-7 text-[0.54rem] font-bold uppercase tracking-[0.18em] text-cyan-300/60">{feature.label}</p><h3 className="mt-2 text-base font-bold leading-6 text-slate-100">{feature.title}</h3><p className="mt-3 text-xs leading-5 text-slate-500">{feature.body}</p></article>)}</div>
           </section>
 
           <section id="architecture" className="border-y border-slate-800/70 bg-[#060912]"><div className="mx-auto w-full max-w-[1440px] px-4 py-24 sm:px-6 sm:py-28 lg:px-10 lg:py-32">
             <div className="grid items-end gap-8 lg:grid-cols-[0.85fr_1.15fr]"><div><p className="landing-kicker"><span>04</span> One continuous loop</p><h2 className="mt-5 max-w-xl text-4xl font-black leading-[1.02] tracking-[-0.04em] text-slate-100 sm:text-5xl">Author. Synchronize. Play.</h2></div><p className="max-w-2xl text-base leading-7 text-slate-500 lg:ml-auto">The editor and the game are two views of the same world. No exports, rebuilds, or duplicated state between making an adventure and entering it.</p></div>
-            <div className="relative mt-14 grid gap-4 lg:grid-cols-3"><div className="landing-flow-line hidden lg:block" aria-hidden="true" />{[
-              { number: '01', icon: 'world', title: 'Author in the studio', body: 'Design locations, cast NPCs, place objects, and define the mechanics that make this world unique.', meta: 'Next.js · React · Visual editor' },
-              { number: '02', icon: 'shield', title: 'Synchronize the truth', body: 'SpacetimeDB replicates live state while Rust reducers validate every mutation and resolve every outcome.', meta: 'SpacetimeDB · Rust · Realtime' },
-              { number: '03', icon: 'terminal', title: 'Enter from anywhere', body: 'Players explore through a responsive terminal with world visuals, audio, chat, inventory, gear, and stats.', meta: 'Desktop · Mobile · Multiplayer' },
-            ].map((step) => <article key={step.number} className="landing-flow-card relative"><div className="relative z-10 flex items-center justify-between"><span className="grid h-11 w-11 place-items-center rounded-xl border border-cyan-300/20 bg-cyan-300/[0.06] text-cyan-300"><Icon name={step.icon} /></span><span className="text-3xl font-black text-slate-800">{step.number}</span></div><h3 className="relative z-10 mt-8 text-xl font-bold text-slate-100">{step.title}</h3><p className="relative z-10 mt-3 text-sm leading-6 text-slate-500">{step.body}</p><p className="relative z-10 mt-8 border-t border-slate-800 pt-4 text-[0.56rem] font-bold uppercase tracking-[0.14em] text-slate-600">{step.meta}</p></article>)}</div>
+            <div className="relative mt-14 grid gap-4 lg:grid-cols-3">{FLOW_STEPS.map((step) => <article key={step.number} className="landing-flow-card relative"><FlowScreenshot type={step.preview} /><div className="landing-flow-card__copy relative z-10"><div className="flex items-center justify-between"><span className="grid h-9 w-9 place-items-center rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] text-cyan-300"><Icon name={step.icon} className="h-4 w-4" /></span><span className="text-2xl font-black text-slate-800">{step.number}</span></div><h3 className="mt-5 text-xl font-bold text-slate-100">{step.title}</h3><p className="mt-3 text-sm leading-6 text-slate-500">{step.body}</p><p className="mt-5 border-t border-slate-800 pt-4 text-[0.56rem] font-bold uppercase tracking-[0.14em] text-slate-600">{step.meta}</p></div></article>)}</div>
           </div></section>
 
           <section className="mx-auto w-full max-w-[1440px] px-4 py-20 sm:px-6 sm:py-24 lg:px-10 lg:py-28"><div className="landing-cta relative overflow-hidden rounded-[1.75rem] border border-cyan-300/20 px-5 py-16 text-center shadow-2xl shadow-black/50 sm:px-10 sm:py-20"><div className="pointer-events-none absolute inset-0" aria-hidden="true"><div className="landing-cta-glow" /></div><div className="relative z-10 mx-auto max-w-3xl"><p className="text-[0.6rem] font-bold uppercase tracking-[0.24em] text-cyan-300">The archive is open</p><h2 className="mt-5 text-4xl font-black leading-[1.02] tracking-[-0.045em] text-slate-50 sm:text-6xl">Your world is waiting to be remembered.</h2><p className="mx-auto mt-6 max-w-xl text-base leading-7 text-slate-400">Self-host the engine, shape the rules, invite your players, and keep everything you create.</p><div className="mt-9 flex flex-col justify-center gap-3 sm:flex-row"><button type="button" onClick={primaryAction} className="landing-button landing-button--primary group"><span>{user ? 'Return to your world' : 'Start a saved world'}</span><Arrow /></button><a href="https://github.com/SeloSlav/arkyv-engine" target="_blank" rel="noopener noreferrer" className="landing-button landing-button--secondary">View source on GitHub <span aria-hidden="true">↗</span></a></div></div></div></section>

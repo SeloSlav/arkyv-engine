@@ -45,14 +45,29 @@ import UpdateRowsReducer from "./update_rows_reducer";
 // Import all procedure arg schemas
 
 // Import all table schema definitions
+import AbilityDefinitionRow from "./ability_definition_table";
+import ActorAbilityRow from "./actor_ability_table";
+import ActorCooldownRow from "./actor_cooldown_table";
+import ActorCrimeRow from "./actor_crime_table";
+import ActorFactionReputationRow from "./actor_faction_reputation_table";
+import ActorProgressionRow from "./actor_progression_table";
+import ActorQuestRow from "./actor_quest_table";
+import ActorQuestProgressRow from "./actor_quest_progress_table";
 import ActorStatRow from "./actor_stat_table";
+import ActorWalletRow from "./actor_wallet_table";
 import CharacterRow from "./character_table";
 import CommandRow from "./command_table";
+import EquipmentSlotDefinitionRow from "./equipment_slot_definition_table";
 import ExitRow from "./exit_table";
+import FactionDefinitionRow from "./faction_definition_table";
 import LootTableEntryRow from "./loot_table_entry_table";
 import NpcRow from "./npc_table";
 import ObjectDefinitionRow from "./object_definition_table";
 import ProfileRow from "./profile_table";
+import ProgressionConfigRow from "./progression_config_table";
+import QuestDefinitionRow from "./quest_definition_table";
+import QuestItemRewardRow from "./quest_item_reward_table";
+import QuestObjectiveRow from "./quest_objective_table";
 import RegionRow from "./region_table";
 import RegionChatRow from "./region_chat_table";
 import RoomRow from "./room_table";
@@ -64,6 +79,94 @@ import WorldObjectRow from "./world_object_table";
 
 /** The schema information for all tables in this module. This is defined the same was as the tables would have been defined in the server. */
 const tablesSchema = __schema({
+  ability_definition: __table({
+    name: 'ability_definition',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'ability_definition_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, AbilityDefinitionRow),
+  actor_ability: __table({
+    name: 'actor_ability',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_ability_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ActorAbilityRow),
+  actor_cooldown: __table({
+    name: 'actor_cooldown',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_cooldown_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ActorCooldownRow),
+  actor_crime: __table({
+    name: 'actor_crime',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_crime_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ActorCrimeRow),
+  actor_faction_reputation: __table({
+    name: 'actor_faction_reputation',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_faction_reputation_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ActorFactionReputationRow),
+  actor_progression: __table({
+    name: 'actor_progression',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_progression_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ActorProgressionRow),
+  actor_quest: __table({
+    name: 'actor_quest',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_quest_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ActorQuestRow),
+  actor_quest_progress: __table({
+    name: 'actor_quest_progress',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_quest_progress_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ActorQuestProgressRow),
   actor_stat: __table({
     name: 'actor_stat',
     indexes: [
@@ -75,6 +178,17 @@ const tablesSchema = __schema({
       { name: 'actor_stat_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ActorStatRow),
+  actor_wallet: __table({
+    name: 'actor_wallet',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_wallet_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ActorWalletRow),
   character: __table({
     name: 'character',
     indexes: [
@@ -103,6 +217,17 @@ const tablesSchema = __schema({
       { name: 'command_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, CommandRow),
+  equipment_slot_definition: __table({
+    name: 'equipment_slot_definition',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'equipment_slot_definition_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, EquipmentSlotDefinitionRow),
   exit: __table({
     name: 'exit',
     indexes: [
@@ -114,6 +239,17 @@ const tablesSchema = __schema({
       { name: 'exit_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ExitRow),
+  faction_definition: __table({
+    name: 'faction_definition',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'faction_definition_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, FactionDefinitionRow),
   loot_table_entry: __table({
     name: 'loot_table_entry',
     indexes: [
@@ -161,6 +297,50 @@ const tablesSchema = __schema({
       { name: 'profile_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ProfileRow),
+  progression_config: __table({
+    name: 'progression_config',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'progression_config_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ProgressionConfigRow),
+  quest_definition: __table({
+    name: 'quest_definition',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'quest_definition_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, QuestDefinitionRow),
+  quest_item_reward: __table({
+    name: 'quest_item_reward',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'quest_item_reward_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, QuestItemRewardRow),
+  quest_objective: __table({
+    name: 'quest_objective',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'quest_objective_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, QuestObjectiveRow),
   region: __table({
     name: 'region',
     indexes: [

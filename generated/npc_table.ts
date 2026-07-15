@@ -33,4 +33,10 @@ export default __t.row({
   respawnSeconds: __t.u32().name("respawn_seconds"),
   spawnRoom: __t.option(__t.string()).name("spawn_room"),
   defeatedAt: __t.option(__t.timestamp()).name("defeated_at"),
+  xpReward: __t.u32().name("xp_reward"),
+  isGuard: __t.bool().name("is_guard"),
+  guardGreeting: __t.option(__t.string()).name("guard_greeting"),
+  protectPlayers: __t.bool().name("protect_players"),
+  protectFactionMembers: __t.bool().name("protect_faction_members"),
+  guardWantedSeconds: __t.u32().name("guard_wanted_seconds"),
 });

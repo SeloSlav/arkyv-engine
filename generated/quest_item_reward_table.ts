@@ -12,15 +12,9 @@ import {
 
 export default __t.row({
   id: __t.string().primaryKey(),
-  name: __t.string(),
-  description: __t.string(),
-  role: __t.option(__t.string()),
-  minimum: __t.i32(),
-  maximum: __t.i32(),
-  defaultValue: __t.i32().name("default_value"),
-  visible: __t.bool(),
+  questId: __t.string().name("quest_id"),
+  definitionId: __t.string().name("definition_id"),
+  quantity: __t.u32(),
   createdAt: __t.timestamp().name("created_at"),
   updatedAt: __t.timestamp().name("updated_at"),
-  perLevelGain: __t.i32().name("per_level_gain"),
-  regenerationPerSecond: __t.i32().name("regeneration_per_second"),
 });

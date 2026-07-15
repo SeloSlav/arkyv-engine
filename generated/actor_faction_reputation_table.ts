@@ -12,15 +12,8 @@ import {
 
 export default __t.row({
   id: __t.string().primaryKey(),
-  name: __t.string(),
-  description: __t.string(),
-  role: __t.option(__t.string()),
-  minimum: __t.i32(),
-  maximum: __t.i32(),
-  defaultValue: __t.i32().name("default_value"),
-  visible: __t.bool(),
-  createdAt: __t.timestamp().name("created_at"),
+  actorId: __t.string().name("actor_id"),
+  factionId: __t.string().name("faction_id"),
+  reputation: __t.i32(),
   updatedAt: __t.timestamp().name("updated_at"),
-  perLevelGain: __t.i32().name("per_level_gain"),
-  regenerationPerSecond: __t.i32().name("regeneration_per_second"),
 });

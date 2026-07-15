@@ -452,7 +452,17 @@ function NpcBehaviorEditor({ value, rooms, onChange }) {
                 <label className="flex items-center gap-3 self-end rounded-md border border-slate-700 bg-slate-900/60 px-3 py-2.5 text-xs normal-case tracking-normal text-slate-300"><input type="checkbox" checked={Boolean(value?.attack_on_sight)} disabled={(value?.disposition || 'neutral') !== 'hostile'} onChange={(event) => set('attack_on_sight', event.target.checked)} className="accent-rose-400" />Attack players on sight</label>
                 <label className="flex flex-col gap-2 text-[0.65rem] uppercase tracking-[0.2em] text-slate-400">Attack cadence (seconds)<input type="number" min="1" value={value?.attack_interval_seconds ?? 6} onChange={(event) => set('attack_interval_seconds', event.target.value)} className="rounded-md border border-slate-600/60 bg-slate-800/70 px-3 py-2 text-sm normal-case tracking-normal text-slate-100" /></label>
                 <label className="flex flex-col gap-2 text-[0.65rem] uppercase tracking-[0.2em] text-slate-400">Respawn after seconds<input type="number" min="0" value={value?.respawn_seconds ?? 60} onChange={(event) => set('respawn_seconds', event.target.value)} className="rounded-md border border-slate-600/60 bg-slate-800/70 px-3 py-2 text-sm normal-case tracking-normal text-slate-100" /><span className="normal-case tracking-normal text-slate-600">Use 0 to keep defeated permanently.</span></label>
+                <label className="flex flex-col gap-2 text-[0.65rem] uppercase tracking-[0.2em] text-slate-400">XP reward<input type="number" min="0" value={value?.xp_reward ?? 25} onChange={(event) => set('xp_reward', event.target.value)} className="rounded-md border border-slate-600/60 bg-slate-800/70 px-3 py-2 text-sm normal-case tracking-normal text-slate-100" /><span className="normal-case tracking-normal text-slate-600">Awarded to the player who defeats this NPC.</span></label>
                 <label className="flex flex-col gap-2 text-[0.65rem] uppercase tracking-[0.2em] text-slate-400">Spawn / respawn room<select value={value?.spawn_room || value?.current_room || ''} onChange={(event) => set('spawn_room', event.target.value)} className="rounded-md border border-slate-600/60 bg-slate-800/70 px-3 py-2 text-sm normal-case tracking-normal text-slate-100"><option value="">Use current room</option>{rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}</select></label>
+            </div>
+            <div className="space-y-3 rounded-lg border border-cyan-400/20 bg-cyan-500/[0.035] p-3">
+                <label className="flex items-center gap-3 text-sm normal-case tracking-normal text-cyan-100"><input type="checkbox" checked={Boolean(value?.is_guard)} onChange={(event) => set('is_guard', event.target.checked)} className="accent-cyan-400" /><span><span className="block font-semibold">Settlement guard</span><span className="block text-xs text-slate-500">Addresses entrants and enforces crimes and hostile faction standing.</span></span></label>
+                {value?.is_guard && <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <label className="flex items-center gap-2 text-xs normal-case tracking-normal text-slate-300"><input type="checkbox" checked={value?.protect_players !== false} onChange={(event) => set('protect_players', event.target.checked)} className="accent-cyan-400" />Protect players in safe regions</label>
+                    <label className="flex items-center gap-2 text-xs normal-case tracking-normal text-slate-300"><input type="checkbox" checked={value?.protect_faction_members !== false} onChange={(event) => set('protect_faction_members', event.target.checked)} className="accent-cyan-400" />Protect faction NPCs</label>
+                    <label className="flex flex-col gap-2 text-[0.65rem] uppercase tracking-[0.2em] text-slate-400">Wanted duration (seconds)<input type="number" min="1" value={value?.guard_wanted_seconds ?? 120} onChange={(event) => set('guard_wanted_seconds', event.target.value)} className="rounded-md border border-slate-600/60 bg-slate-800/70 px-3 py-2 text-sm normal-case tracking-normal text-slate-100" /></label>
+                    <label className="flex flex-col gap-2 text-[0.65rem] uppercase tracking-[0.2em] text-slate-400 sm:col-span-2 lg:col-span-3">Guard greeting<input value={value?.guard_greeting || ''} onChange={(event) => set('guard_greeting', event.target.value)} placeholder="Halt. Keep the peace while you are here." className="rounded-md border border-slate-600/60 bg-slate-800/70 px-3 py-2 text-sm normal-case tracking-normal text-slate-100" /></label>
+                </div>}
             </div>
             {isPatrolling && <><label className="flex max-w-xs flex-col gap-2 text-[0.65rem] uppercase tracking-[0.2em] text-slate-400">Patrol cadence (seconds)<input type="number" min="1" value={value?.patrol_interval_seconds ?? 20} onChange={(event) => set('patrol_interval_seconds', event.target.value)} className="rounded-md border border-slate-600/60 bg-slate-800/70 px-3 py-2 text-sm normal-case tracking-normal text-slate-100" /></label><PatrolRouteEditor rooms={rooms} value={value?.patrol_route} onChange={(route) => set('patrol_route', route)} /></>}
         </div>
@@ -591,6 +601,12 @@ export default function ArkyvAdminPanel() {
         patrol_interval_seconds: 20,
         attack_interval_seconds: 6,
         respawn_seconds: 60,
+        xp_reward: 25,
+        is_guard: false,
+        guard_greeting: '',
+        protect_players: true,
+        protect_faction_members: true,
+        guard_wanted_seconds: 120,
         spawn_room: '',
         personality: ''
     });
@@ -1133,6 +1149,12 @@ export default function ArkyvAdminPanel() {
                 patrol_interval_seconds,
                 attack_interval_seconds,
                 respawn_seconds,
+                xp_reward,
+                is_guard,
+                guard_greeting,
+                protect_players,
+                protect_faction_members,
+                guard_wanted_seconds,
                 spawn_room,
                 rooms:current_room (
                     id,
@@ -3203,6 +3225,12 @@ export default function ArkyvAdminPanel() {
             patrol_interval_seconds: npc.patrol_interval_seconds ?? 20,
             attack_interval_seconds: npc.attack_interval_seconds ?? 6,
             respawn_seconds: npc.respawn_seconds ?? 60,
+            xp_reward: npc.xp_reward ?? 25,
+            is_guard: Boolean(npc.is_guard),
+            guard_greeting: npc.guard_greeting || '',
+            protect_players: npc.protect_players !== false,
+            protect_faction_members: npc.protect_faction_members !== false,
+            guard_wanted_seconds: npc.guard_wanted_seconds ?? 120,
             spawn_room: npc.spawn_room || npc.current_room || null
         });
         setIsNpcDirty(false);
@@ -3239,6 +3267,12 @@ export default function ArkyvAdminPanel() {
                 Number(next.patrol_interval_seconds ?? 20) !== Number(activeNpc.patrol_interval_seconds ?? 20) ||
                 Number(next.attack_interval_seconds ?? 6) !== Number(activeNpc.attack_interval_seconds ?? 6) ||
                 Number(next.respawn_seconds ?? 60) !== Number(activeNpc.respawn_seconds ?? 60) ||
+                Number(next.xp_reward ?? 25) !== Number(activeNpc.xp_reward ?? 25) ||
+                Boolean(next.is_guard) !== Boolean(activeNpc.is_guard) ||
+                (next.guard_greeting ?? '') !== (activeNpc.guard_greeting ?? '') ||
+                (next.protect_players !== false) !== (activeNpc.protect_players !== false) ||
+                (next.protect_faction_members !== false) !== (activeNpc.protect_faction_members !== false) ||
+                Number(next.guard_wanted_seconds ?? 120) !== Number(activeNpc.guard_wanted_seconds ?? 120) ||
                 (next.spawn_room ?? null) !== (activeNpc.spawn_room ?? activeNpc.current_room ?? null)
             );
             setIsNpcDirty(dirty);
@@ -3267,6 +3301,12 @@ export default function ArkyvAdminPanel() {
                 patrol_interval_seconds: Math.max(1, Number(editNpc.patrol_interval_seconds) || 20),
                 attack_interval_seconds: Math.max(1, Number(editNpc.attack_interval_seconds) || 6),
                 respawn_seconds: Math.max(0, Number(editNpc.respawn_seconds) || 0),
+                xp_reward: Math.max(0, Number(editNpc.xp_reward) || 0),
+                is_guard: Boolean(editNpc.is_guard),
+                guard_greeting: editNpc.guard_greeting?.trim() || null,
+                protect_players: editNpc.protect_players !== false,
+                protect_faction_members: editNpc.protect_faction_members !== false,
+                guard_wanted_seconds: Math.max(1, Number(editNpc.guard_wanted_seconds) || 120),
                 spawn_room: editNpc.spawn_room || editNpc.current_room || null
             };
             const { error } = await spacetime.from('npcs').update(payload).eq('id', editNpc.id);
@@ -3339,6 +3379,12 @@ export default function ArkyvAdminPanel() {
             patrol_interval_seconds: 20,
             attack_interval_seconds: 6,
             respawn_seconds: 60,
+            xp_reward: 25,
+            is_guard: false,
+            guard_greeting: '',
+            protect_players: true,
+            protect_faction_members: true,
+            guard_wanted_seconds: 120,
             spawn_room: roomId,
             personality: ''
         });
@@ -3369,6 +3415,12 @@ export default function ArkyvAdminPanel() {
                 patrol_interval_seconds: Math.max(1, Number(newNpc.patrol_interval_seconds) || 20),
                 attack_interval_seconds: Math.max(1, Number(newNpc.attack_interval_seconds) || 6),
                 respawn_seconds: Math.max(0, Number(newNpc.respawn_seconds) || 0),
+                xp_reward: Math.max(0, Number(newNpc.xp_reward) || 0),
+                is_guard: Boolean(newNpc.is_guard),
+                guard_greeting: newNpc.guard_greeting?.trim() || null,
+                protect_players: newNpc.protect_players !== false,
+                protect_faction_members: newNpc.protect_faction_members !== false,
+                guard_wanted_seconds: Math.max(1, Number(newNpc.guard_wanted_seconds) || 120),
                 spawn_room: newNpc.spawn_room || newNpc.current_room || null,
                 dialogue_tree: {
                     personality: newNpc.personality?.trim() || ''
@@ -3396,6 +3448,12 @@ export default function ArkyvAdminPanel() {
                 patrol_interval_seconds: 20,
                 attack_interval_seconds: 6,
                 respawn_seconds: 60,
+                xp_reward: 25,
+                is_guard: false,
+                guard_greeting: '',
+                protect_players: true,
+                protect_faction_members: true,
+                guard_wanted_seconds: 120,
                 spawn_room: '',
                 personality: ''
             });
