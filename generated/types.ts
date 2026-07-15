@@ -64,6 +64,22 @@ export const ActorCrime = __t.object("ActorCrime", {
 });
 export type ActorCrime = __Infer<typeof ActorCrime>;
 
+export const ActorDeathRecord = __t.object("ActorDeathRecord", {
+  id: __t.string(),
+  actorId: __t.string(),
+  actorName: __t.string(),
+  deathRoomId: __t.string(),
+  spawnPointId: __t.option(__t.string()),
+  deathMode: __t.string(),
+  defeatedBy: __t.option(__t.string()),
+  itemStacksDropped: __t.u32(),
+  itemStacksDestroyed: __t.u32(),
+  goldLost: __t.i32(),
+  experienceLost: __t.u32(),
+  diedAt: __t.timestamp(),
+});
+export type ActorDeathRecord = __Infer<typeof ActorDeathRecord>;
+
 export const ActorFactionReputation = __t.object("ActorFactionReputation", {
   id: __t.string(),
   actorId: __t.string(),
@@ -72,6 +88,20 @@ export const ActorFactionReputation = __t.object("ActorFactionReputation", {
   updatedAt: __t.timestamp(),
 });
 export type ActorFactionReputation = __Infer<typeof ActorFactionReputation>;
+
+export const ActorLifeState = __t.object("ActorLifeState", {
+  id: __t.string(),
+  actorId: __t.string(),
+  state: __t.string(),
+  deathRoomId: __t.option(__t.string()),
+  pendingSpawnPointId: __t.option(__t.string()),
+  deathCount: __t.u32(),
+  diedAt: __t.option(__t.timestamp()),
+  respawnAvailableAtMicros: __t.i64(),
+  protectedUntilMicros: __t.i64(),
+  updatedAt: __t.timestamp(),
+});
+export type ActorLifeState = __Infer<typeof ActorLifeState>;
 
 export const ActorProgression = __t.object("ActorProgression", {
   id: __t.string(),
@@ -374,6 +404,20 @@ export const RoomMessage = __t.object("RoomMessage", {
 });
 export type RoomMessage = __Infer<typeof RoomMessage>;
 
+export const SpawnPoint = __t.object("SpawnPoint", {
+  id: __t.string(),
+  name: __t.string(),
+  description: __t.string(),
+  roomId: __t.string(),
+  allowsInitialSpawn: __t.bool(),
+  allowsRespawn: __t.bool(),
+  active: __t.bool(),
+  priority: __t.i32(),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type SpawnPoint = __Infer<typeof SpawnPoint>;
+
 export const StatDefinition = __t.object("StatDefinition", {
   id: __t.string(),
   name: __t.string(),
@@ -389,6 +433,29 @@ export const StatDefinition = __t.object("StatDefinition", {
   regenerationPerSecond: __t.i32(),
 });
 export type StatDefinition = __Infer<typeof StatDefinition>;
+
+export const WorldLifecycleConfig = __t.object("WorldLifecycleConfig", {
+  id: __t.string(),
+  initialSpawnPolicy: __t.string(),
+  fixedInitialSpawnPointId: __t.option(__t.string()),
+  respawnPolicy: __t.string(),
+  fixedRespawnPointId: __t.option(__t.string()),
+  deathMode: __t.string(),
+  respawnDelaySeconds: __t.u32(),
+  inventoryLossMode: __t.string(),
+  inventoryLossPercent: __t.u32(),
+  includeEquippedInLoss: __t.bool(),
+  goldLossPercent: __t.u32(),
+  experienceLossPercent: __t.u32(),
+  respawnHealthPercent: __t.u32(),
+  respawnResourcePercent: __t.u32(),
+  spawnProtectionSeconds: __t.u32(),
+  resetQuestsOnDeath: __t.bool(),
+  clearWantedOnRespawn: __t.bool(),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type WorldLifecycleConfig = __Infer<typeof WorldLifecycleConfig>;
 
 export const WorldObject = __t.object("WorldObject", {
   id: __t.string(),

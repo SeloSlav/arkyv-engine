@@ -66,6 +66,8 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
     const [actorQuests, setActorQuests] = useState([]);
     const [questProgress, setQuestProgress] = useState([]);
     const [wallet, setWallet] = useState({ gold: 0 });
+    const [lifeState, setLifeState] = useState(null);
+    const [lifecycleConfig, setLifecycleConfig] = useState(null);
 
     const run = useCallback((command) => onExecuteCommand?.(command), [onExecuteCommand]);
 
@@ -74,9 +76,10 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
             setObjects([]);
             setStats([]);
             setNearbyNpcs([]);
+            setLifeState(null);
             return;
         }
-        const [definitionsResult, objectsResult, statDefinitionsResult, actorStatsResult, roomsResult, regionsResult, npcsResult, progressionResult, progressionConfigResult, abilitiesResult, grantsResult, cooldownsResult, slotsResult, factionsResult, reputationsResult, questsResult, objectivesResult, actorQuestsResult, questProgressResult, walletResult] = await Promise.all([
+        const [definitionsResult, objectsResult, statDefinitionsResult, actorStatsResult, roomsResult, regionsResult, npcsResult, progressionResult, progressionConfigResult, abilitiesResult, grantsResult, cooldownsResult, slotsResult, factionsResult, reputationsResult, questsResult, objectivesResult, actorQuestsResult, questProgressResult, walletResult, lifeStateResult, lifecycleConfigResult] = await Promise.all([
             spacetime.from('object_definitions').select('*'),
             spacetime.from('world_objects').select('*').eq('location_id', actor.id),
             spacetime.from('stat_definitions').select('*'),
@@ -97,8 +100,10 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
             spacetime.from('actor_quests').select('*').eq('actor_id', actor.id),
             spacetime.from('actor_quest_progress').select('*').eq('actor_id', actor.id),
             spacetime.from('actor_wallets').select('*').eq('actor_id', actor.id),
+            spacetime.from('actor_life_states').select('*').eq('actor_id', actor.id),
+            spacetime.from('world_lifecycle_configs').select('*'),
         ]);
-        if ([definitionsResult, objectsResult, statDefinitionsResult, actorStatsResult, roomsResult, regionsResult, npcsResult, progressionResult, progressionConfigResult, abilitiesResult, grantsResult, cooldownsResult, slotsResult, factionsResult, reputationsResult, questsResult, objectivesResult, actorQuestsResult, questProgressResult, walletResult].some((result) => result.error)) return;
+        if ([definitionsResult, objectsResult, statDefinitionsResult, actorStatsResult, roomsResult, regionsResult, npcsResult, progressionResult, progressionConfigResult, abilitiesResult, grantsResult, cooldownsResult, slotsResult, factionsResult, reputationsResult, questsResult, objectivesResult, actorQuestsResult, questProgressResult, walletResult, lifeStateResult, lifecycleConfigResult].some((result) => result.error)) return;
         const nextDefinitions = new Map((definitionsResult.data || []).map((definition) => [definition.id, definition]));
         const overrides = new Map((actorStatsResult.data || []).map((row) => [row.stat_definition_id, row]));
         const equipped = (objectsResult.data || []).filter((object) => object.location_kind === 'equipped');
@@ -134,6 +139,8 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
         setActorQuests(actorQuestsResult.data || []);
         setQuestProgress(questProgressResult.data || []);
         setWallet((walletResult.data || [])[0] || { gold: 0 });
+        setLifeState((lifeStateResult.data || [])[0] || null);
+        setLifecycleConfig((lifecycleConfigResult.data || [])[0] || null);
     }, [actor?.current_room, actor?.id, spacetime]);
 
     useEffect(() => {
@@ -187,6 +194,9 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
         const state = actorQuestByQuest.get(quest.id);
         return !state || (state.status === 'completed' && quest.repeatable);
     });
+    const respawnSeconds = Math.max(0, Math.ceil(((Number(lifeState?.respawn_available_at_micros) || 0) - Date.now() * 1000) / 1_000_000));
+    const protectionSeconds = Math.max(0, Math.ceil(((Number(lifeState?.protected_until_micros) || 0) - Date.now() * 1000) / 1_000_000));
+    const isDead = lifeState?.state === 'dead';
 
     return (
         <section className={`arkyv-panel flex min-h-0 flex-col overflow-hidden ${className}`} aria-label="Character status and actions">
@@ -212,7 +222,24 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
                     </div>
                 )}
 
-                {actor?.id && tab === 'gear' && (
+                {actor?.id && isDead && (
+                    <div className="flex min-h-full flex-col items-center justify-center px-4 py-8 text-center">
+                        <span className="text-4xl text-purple-200" aria-hidden="true">◇</span>
+                        <h3 className="mt-4 font-terminal text-sm uppercase tracking-[0.24em] text-rose-200">You are defeated</h3>
+                        <p className="mt-2 max-w-sm text-xs leading-5 text-slate-400">Your character is between death and respawn. Movement, combat, inventory actions, and abilities are unavailable until you return.</p>
+                        <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950/70 px-5 py-3 text-xs text-slate-300">
+                            {respawnSeconds > 0 ? `Respawn available in ${respawnSeconds} second${respawnSeconds === 1 ? '' : 's'}.` : 'You may respawn now.'}
+                        </div>
+                        <button type="button" disabled={respawnSeconds > 0} onClick={() => run('respawn')} className="mt-4 min-h-11 rounded-lg border border-purple-300/40 bg-purple-500/15 px-6 text-xs font-semibold uppercase tracking-[0.18em] text-purple-100 transition hover:bg-purple-500/25 disabled:cursor-not-allowed disabled:opacity-40">Respawn</button>
+                        <p className="mt-3 text-[0.65rem] text-slate-600">Deaths recorded: {lifeState.death_count || 0}{lifecycleConfig?.inventory_loss_mode && lifecycleConfig.inventory_loss_mode !== 'keep' ? ` · item rule: ${lifecycleConfig.inventory_loss_mode.replaceAll('_', ' ')}` : ''}</p>
+                    </div>
+                )}
+
+                {actor?.id && !isDead && protectionSeconds > 0 && (
+                    <div className="mb-3 rounded-lg border border-cyan-400/25 bg-cyan-500/[0.06] px-3 py-2 text-center text-[0.65rem] text-cyan-100">Respawn protection: {protectionSeconds}s. Attacking ends it early.</div>
+                )}
+
+                {actor?.id && !isDead && tab === 'gear' && (
                     <div className="space-y-4">
                         <div>
                             <div className="mb-2 flex items-center justify-between">
@@ -269,7 +296,7 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
                     </div>
                 )}
 
-                {actor?.id && tab === 'stats' && (
+                {actor?.id && !isDead && tab === 'stats' && (
                     <div className="space-y-3">
                         <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.04] p-3"><div className="flex items-baseline justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">Level {level}</span><span className="text-xs text-slate-400">{atLevelCap ? 'Level cap' : `${progression.experience || 0} / ${xpRequired} XP`}</span></div>{!atLevelCap && <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-gradient-to-r from-amber-500 to-fuchsia-500" style={{ width: `${Math.min(100, Math.max(0, ((Number(progression.experience) || 0) / xpRequired) * 100))}%` }} /></div>}{Number(progression.unspent_stat_points) > 0 && <p className="mt-2 text-[0.65rem] text-amber-100">{progression.unspent_stat_points} unspent stat point{Number(progression.unspent_stat_points) === 1 ? '' : 's'}</p>}</div>
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -292,7 +319,7 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
                     </div>
                 )}
 
-                {actor?.id && tab === 'abilities' && (
+                {actor?.id && !isDead && tab === 'abilities' && (
                     <div className="space-y-3">
                         <div className="rounded-xl border border-fuchsia-400/15 bg-fuchsia-400/[0.04] p-3"><p className="text-xs font-semibold text-slate-100">Abilities & magic</p><p className="mt-1 text-[0.68rem] leading-5 text-slate-500">Costs, cast pacing, scaling, targets, and damage are authored by the world administrator and enforced by the server.</p></div>
                         {abilities.filter((ability) => ability.enabled).map((ability) => {
@@ -308,7 +335,7 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
                     </div>
                 )}
 
-                {actor?.id && tab === 'adventure' && (
+                {actor?.id && !isDead && tab === 'adventure' && (
                     <div className="space-y-4">
                         <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.04] p-3"><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold text-amber-100">Quest journal</p><p className="mt-1 text-[0.68rem] leading-5 text-slate-500">Progress is recorded by room entry, item possession, NPC conversations, and server-resolved defeats.</p></div><strong className="shrink-0 text-sm text-amber-200">{wallet.gold || 0} gold</strong></div></div>
                         <div className="space-y-2">
@@ -325,7 +352,7 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
                     </div>
                 )}
 
-                {actor?.id && tab === 'combat' && (
+                {actor?.id && !isDead && tab === 'combat' && (
                     <div className="space-y-4">
                         <div className="rounded-xl border border-fuchsia-400/15 bg-fuchsia-400/[0.04] p-3">
                             <p className="text-xs font-semibold text-slate-100">Choose a target</p>

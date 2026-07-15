@@ -12,8 +12,12 @@ This repository uses **SpacetimeDB 2.0.1** for its authoritative backend. The pr
 - Rust reducers for commands, movement, profiles, characters, and world editing
 - AI-powered NPC conversations with OpenAI or Grok
 - Visual region, room, exit, NPC, and RPG systems editor
-- Admin-authored NPC patrol routes, friendly/neutral/hostile disposition, attack-on-sight behavior, combat cadence, and respawning
-- Region-level safe/PvP rules with configurable player recovery rooms
+- Admin-authored NPC patrol routes, friendly/neutral/hostile disposition, guards, attack-on-sight behavior, combat cadence, and respawning
+- Region-level safe/PvP rules, persistent wanted states, guard enforcement, and configurable fallback recovery rooms
+- Multiple named initial/respawn points with fixed, priority, random, nearest, and same-region-nearest selection
+- Admin-authored death penalties, respawn delay/protection, item/gold/XP loss, resource restoration, and optional hardcore permanent character death
+- Factions with configurable reputation ranges, standing thresholds, combat penalties, quest requirements, and rewards
+- NPC-given quests with explore, acquire-item, defeat-NPC, defeat-faction, and talk-to-NPC objectives plus server-authoritative progress and turn-in
 - Admin-defined levels, XP curve, HP/MP/energy/focus resources, regeneration, abilities, magic, items, equipment slots, and hero stats
 - Authoritative inventory limits, multi-item ring/trinket slots, weapon attack speed, ability costs/cooldowns, combat, defeat, chests, and enemy loot
 - Local saved worlds backed by persistent SpacetimeDB identity tokens
@@ -141,7 +145,7 @@ The Rust module in `spacetimedb/src/lib.rs` defines these public replicated tabl
 | `region` | Region metadata, color themes, PvP policy, and defeat recovery room |
 | `room` | Locations, descriptions, images, and elevation |
 | `exit` | Directed room connections |
-| `npc` | Placement, personality, patrol, disposition, aggression, XP reward, defeat, respawn, and portraits |
+| `npc` | Placement, personality, patrol, faction, disposition, guard policy, aggression, XP reward, defeat, respawn, and portraits |
 | `profile` | One identity-owned saved-world profile |
 | `character` | Identity-owned player characters |
 | `command` | Private command audit and pending AI work |
@@ -158,6 +162,19 @@ The Rust module in `spacetimedb/src/lib.rs` defines these public replicated tabl
 | `actor_ability` | Explicit ability grants in addition to automatic level unlocks |
 | `actor_cooldown` | Server-authoritative readiness for basic attacks and abilities |
 | `equipment_slot_definition` | Wearable slot names, order, and capacity, such as two rings or two trinkets |
+| `faction_definition` | Reputation bounds, hostile/friendly thresholds, and attack/kill consequences |
+| `actor_faction_reputation` | Persistent per-actor standing with each encountered faction |
+| `actor_crime` | Safe-region wanted state, severity, protected faction, and expiry |
+| `quest_definition` | Quest giver, turn-in NPC, prerequisites, repeatability, and XP/gold/reputation rewards |
+| `quest_objective` | Ordered explore, acquire, defeat, and conversation requirements |
+| `quest_item_reward` | Portable object rewards granted at a successful turn-in |
+| `actor_quest` | Accepted, ready, and completed quest lifecycle per actor |
+| `actor_quest_progress` | Server-observed progress for each accepted objective |
+| `actor_wallet` | Persistent gold balance per actor |
+| `spawn_point` | Named initial-entry and respawn locations with eligibility and priority |
+| `world_lifecycle_config` | World-wide initial spawn, death, loss, recovery, protection, and hardcore rules |
+| `actor_life_state` | Alive/dead state, respawn eligibility, selected point, death count, and protection window |
+| `actor_death_record` | Permanent death audit including location, cause, mode, destination, and applied losses |
 
 Reducers are the only write path. They validate identity ownership for profiles and characters, require admin status for world editing, process deterministic commands server-side, and complete AI NPC responses returned by the stateless Next.js AI route.
 
@@ -167,11 +184,14 @@ The frontend consumes generated bindings in `generated/`. The client data layer 
 
 Administrators can open `/admin` and use **RPG Systems Studio** to create game rules from reusable primitives. The built-in starter kit is optional and contains Health, Mana, Energy, Focus, Strength, Defense, starter abilities, wearable slots, firewood, a wooden box, a fuel-burning campfire, a sword, armor, and a healing potion. It can be installed repeatedly without overwriting edited definitions.
 
-The studio has eight authoring surfaces:
+The studio has eleven authoring surfaces:
 
 - **Object primitives** define presentation and pixel-art imagery, portability, stacking, container capacity, fuel production/acceptance, elapsed-time burn rate, wearable slot, weapon damage, armor, basic-attack cooldown, inventory-slot bonuses, stat scaling, equipment modifiers, and consumable effects.
 - **Hero stats** define numeric ranges, level-one bases, per-level gains, passive regeneration, visibility, and optional Health, Mana, Energy, Focus, Combat Power, and Defense roles. Additional resources and attributes can remain fully custom.
 - **Abilities & magic** define damage, healing, or resource restoration; enemy/self/ally targeting; resource stat and cost; cooldown and cast pacing; power range; stat scaling; affected stat; armor mitigation; required level; automatic learning; and explicit actor grants.
+- **Factions & reputation** define starting/minimum/maximum reputation, hostile and friendly thresholds, reputation lost for attacks and kills, and direct actor-standing adjustments for moderation.
+- **Quests** define giver and turn-in NPCs, level/reputation prerequisites, repeatability, availability, objective sequence, optional quest-item consumption, and XP, gold, faction-reputation, and item rewards.
+- **Spawn & death** creates any number of named entry or recovery points in authored rooms and configures initial placement, graph-nearest/fixed/priority/random respawn, delays, protection, inventory/equipment consequences, gold/current-level-XP loss, resource restoration, active-quest reset, wanted-state clearing, and hardcore mode. It also shows live character states and permanent death history.
 - **Levels & inventory** defines the level cap, XP needed for level two, percentage threshold growth, stat points per level, base inventory slots, and slots gained per level. A live preview shows the first ten thresholds, and actor levels can be adjusted for testing or moderation.
 - **Equipment slots** define stable wearable locations, display order, and capacity. Ordinary slots default to one object, while the starter Finger and Trinket slots accept two.
 - **Placed objects** instantiate a primitive in a room, actor inventory, equipment slot, or another container. Instance state includes quantity, durability, remaining fuel, active/burning state, and a JSON extension object.
@@ -180,9 +200,17 @@ The studio has eight authoring surfaces:
 
 The XP requirement for each level starts at `base_xp` and is multiplied by `100% + growth_percent` for each subsequent level. XP is stored as progress within the current level, so changing the curve does not rewrite historical totals. When an NPC is defeated, its authored XP reward goes to the defeating player; crossing one or more thresholds applies every stat's per-level gain and reveals auto-learned abilities.
 
-Region dialogs define whether player-versus-player combat is allowed throughout that region and where defeated players recover. NPC dialogs define whether an NPC is friendly, neutral, or hostile; whether a hostile NPC attacks on sight; its attack and respawn timing; XP reward; and an ordered patrol route. Patrol stops must be joined by directed exits. World behavior advances deterministically as players issue commands, and `wait` explicitly advances a turn without taking another action.
+Region dialogs define whether player-versus-player combat is allowed throughout that region and a legacy recovery-room fallback used only when no eligible spawn point exists. NPC dialogs define faction membership; friendly, neutral, or hostile disposition; guard status and greeting; whether the guard protects players and NPCs; wanted duration; attack-on-sight policy; attack and respawn timing; XP reward; and an ordered patrol route. Patrol stops must be joined by directed exits. World behavior advances deterministically as players issue commands, and `wait` explicitly advances a turn without taking another action.
 
-Friendly NPCs cannot be attacked. Neutral NPCs can be attacked and retaliate. Hostile NPCs may attack automatically when configured. Basic attacks use the equipped weapon's server-enforced cooldown. Abilities separately enforce learning, valid targets, costs, cooldown/cast pacing, scaling, and mitigation. On defeat, players keep their inventory, recover their level-scaled base health, and move to the region recovery room. Defeated NPCs leave authored drops in the room and either remain defeated or return to their spawn room after their configured delay.
+Friendly NPCs cannot be damaged, but attempting to attack them still counts as a negative action. Neutral NPCs can be attacked and retaliate. Hostile NPCs may attack automatically when configured. In safe regions, attempted player attacks and attacks on protected NPCs create a timed wanted state; a present guard responds immediately, and guards in the same region remain hostile until that state expires. Attacking or killing a non-hostile faction NPC also applies the faction's authored reputation penalty. A faction guard attacks actors whose standing is at or below its hostile threshold. Basic attacks use the equipped weapon's server-enforced cooldown. Abilities apply the same law and reputation rules before enforcing learning, valid targets, costs, cooldown/cast pacing, scaling, and mitigation. Defeated NPCs leave authored drops in the room and either remain defeated or return to their spawn room after their configured delay.
+
+Player defeat is a server-authoritative lifecycle. The default policy remains forgiving: immediate recovery, full health/resources, and no item, gold, or XP loss. Administrators can instead delay recovery and require `respawn`, select a specific or random point, choose highest priority, or find the physically nearest eligible point by breadth-first distance across the room/exit graph. Same-region-nearest prefers the death region and falls back to world-wide nearest. Ties favor higher point priority and then stable name/id order. Spawn protection blocks NPC and player attacks and ends early when the protected player attacks.
+
+Inventory consequences can keep everything; drop or destroy inventory only; drop or destroy inventory plus equipment; or independently roll an authored percentage for each eligible stack. Equipment can be included in percentage loss. Definitions tagged `soulbound` or `keep-on-death` ignore ordinary death-loss rules. Gold loss and XP loss are separate percentages; XP loss applies only to progress within the current level and never removes a level. Health and mana/energy/focus-style resources restore by separate percentages. Administrators may optionally reset unfinished quests and clear wanted states.
+
+Hardcore mode permanently deletes the defeated character and its remaining actor-owned runtime state. Items already dropped by the configured death rule remain in the death room; anything still attached to the deleted character is destroyed. The saved-world identity, other characters, shared world, and immutable death record remain, allowing the player to create a replacement character. The account-level traveler profile is not deleted if it is used without a selected character.
+
+Quest progress is derived from world events rather than client claims. Entering a room records exploration, taking or losing items refreshes possession objectives, talking to an NPC records conversation objectives, and a server-resolved NPC defeat records NPC and faction kills. Players must accept a quest before those events count and return to its configured turn-in NPC. Turn-in revalidates every objective and inventory requirement before consuming configured quest items and granting rewards.
 
 Inventory capacity counts top-level stacks, not individual units in a stack. Level rules and equipped items can add capacity. Taking loot or unequipping a capacity-granting item is rejected when it would overflow the pack. Equipping respects the authored slot capacity and replaces the oldest occupied item only once that capacity is full.
 
@@ -197,6 +225,11 @@ inventory                     list carried/equipped objects and used/available s
 stats                         show level, XP, resource pools, growth, and equipment bonuses
 abilities                     list learned, locked, granted, ready, and cooling-down abilities
 cast <ability> at <target>    use an enemy/ally ability; self abilities omit the target
+quests                        show active objectives, nearby offers, turn-in state, and gold
+quest <npc>                   inspect quests offered or received by a nearby NPC
+accept <quest>                accept an available quest from its nearby giver
+turn in <quest>               validate and complete a quest at its turn-in NPC
+reputation                    show numeric and named standing with every faction
 take <item>                   move a portable room object into inventory
 drop <item>                   place a carried object in the current room
 examine <object>              inspect state, fuel, or container contents
@@ -216,6 +249,7 @@ combat                        show zone PvP rules and visible enemies
 rest                          restore configured HP/MP/energy/focus pools when safe
 wait                          pass a turn and advance NPC behavior
 flee <direction>              leave combat through an authored exit
+respawn                      return when the configured recovery delay has elapsed
 ```
 
 All runtime mutations occur in the Rust module. The browser only sends commands and renders replicated state; it does not calculate authoritative damage, fuel, inventory ownership, or stat changes.
@@ -233,7 +267,7 @@ npm run smoke:rpg:compile         # Compile the isolated RPG reducer smoke test
 npm run smoke:rpg                 # Run it against arkyv-engine-runtime-test
 ```
 
-The smoke test expects a fresh local database named `arkyv-engine-runtime-test`. Publish the module to that name before running it, then delete the test database afterward. It verifies authoritative room checks, safe/open PvP, attack cooldowns, inventory overflow, patrol movement, XP and level growth, ability costs, resource regeneration, two-item equipment slots, hostile attacks, player recovery, and enemy drops without touching the main `arkyv-engine` world.
+The smoke test expects a fresh local database named `arkyv-engine-runtime-test`. Publish the module to that name before running it, then delete the test database afterward. It verifies authoritative room checks, safe/open PvP, attack cooldowns, inventory overflow, patrol movement, XP and level growth, ability costs, resource regeneration, two-item equipment slots, hostile attacks, graph-nearest delayed player recovery and loss rules, enemy drops, guard greetings and safe-region crimes, faction reputation, all quest event paths, turn-in rewards, and hardcore character deletion without touching the main `arkyv-engine` world.
 
 The PowerShell deploy scripts invoke the installed Windows CLI at `SpacetimeDB/bin/2.0.1`. On macOS or Linux, run the equivalent commands directly:
 

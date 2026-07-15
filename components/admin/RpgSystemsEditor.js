@@ -16,6 +16,7 @@ const TAB_OPTIONS = [
     { id: 'abilities', label: 'Abilities & magic' },
     { id: 'factions', label: 'Factions & reputation' },
     { id: 'quests', label: 'Quests' },
+    { id: 'lifecycle', label: 'Spawn & death' },
     { id: 'progression', label: 'Levels & inventory' },
     { id: 'slots', label: 'Equipment slots' },
     { id: 'instances', label: 'Placed objects' },
@@ -46,6 +47,13 @@ const emptyFaction = () => ({ id: '', name: '', description: '', starting_reputa
 const emptyQuest = () => ({ id: '', title: '', description: '', quest_giver_npc_id: '', turn_in_npc_id: '', required_level: 1, required_faction_id: '', required_reputation: 0, repeatable: false, active: true, xp_reward: 0, gold_reward: 0, reputation_faction_id: '', reputation_reward: 0 });
 const emptyObjective = () => ({ id: '', quest_id: '', objective_type: 'explore_room', target_id: '', description: '', required_count: 1, sort_order: 0, consume_on_turn_in: false });
 const emptyQuestReward = () => ({ id: '', quest_id: '', definition_id: '', quantity: 1 });
+const emptySpawnPoint = () => ({ id: '', name: '', description: '', room_id: '', allows_initial_spawn: true, allows_respawn: true, active: true, priority: 0 });
+const emptyLifecycle = () => ({
+    id: 'world', initial_spawn_policy: 'fixed', fixed_initial_spawn_point_id: '', respawn_policy: 'nearest', fixed_respawn_point_id: '',
+    death_mode: 'respawn', respawn_delay_seconds: 0, inventory_loss_mode: 'keep', inventory_loss_percent: 0,
+    include_equipped_in_loss: false, gold_loss_percent: 0, experience_loss_percent: 0, respawn_health_percent: 100,
+    respawn_resource_percent: 100, spawn_protection_seconds: 0, reset_quests_on_death: false, clear_wanted_on_respawn: false,
+});
 
 function csvToArray(value) {
     return String(value || '').split(',').map((part) => part.trim()).filter(Boolean);
@@ -144,6 +152,10 @@ export default function RpgSystemsEditor({ enabled }) {
     const [quests, setQuests] = useState([]);
     const [questObjectives, setQuestObjectives] = useState([]);
     const [questRewards, setQuestRewards] = useState([]);
+    const [spawnPoints, setSpawnPoints] = useState([]);
+    const [lifecycleConfigs, setLifecycleConfigs] = useState([]);
+    const [lifeStates, setLifeStates] = useState([]);
+    const [deathRecords, setDeathRecords] = useState([]);
     const [definitionForm, setDefinitionForm] = useState(emptyDefinition);
     const [statForm, setStatForm] = useState(emptyStat);
     const [instanceForm, setInstanceForm] = useState(emptyInstance);
@@ -157,6 +169,8 @@ export default function RpgSystemsEditor({ enabled }) {
     const [questForm, setQuestForm] = useState(emptyQuest);
     const [objectiveForm, setObjectiveForm] = useState(emptyObjective);
     const [questRewardForm, setQuestRewardForm] = useState(emptyQuestReward);
+    const [spawnPointForm, setSpawnPointForm] = useState(emptySpawnPoint);
+    const [lifecycleForm, setLifecycleForm] = useState(emptyLifecycle);
     const [editingDefinition, setEditingDefinition] = useState(null);
     const [editingStat, setEditingStat] = useState(null);
     const [editingInstance, setEditingInstance] = useState(null);
@@ -168,6 +182,7 @@ export default function RpgSystemsEditor({ enabled }) {
     const [editingQuest, setEditingQuest] = useState(null);
     const [editingObjective, setEditingObjective] = useState(null);
     const [editingQuestReward, setEditingQuestReward] = useState(null);
+    const [editingSpawnPoint, setEditingSpawnPoint] = useState(null);
     const [busy, setBusy] = useState(false);
     const [generatingImage, setGeneratingImage] = useState(false);
     const [message, setMessage] = useState(null);
@@ -203,6 +218,10 @@ export default function RpgSystemsEditor({ enabled }) {
             spacetime.from('quest_definitions').select('*').order('title'),
             spacetime.from('quest_objectives').select('*').order('sort_order'),
             spacetime.from('quest_item_rewards').select('*'),
+            spacetime.from('spawn_points').select('*').order('priority', { ascending: false }),
+            spacetime.from('world_lifecycle_configs').select('*'),
+            spacetime.from('actor_life_states').select('*'),
+            spacetime.from('actor_death_records').select('*').order('died_at', { ascending: false }),
         ]);
         const firstError = results.find((result) => result.error)?.error;
         if (firstError) throw firstError;
@@ -226,6 +245,12 @@ export default function RpgSystemsEditor({ enabled }) {
         setQuests(results[15].data || []);
         setQuestObjectives(results[16].data || []);
         setQuestRewards(results[17].data || []);
+        setSpawnPoints(results[18].data || []);
+        const nextLifecycleConfigs = results[19].data || [];
+        setLifecycleConfigs(nextLifecycleConfigs);
+        setLifecycleForm({ ...emptyLifecycle(), ...(nextLifecycleConfigs[0] || {}), fixed_initial_spawn_point_id: nextLifecycleConfigs[0]?.fixed_initial_spawn_point_id || '', fixed_respawn_point_id: nextLifecycleConfigs[0]?.fixed_respawn_point_id || '' });
+        setLifeStates(results[20].data || []);
+        setDeathRecords(results[21].data || []);
     }, [enabled, spacetime]);
 
     useEffect(() => {
@@ -513,6 +538,47 @@ export default function RpgSystemsEditor({ enabled }) {
         if (ok) { setEditingQuestReward(null); setQuestRewardForm(emptyQuestReward()); }
     };
 
+    const saveSpawnPoint = async () => {
+        const payload = {
+            ...spawnPointForm,
+            id: spawnPointForm.id.trim(),
+            name: spawnPointForm.name.trim(),
+            description: spawnPointForm.description.trim(),
+            priority: Number(spawnPointForm.priority) || 0,
+        };
+        if (!payload.id || !payload.name || !payload.room_id) { setMessage({ type: 'error', text: 'Spawn point id, name, and room are required.' }); return; }
+        const ok = await run(
+            () => editingSpawnPoint
+                ? spacetime.from('spawn_points').update(payload).eq('id', editingSpawnPoint).select()
+                : spacetime.from('spawn_points').insert(payload).select(),
+            editingSpawnPoint ? 'Spawn point updated.' : 'Spawn point created.',
+        );
+        if (ok) { setEditingSpawnPoint(null); setSpawnPointForm(emptySpawnPoint()); }
+    };
+
+    const saveLifecycle = async () => {
+        const percent = (value) => Math.min(100, Math.max(0, Number(value) || 0));
+        const payload = {
+            ...lifecycleForm,
+            id: lifecycleForm.id || 'world',
+            fixed_initial_spawn_point_id: lifecycleForm.fixed_initial_spawn_point_id || null,
+            fixed_respawn_point_id: lifecycleForm.fixed_respawn_point_id || null,
+            respawn_delay_seconds: Math.max(0, Number(lifecycleForm.respawn_delay_seconds) || 0),
+            inventory_loss_percent: percent(lifecycleForm.inventory_loss_percent),
+            gold_loss_percent: percent(lifecycleForm.gold_loss_percent),
+            experience_loss_percent: percent(lifecycleForm.experience_loss_percent),
+            respawn_health_percent: Math.max(1, percent(lifecycleForm.respawn_health_percent)),
+            respawn_resource_percent: percent(lifecycleForm.respawn_resource_percent),
+            spawn_protection_seconds: Math.max(0, Number(lifecycleForm.spawn_protection_seconds) || 0),
+        };
+        await run(
+            () => lifecycleConfigs.length
+                ? spacetime.from('world_lifecycle_configs').update(payload).eq('id', lifecycleConfigs[0].id).select()
+                : spacetime.from('world_lifecycle_configs').insert(payload).select(),
+            'Spawn and death rules saved.',
+        );
+    };
+
     const objectiveTargets = useMemo(() => {
         if (objectiveForm.objective_type === 'explore_room') return rooms.map((row) => ({ id: row.id, name: row.name }));
         if (objectiveForm.objective_type === 'acquire_item') return definitions.map((row) => ({ id: row.id, name: `${row.icon} ${row.name}` }));
@@ -693,6 +759,65 @@ export default function RpgSystemsEditor({ enabled }) {
                     <div className="grid gap-6 xl:grid-cols-2">
                         <div className="space-y-4 rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5"><div><h3 className="text-sm uppercase tracking-[0.22em] text-amber-200">Objectives</h3><p className="mt-1 text-xs text-slate-500">Explore rooms, acquire items, defeat an NPC or faction member, or speak to an NPC.</p></div><div className="flex flex-wrap gap-2">{questObjectives.filter((row) => !editingQuest || row.quest_id === editingQuest).map((row) => <button key={row.id} type="button" onClick={() => { setEditingObjective(row.id); setObjectiveForm({ ...emptyObjective(), ...row }); }} className="rounded-full border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-amber-400">{row.description || row.objective_type} Ã—{row.required_count}</button>)}</div><div className="grid gap-4 sm:grid-cols-2"><Field label="Quest"><select className={inputClass} value={objectiveForm.quest_id} onChange={(event) => setObjectiveForm((value) => ({ ...value, quest_id: event.target.value }))}><option value="">Choose questâ€¦</option>{quests.map((quest) => <option key={quest.id} value={quest.id}>{quest.title}</option>)}</select></Field><Field label="Objective type"><select className={inputClass} value={objectiveForm.objective_type} onChange={(event) => setObjectiveForm((value) => ({ ...value, objective_type: event.target.value, target_id: '' }))}><option value="explore_room">Explore a room</option><option value="acquire_item">Acquire an item</option><option value="kill_npc">Defeat an NPC</option><option value="kill_faction">Defeat faction members</option><option value="talk_npc">Speak to an NPC</option></select></Field><Field label="Target"><select className={inputClass} value={objectiveForm.target_id} onChange={(event) => setObjectiveForm((value) => ({ ...value, target_id: event.target.value }))}><option value="">Choose targetâ€¦</option>{objectiveTargets.map((target) => <option key={target.id} value={target.id}>{target.name}</option>)}</select></Field><Field label="Required count"><input type="number" min="1" className={inputClass} value={objectiveForm.required_count} onChange={(event) => setObjectiveForm((value) => ({ ...value, required_count: event.target.value }))} /></Field><Field label="Display order"><input type="number" min="0" className={inputClass} value={objectiveForm.sort_order} onChange={(event) => setObjectiveForm((value) => ({ ...value, sort_order: event.target.value }))} /></Field></div><Field label="Player-facing description"><input className={inputClass} value={objectiveForm.description} onChange={(event) => setObjectiveForm((value) => ({ ...value, description: event.target.value }))} placeholder="Leave blank for an automatic label" /></Field>{objectiveForm.objective_type === 'acquire_item' && <Check label="Consume required items on turn-in" checked={objectiveForm.consume_on_turn_in} onChange={(consume_on_turn_in) => setObjectiveForm((value) => ({ ...value, consume_on_turn_in }))} />}<div className="flex justify-end gap-3">{editingObjective && <button type="button" disabled={busy} onClick={() => remove('quest_objectives', editingObjective, 'Quest objective').then(() => { setEditingObjective(null); setObjectiveForm({ ...emptyObjective(), quest_id: editingQuest || '' }); })} className="rounded-md border border-rose-400/50 px-4 py-2 text-xs uppercase text-rose-200">Delete</button>}<button type="button" disabled={busy} onClick={saveObjective} className={buttonClass}>Save objective</button></div></div>
                         <div className="space-y-4 rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5"><div><h3 className="text-sm uppercase tracking-[0.22em] text-amber-200">Item rewards</h3><p className="mt-1 text-xs text-slate-500">XP, gold, and reputation are configured above; add any number of inventory item rewards here.</p></div><div className="flex flex-wrap gap-2">{questRewards.filter((row) => !editingQuest || row.quest_id === editingQuest).map((row) => <button key={row.id} type="button" onClick={() => { setEditingQuestReward(row.id); setQuestRewardForm({ ...emptyQuestReward(), ...row }); }} className="rounded-full border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-amber-400">{definitionsById.get(row.definition_id)?.name || row.definition_id} Ã—{row.quantity}</button>)}</div><Field label="Quest"><select className={inputClass} value={questRewardForm.quest_id} onChange={(event) => setQuestRewardForm((value) => ({ ...value, quest_id: event.target.value }))}><option value="">Choose questâ€¦</option>{quests.map((quest) => <option key={quest.id} value={quest.id}>{quest.title}</option>)}</select></Field><Field label="Reward item"><select className={inputClass} value={questRewardForm.definition_id} onChange={(event) => setQuestRewardForm((value) => ({ ...value, definition_id: event.target.value }))}><option value="">Choose itemâ€¦</option>{definitions.filter((definition) => definition.portable).map((definition) => <option key={definition.id} value={definition.id}>{definition.icon} {definition.name}</option>)}</select></Field><Field label="Quantity"><input type="number" min="1" className={inputClass} value={questRewardForm.quantity} onChange={(event) => setQuestRewardForm((value) => ({ ...value, quantity: event.target.value }))} /></Field><div className="flex justify-end gap-3">{editingQuestReward && <button type="button" disabled={busy} onClick={() => remove('quest_item_rewards', editingQuestReward, 'Quest item reward').then(() => { setEditingQuestReward(null); setQuestRewardForm({ ...emptyQuestReward(), quest_id: editingQuest || '' }); })} className="rounded-md border border-rose-400/50 px-4 py-2 text-xs uppercase text-rose-200">Delete</button>}<button type="button" disabled={busy} onClick={saveQuestReward} className={buttonClass}>Save item reward</button></div></div>
+                    </div>
+                </div>
+            )}
+
+            {activeTab === 'lifecycle' && (
+                <div className="space-y-6 p-4 sm:p-6">
+                    <div className="rounded-xl border border-cyan-400/20 bg-cyan-500/[0.04] p-4 text-xs leading-5 text-slate-400">
+                        Spawn points are named world locations such as graveyards, cairns, temples, or portals. Nearest respawn follows the authored room-and-exit graph in both directions; screen coordinates do not affect distance.
+                    </div>
+
+                    <div className="grid gap-6 xl:grid-cols-[1fr_420px]">
+                        <div className="space-y-3">
+                            {spawnPoints.length === 0 && <p className="rounded-xl border border-dashed border-slate-800 p-6 text-center text-xs text-slate-600">No spawn points authored yet.</p>}
+                            {spawnPoints.map((point) => (
+                                <button key={point.id} type="button" onClick={() => { setEditingSpawnPoint(point.id); setSpawnPointForm({ ...emptySpawnPoint(), ...point }); }} className={`grid w-full gap-2 rounded-xl border p-4 text-left sm:grid-cols-[1fr_auto] ${editingSpawnPoint === point.id ? 'border-cyan-300 bg-cyan-500/15' : 'border-slate-700/70 bg-slate-950/40 hover:border-cyan-400/40'}`}>
+                                    <span><span className="block text-sm text-slate-100">{point.name}</span><span className="mt-1 block text-xs text-slate-500">{roomsById.get(point.room_id)?.name || point.room_id} · priority {point.priority}</span></span>
+                                    <span className="flex flex-wrap gap-2 text-[0.6rem] uppercase tracking-wider sm:justify-end">{point.active ? <span className="text-emerald-300">Active</span> : <span className="text-slate-600">Disabled</span>}{point.allows_initial_spawn && <span className="text-cyan-300">Initial</span>}{point.allows_respawn && <span className="text-purple-300">Respawn</span>}</span>
+                                </button>
+                            ))}
+                        </div>
+                        <div className="space-y-4 rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5">
+                            <div className="flex items-center justify-between"><div><h3 className="text-sm uppercase tracking-[0.22em] text-cyan-200">{editingSpawnPoint ? 'Edit spawn point' : 'New spawn point'}</h3><p className="mt-1 text-xs text-slate-500">One room can contain more than one differently named point.</p></div>{editingSpawnPoint && <button type="button" onClick={() => { setEditingSpawnPoint(null); setSpawnPointForm(emptySpawnPoint()); }} className="text-xs text-slate-400">New</button>}</div>
+                            <div className="grid gap-4 sm:grid-cols-2"><Field label="Name"><input className={inputClass} value={spawnPointForm.name} onChange={(event) => setSpawnPointForm((value) => ({ ...value, name: event.target.value }))} placeholder="Old North Cairn" /></Field><Field label="Stable id"><input disabled={Boolean(editingSpawnPoint)} className={inputClass} value={spawnPointForm.id} onChange={(event) => setSpawnPointForm((value) => ({ ...value, id: event.target.value }))} placeholder="old-north-cairn" /></Field></div>
+                            <Field label="Room"><select className={inputClass} value={spawnPointForm.room_id} onChange={(event) => setSpawnPointForm((value) => ({ ...value, room_id: event.target.value }))}><option value="">Choose room…</option>{rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}</select></Field>
+                            <Field label="Description"><textarea className={`${inputClass} min-h-20`} value={spawnPointForm.description} onChange={(event) => setSpawnPointForm((value) => ({ ...value, description: event.target.value }))} /></Field>
+                            <Field label="Priority"><input type="number" className={inputClass} value={spawnPointForm.priority} onChange={(event) => setSpawnPointForm((value) => ({ ...value, priority: event.target.value }))} /></Field>
+                            <div className="grid gap-2 sm:grid-cols-2"><Check label="Initial character spawn" checked={spawnPointForm.allows_initial_spawn} onChange={(allows_initial_spawn) => setSpawnPointForm((value) => ({ ...value, allows_initial_spawn }))} /><Check label="Death respawn" checked={spawnPointForm.allows_respawn} onChange={(allows_respawn) => setSpawnPointForm((value) => ({ ...value, allows_respawn }))} /><Check label="Active" checked={spawnPointForm.active} onChange={(active) => setSpawnPointForm((value) => ({ ...value, active }))} /></div>
+                            <div className="flex justify-end gap-3">{editingSpawnPoint && <button type="button" disabled={busy} onClick={() => remove('spawn_points', editingSpawnPoint, 'Spawn point').then(() => { setEditingSpawnPoint(null); setSpawnPointForm(emptySpawnPoint()); })} className="rounded-md border border-rose-400/50 px-4 py-2 text-xs uppercase tracking-[0.18em] text-rose-200">Delete</button>}<button type="button" disabled={busy} onClick={saveSpawnPoint} className={buttonClass}>Save point</button></div>
+                        </div>
+                    </div>
+
+                    <div className="space-y-5 rounded-xl border border-purple-400/20 bg-slate-950/35 p-4 sm:p-5">
+                        <div><h3 className="text-sm uppercase tracking-[0.22em] text-purple-200">World lifecycle rules</h3><p className="mt-1 text-xs leading-5 text-slate-500">These rules apply server-side to every character. A saved world remains available even when a character is permanently lost.</p></div>
+                        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                            <Field label="Initial spawn rule"><select className={inputClass} value={lifecycleForm.initial_spawn_policy} onChange={(event) => setLifecycleForm((value) => ({ ...value, initial_spawn_policy: event.target.value }))}><option value="fixed">Specific point</option><option value="highest_priority">Highest priority</option><option value="random">Random eligible point</option></select></Field>
+                            <Field label="Specific initial point"><select disabled={lifecycleForm.initial_spawn_policy !== 'fixed'} className={inputClass} value={lifecycleForm.fixed_initial_spawn_point_id} onChange={(event) => setLifecycleForm((value) => ({ ...value, fixed_initial_spawn_point_id: event.target.value }))}><option value="">Highest-priority fallback</option>{spawnPoints.filter((point) => point.active && point.allows_initial_spawn).map((point) => <option key={point.id} value={point.id}>{point.name}</option>)}</select></Field>
+                            <Field label="Respawn rule"><select className={inputClass} value={lifecycleForm.respawn_policy} onChange={(event) => setLifecycleForm((value) => ({ ...value, respawn_policy: event.target.value }))}><option value="nearest">Nearest by room graph</option><option value="region_nearest">Nearest in same region</option><option value="fixed">Specific point</option><option value="highest_priority">Highest priority</option><option value="random">Random eligible point</option></select></Field>
+                            <Field label="Specific respawn point"><select disabled={lifecycleForm.respawn_policy !== 'fixed'} className={inputClass} value={lifecycleForm.fixed_respawn_point_id} onChange={(event) => setLifecycleForm((value) => ({ ...value, fixed_respawn_point_id: event.target.value }))}><option value="">Highest-priority fallback</option>{spawnPoints.filter((point) => point.active && point.allows_respawn).map((point) => <option key={point.id} value={point.id}>{point.name}</option>)}</select></Field>
+                        </div>
+                        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                            <Field label="Death mode"><select className={inputClass} value={lifecycleForm.death_mode} onChange={(event) => setLifecycleForm((value) => ({ ...value, death_mode: event.target.value }))}><option value="respawn">Respawn</option><option value="hardcore">Hardcore permanent death</option></select></Field>
+                            <Field label="Respawn delay (seconds)"><input type="number" min="0" className={inputClass} value={lifecycleForm.respawn_delay_seconds} onChange={(event) => setLifecycleForm((value) => ({ ...value, respawn_delay_seconds: event.target.value }))} /></Field>
+                            <Field label="Inventory consequence"><select className={inputClass} value={lifecycleForm.inventory_loss_mode} onChange={(event) => setLifecycleForm((value) => ({ ...value, inventory_loss_mode: event.target.value }))}><option value="keep">Keep everything</option><option value="drop_inventory">Drop inventory</option><option value="drop_all">Drop inventory + equipment</option><option value="destroy_inventory">Destroy inventory</option><option value="destroy_all">Destroy inventory + equipment</option><option value="drop_percentage">Drop a percentage</option><option value="destroy_percentage">Destroy a percentage</option></select></Field>
+                            <Field label="Inventory loss chance %"><input type="number" min="0" max="100" disabled={!['drop_percentage', 'destroy_percentage'].includes(lifecycleForm.inventory_loss_mode)} className={inputClass} value={lifecycleForm.inventory_loss_percent} onChange={(event) => setLifecycleForm((value) => ({ ...value, inventory_loss_percent: event.target.value }))} /></Field>
+                            <Field label="Gold lost %"><input type="number" min="0" max="100" className={inputClass} value={lifecycleForm.gold_loss_percent} onChange={(event) => setLifecycleForm((value) => ({ ...value, gold_loss_percent: event.target.value }))} /></Field>
+                            <Field label="Current-level XP lost %"><input type="number" min="0" max="100" className={inputClass} value={lifecycleForm.experience_loss_percent} onChange={(event) => setLifecycleForm((value) => ({ ...value, experience_loss_percent: event.target.value }))} /></Field>
+                            <Field label="Health restored %"><input type="number" min="1" max="100" className={inputClass} value={lifecycleForm.respawn_health_percent} onChange={(event) => setLifecycleForm((value) => ({ ...value, respawn_health_percent: event.target.value }))} /></Field>
+                            <Field label="Mana / energy / focus %"><input type="number" min="0" max="100" className={inputClass} value={lifecycleForm.respawn_resource_percent} onChange={(event) => setLifecycleForm((value) => ({ ...value, respawn_resource_percent: event.target.value }))} /></Field>
+                            <Field label="Spawn protection (seconds)"><input type="number" min="0" className={inputClass} value={lifecycleForm.spawn_protection_seconds} onChange={(event) => setLifecycleForm((value) => ({ ...value, spawn_protection_seconds: event.target.value }))} /></Field>
+                        </div>
+                        <div className="grid gap-2 sm:grid-cols-3"><Check label="Include equipped items in percentage loss" checked={lifecycleForm.include_equipped_in_loss} onChange={(include_equipped_in_loss) => setLifecycleForm((value) => ({ ...value, include_equipped_in_loss }))} /><Check label="Reset active quests on death" checked={lifecycleForm.reset_quests_on_death} onChange={(reset_quests_on_death) => setLifecycleForm((value) => ({ ...value, reset_quests_on_death }))} /><Check label="Clear wanted status on respawn" checked={lifecycleForm.clear_wanted_on_respawn} onChange={(clear_wanted_on_respawn) => setLifecycleForm((value) => ({ ...value, clear_wanted_on_respawn }))} /></div>
+                        {lifecycleForm.death_mode === 'hardcore' && <p className="rounded-lg border border-rose-400/30 bg-rose-500/10 p-3 text-xs leading-5 text-rose-200">Hardcore death deletes the character and all runtime state still attached to it. Dropped items remain in the death room; everything still owned is destroyed. The player’s saved world/account and death history remain so they can create another character.</p>}
+                        <p className="text-xs leading-5 text-slate-500">Object definitions tagged <span className="text-slate-300">soulbound</span> or <span className="text-slate-300">keep-on-death</span> are exempt from ordinary loss rules. Protection ends early if the recovered character attacks.</p>
+                        <div className="flex justify-end"><button type="button" disabled={busy} onClick={saveLifecycle} className={buttonClass}>Save lifecycle rules</button></div>
+                    </div>
+
+                    <div className="grid gap-6 xl:grid-cols-2">
+                        <div className="rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5"><h3 className="text-sm uppercase tracking-[0.22em] text-slate-200">Current life states</h3><div className="mt-4 space-y-2">{lifeStates.filter((state) => actorsById.has(state.actor_id) || state.state === 'dead').map((state) => <div key={state.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-800 bg-black/20 px-3 py-2 text-xs"><span className="text-slate-300">{actorsById.get(state.actor_id)?.name || state.actor_id}</span><span className={state.state === 'dead' ? 'uppercase text-rose-300' : 'uppercase text-emerald-300'}>{state.state} · {state.death_count} deaths</span></div>)}</div></div>
+                        <div className="rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5"><div className="flex items-center justify-between"><h3 className="text-sm uppercase tracking-[0.22em] text-slate-200">Recent deaths</h3>{deathRecords.length > 0 && <span className="text-xs text-slate-600">{deathRecords.length} recorded</span>}</div><div className="mt-4 max-h-72 space-y-2 overflow-y-auto">{deathRecords.slice(0, 50).map((record) => <div key={record.id} className="rounded-lg border border-slate-800 bg-black/20 p-3 text-xs"><div className="flex justify-between gap-3"><span className="text-slate-200">{record.actor_name}</span><span className={record.death_mode === 'hardcore' ? 'uppercase text-rose-300' : 'uppercase text-purple-300'}>{record.death_mode}</span></div><p className="mt-1 text-slate-500">{roomsById.get(record.death_room_id)?.name || record.death_room_id}{record.defeated_by ? ` · defeated by ${record.defeated_by}` : ''} · dropped {record.item_stacks_dropped}, destroyed {record.item_stacks_destroyed}, lost {record.gold_lost} gold / {record.experience_lost} XP</p></div>)}</div></div>
                     </div>
                 </div>
             )}

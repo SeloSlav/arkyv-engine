@@ -36,6 +36,7 @@ Available commands:
 • light / extinguish &lt;object&gt; - Control fuel-burning objects
 • use &lt;item&gt;             - Run the item behavior configured by the admin
 • attack &lt;target&gt;        - Resolve combat from configured stats and equipment
+• respawn                - Return after the world's configured recovery delay
 • clear                  - Clear the terminal output
 
 Movement:

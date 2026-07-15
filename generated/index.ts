@@ -49,7 +49,9 @@ import AbilityDefinitionRow from "./ability_definition_table";
 import ActorAbilityRow from "./actor_ability_table";
 import ActorCooldownRow from "./actor_cooldown_table";
 import ActorCrimeRow from "./actor_crime_table";
+import ActorDeathRecordRow from "./actor_death_record_table";
 import ActorFactionReputationRow from "./actor_faction_reputation_table";
+import ActorLifeStateRow from "./actor_life_state_table";
 import ActorProgressionRow from "./actor_progression_table";
 import ActorQuestRow from "./actor_quest_table";
 import ActorQuestProgressRow from "./actor_quest_progress_table";
@@ -72,7 +74,9 @@ import RegionRow from "./region_table";
 import RegionChatRow from "./region_chat_table";
 import RoomRow from "./room_table";
 import RoomMessageRow from "./room_message_table";
+import SpawnPointRow from "./spawn_point_table";
 import StatDefinitionRow from "./stat_definition_table";
+import WorldLifecycleConfigRow from "./world_lifecycle_config_table";
 import WorldObjectRow from "./world_object_table";
 
 /** Type-only namespace exports for generated type groups. */
@@ -123,6 +127,17 @@ const tablesSchema = __schema({
       { name: 'actor_crime_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ActorCrimeRow),
+  actor_death_record: __table({
+    name: 'actor_death_record',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_death_record_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ActorDeathRecordRow),
   actor_faction_reputation: __table({
     name: 'actor_faction_reputation',
     indexes: [
@@ -134,6 +149,17 @@ const tablesSchema = __schema({
       { name: 'actor_faction_reputation_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ActorFactionReputationRow),
+  actor_life_state: __table({
+    name: 'actor_life_state',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_life_state_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ActorLifeStateRow),
   actor_progression: __table({
     name: 'actor_progression',
     indexes: [
@@ -385,6 +411,17 @@ const tablesSchema = __schema({
       { name: 'room_message_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, RoomMessageRow),
+  spawn_point: __table({
+    name: 'spawn_point',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'spawn_point_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, SpawnPointRow),
   stat_definition: __table({
     name: 'stat_definition',
     indexes: [
@@ -396,6 +433,17 @@ const tablesSchema = __schema({
       { name: 'stat_definition_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, StatDefinitionRow),
+  world_lifecycle_config: __table({
+    name: 'world_lifecycle_config',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'world_lifecycle_config_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, WorldLifecycleConfigRow),
   world_object: __table({
     name: 'world_object',
     indexes: [

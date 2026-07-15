@@ -5,7 +5,7 @@
 
 use serde_json::Value;
 use spacetimedb::{reducer, Identity, ReducerContext, Table, Timestamp};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 const CREATION_ROOM_ID: &str = "e58caed0-8268-419e-abe8-faa3833a1de6";
 const STARTING_ROOM_ID: &str = "a1b2c3d4-5678-90ab-cdef-123456789abc";
@@ -521,6 +521,86 @@ pub struct ActorWallet {
     pub updated_at: Timestamp,
 }
 
+/// An authored point where new or defeated characters may enter the world.
+/// Multiple points may target the same room with different roles and priority.
+#[spacetimedb::table(accessor = spawn_point, public)]
+#[derive(Clone)]
+pub struct SpawnPoint {
+    #[primary_key]
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub room_id: String,
+    pub allows_initial_spawn: bool,
+    pub allows_respawn: bool,
+    pub active: bool,
+    pub priority: i32,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+/// Singleton policy for character creation, defeat consequences, and recovery.
+#[spacetimedb::table(accessor = world_lifecycle_config, public)]
+#[derive(Clone)]
+pub struct WorldLifecycleConfig {
+    #[primary_key]
+    pub id: String,
+    pub initial_spawn_policy: String,
+    pub fixed_initial_spawn_point_id: Option<String>,
+    pub respawn_policy: String,
+    pub fixed_respawn_point_id: Option<String>,
+    pub death_mode: String,
+    pub respawn_delay_seconds: u32,
+    pub inventory_loss_mode: String,
+    pub inventory_loss_percent: u32,
+    pub include_equipped_in_loss: bool,
+    pub gold_loss_percent: u32,
+    pub experience_loss_percent: u32,
+    pub respawn_health_percent: u32,
+    pub respawn_resource_percent: u32,
+    pub spawn_protection_seconds: u32,
+    pub reset_quests_on_death: bool,
+    pub clear_wanted_on_respawn: bool,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+/// Runtime state separates being defeated from being eligible to re-enter.
+#[spacetimedb::table(accessor = actor_life_state, public)]
+#[derive(Clone)]
+pub struct ActorLifeState {
+    #[primary_key]
+    pub id: String,
+    pub actor_id: String,
+    pub state: String,
+    pub death_room_id: Option<String>,
+    pub pending_spawn_point_id: Option<String>,
+    pub death_count: u32,
+    pub died_at: Option<Timestamp>,
+    pub respawn_available_at_micros: i64,
+    pub protected_until_micros: i64,
+    pub updated_at: Timestamp,
+}
+
+/// Immutable audit trail retained even when hardcore mode deletes a character.
+#[spacetimedb::table(accessor = actor_death_record, public)]
+#[derive(Clone)]
+pub struct ActorDeathRecord {
+    #[primary_key]
+    pub id: String,
+    pub actor_id: String,
+    pub actor_name: String,
+    pub death_room_id: String,
+    pub spawn_point_id: Option<String>,
+    pub death_mode: String,
+    pub defeated_by: Option<String>,
+    pub item_stacks_dropped: u32,
+    pub item_stacks_destroyed: u32,
+    pub gold_lost: i32,
+    pub experience_lost: u32,
+    pub died_at: Timestamp,
+}
+
 fn identity_id(identity: Identity) -> String {
     identity.to_string()
 }
@@ -544,6 +624,7 @@ fn require_admin(ctx: &ReducerContext) -> Result<(), String> {
 fn ensure_profile(ctx: &ReducerContext) {
     if let Some(profile) = profile_for(ctx, ctx.sender()) {
         ensure_actor_progression(ctx, &profile.id);
+        ensure_actor_life_state(ctx, &profile.id);
         return;
     }
 
@@ -563,6 +644,7 @@ fn ensure_profile(ctx: &ReducerContext) {
         is_admin,
     });
     ensure_actor_progression(ctx, &id);
+    ensure_actor_life_state(ctx, &id);
 }
 
 fn json_string(value: Option<&Value>, fallback: &str) -> String {
@@ -608,6 +690,27 @@ fn normalized_key(value: &str) -> String {
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
         .join("-")
+}
+
+fn validate_lifecycle_policy_values(
+    initial_spawn_policy: &str,
+    respawn_policy: &str,
+    death_mode: &str,
+    inventory_loss_mode: &str,
+) -> Result<(), String> {
+    if !matches!(initial_spawn_policy, "fixed" | "highest_priority" | "random") {
+        return Err("Initial spawn policy must be fixed, highest_priority, or random.".to_string());
+    }
+    if !matches!(respawn_policy, "fixed" | "nearest" | "region_nearest" | "highest_priority" | "random") {
+        return Err("Respawn policy must be fixed, nearest, region_nearest, highest_priority, or random.".to_string());
+    }
+    if !matches!(death_mode, "respawn" | "hardcore") {
+        return Err("Death mode must be respawn or hardcore.".to_string());
+    }
+    if !matches!(inventory_loss_mode, "keep" | "drop_inventory" | "drop_all" | "destroy_inventory" | "destroy_all" | "drop_percentage" | "destroy_percentage") {
+        return Err("Inventory loss mode is invalid.".to_string());
+    }
+    Ok(())
 }
 
 fn actor_stat_id(actor_id: &str, stat_definition_id: &str) -> String {
@@ -846,6 +949,48 @@ fn seed_rpg_definitions(ctx: &ReducerContext) {
     }
 }
 
+fn seed_lifecycle_definitions(ctx: &ReducerContext) {
+    let config_id = "world".to_string();
+    if ctx.db.world_lifecycle_config().id().find(&config_id).is_some() { return; }
+    let starter_point_id = "starter-town-square".to_string();
+    if ctx.db.spawn_point().id().find(&starter_point_id).is_none()
+        && ctx.db.room().id().find(&STARTING_ROOM_ID.to_string()).is_some() {
+        ctx.db.spawn_point().insert(SpawnPoint {
+            id: starter_point_id.clone(),
+            name: "Town Square".to_string(),
+            description: "Default arrival and recovery point for new worlds.".to_string(),
+            room_id: STARTING_ROOM_ID.to_string(),
+            allows_initial_spawn: true,
+            allows_respawn: true,
+            active: true,
+            priority: 100,
+            created_at: ctx.timestamp,
+            updated_at: ctx.timestamp,
+        });
+    }
+    ctx.db.world_lifecycle_config().insert(WorldLifecycleConfig {
+        id: config_id,
+        initial_spawn_policy: "fixed".to_string(),
+        fixed_initial_spawn_point_id: Some(starter_point_id.clone()),
+        respawn_policy: "nearest".to_string(),
+        fixed_respawn_point_id: Some(starter_point_id),
+        death_mode: "respawn".to_string(),
+        respawn_delay_seconds: 0,
+        inventory_loss_mode: "keep".to_string(),
+        inventory_loss_percent: 0,
+        include_equipped_in_loss: false,
+        gold_loss_percent: 0,
+        experience_loss_percent: 0,
+        respawn_health_percent: 100,
+        respawn_resource_percent: 100,
+        spawn_protection_seconds: 0,
+        reset_quests_on_death: false,
+        clear_wanted_on_respawn: false,
+        created_at: ctx.timestamp,
+        updated_at: ctx.timestamp,
+    });
+}
+
 fn seed_world(ctx: &ReducerContext) {
     seed_rpg_definitions(ctx);
     let arkyv_region = "arkyv".to_string();
@@ -945,6 +1090,7 @@ fn seed_world(ctx: &ReducerContext) {
             guard_wanted_seconds: 120,
         });
     }
+    seed_lifecycle_definitions(ctx);
 }
 
 #[reducer(init)]
@@ -960,6 +1106,7 @@ pub fn client_connected(ctx: &ReducerContext) {
     if ctx.db.progression_config().iter().next().is_none() {
         seed_rpg_definitions(ctx);
     }
+    seed_lifecycle_definitions(ctx);
     ensure_profile(ctx);
 }
 
@@ -993,16 +1140,22 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                     return Err("23505: character name already exists".to_string());
                 }
                 let user_id = identity_id(ctx.sender());
+                let initial_room = choose_initial_spawn(ctx, &id)
+                    .map(|point| point.room_id)
+                    .or_else(|| optional_string(&row, "current_room"))
+                    .filter(|room_id| ctx.db.room().id().find(room_id).is_some())
+                    .or_else(|| Some(STARTING_ROOM_ID.to_string()).filter(|room_id| ctx.db.room().id().find(room_id).is_some()));
                 ctx.db.character().insert(Character {
                     id: id.clone(),
                     owner: ctx.sender(),
                     user_id,
                     name,
-                    current_room: optional_string(&row, "current_room").or_else(|| Some(STARTING_ROOM_ID.to_string())),
+                    current_room: initial_room,
                     created_at: ctx.timestamp,
                     description: optional_string(&row, "description"),
                 });
                 ensure_actor_progression(ctx, &id);
+                ensure_actor_life_state(ctx, &id);
             }
         }
         "regions" => {
@@ -1215,6 +1368,7 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                 }
                 let minimum_reputation = i32_value(&row, "minimum_reputation", -3000);
                 let maximum_reputation = i32_value(&row, "maximum_reputation", 3000).max(minimum_reputation);
+                let hostile_threshold = i32_value(&row, "hostile_threshold", -1000).clamp(minimum_reputation, maximum_reputation);
                 ctx.db.faction_definition().insert(FactionDefinition {
                     id,
                     name: string(&row, "name", "Untitled faction"),
@@ -1222,8 +1376,8 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                     starting_reputation: i32_value(&row, "starting_reputation", 0).clamp(minimum_reputation, maximum_reputation),
                     minimum_reputation,
                     maximum_reputation,
-                    hostile_threshold: i32_value(&row, "hostile_threshold", -1000).clamp(minimum_reputation, maximum_reputation),
-                    friendly_threshold: i32_value(&row, "friendly_threshold", 1000).clamp(minimum_reputation, maximum_reputation),
+                    hostile_threshold,
+                    friendly_threshold: i32_value(&row, "friendly_threshold", 1000).clamp(hostile_threshold, maximum_reputation),
                     attack_penalty: i32_value(&row, "attack_penalty", -100).min(0),
                     kill_penalty: i32_value(&row, "kill_penalty", -500).min(0),
                     created_at: ctx.timestamp,
@@ -1334,6 +1488,65 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                 ctx.db.actor_wallet().insert(ActorWallet { id: actor_id.clone(), actor_id, gold: i32_value(&row, "gold", 0).max(0), updated_at: ctx.timestamp });
             }
         }
+        "spawn_points" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = normalized_key(&string(&row, "id", &string(&row, "name", "")));
+                let room_id = string(&row, "room_id", "");
+                if id.is_empty() || ctx.db.spawn_point().id().find(&id).is_some() { return Err("Spawn point id is missing or already exists.".to_string()); }
+                if ctx.db.room().id().find(&room_id).is_none() { return Err("Spawn point room does not exist.".to_string()); }
+                ctx.db.spawn_point().insert(SpawnPoint {
+                    id,
+                    name: string(&row, "name", "Untitled spawn point"),
+                    description: string(&row, "description", ""),
+                    room_id,
+                    allows_initial_spawn: bool_value(&row, "allows_initial_spawn", false),
+                    allows_respawn: bool_value(&row, "allows_respawn", true),
+                    active: bool_value(&row, "active", true),
+                    priority: i32_value(&row, "priority", 0),
+                    created_at: ctx.timestamp,
+                    updated_at: ctx.timestamp,
+                });
+            }
+        }
+        "world_lifecycle_configs" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = string(&row, "id", "world");
+                if ctx.db.world_lifecycle_config().id().find(&id).is_some() { return Err("A lifecycle configuration with that id already exists.".to_string()); }
+                let initial_spawn_policy = string(&row, "initial_spawn_policy", "fixed");
+                let respawn_policy = string(&row, "respawn_policy", "nearest");
+                let death_mode = string(&row, "death_mode", "respawn");
+                let inventory_loss_mode = string(&row, "inventory_loss_mode", "keep");
+                validate_lifecycle_policy_values(&initial_spawn_policy, &respawn_policy, &death_mode, &inventory_loss_mode)?;
+                let fixed_initial_spawn_point_id = optional_string(&row, "fixed_initial_spawn_point_id").filter(|value| !value.trim().is_empty());
+                let fixed_respawn_point_id = optional_string(&row, "fixed_respawn_point_id").filter(|value| !value.trim().is_empty());
+                for spawn_point_id in [fixed_initial_spawn_point_id.as_ref(), fixed_respawn_point_id.as_ref()].into_iter().flatten() {
+                    if ctx.db.spawn_point().id().find(spawn_point_id).is_none() { return Err(format!("Lifecycle configuration references missing spawn point: {spawn_point_id}")); }
+                }
+                ctx.db.world_lifecycle_config().insert(WorldLifecycleConfig {
+                    id,
+                    initial_spawn_policy,
+                    fixed_initial_spawn_point_id,
+                    respawn_policy,
+                    fixed_respawn_point_id,
+                    death_mode,
+                    respawn_delay_seconds: u32_value(&row, "respawn_delay_seconds", 0),
+                    inventory_loss_mode,
+                    inventory_loss_percent: u32_value(&row, "inventory_loss_percent", 0).min(100),
+                    include_equipped_in_loss: bool_value(&row, "include_equipped_in_loss", false),
+                    gold_loss_percent: u32_value(&row, "gold_loss_percent", 0).min(100),
+                    experience_loss_percent: u32_value(&row, "experience_loss_percent", 0).min(100),
+                    respawn_health_percent: u32_value(&row, "respawn_health_percent", 100).clamp(1, 100),
+                    respawn_resource_percent: u32_value(&row, "respawn_resource_percent", 100).min(100),
+                    spawn_protection_seconds: u32_value(&row, "spawn_protection_seconds", 0),
+                    reset_quests_on_death: bool_value(&row, "reset_quests_on_death", false),
+                    clear_wanted_on_respawn: bool_value(&row, "clear_wanted_on_respawn", false),
+                    created_at: ctx.timestamp,
+                    updated_at: ctx.timestamp,
+                });
+            }
+        }
         "world_objects" => {
             require_admin(ctx)?;
             for row in rows {
@@ -1442,13 +1655,17 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                 if id.is_empty() || ctx.db.npc().id().find(&id).is_some() {
                     return Err("NPC id is missing or already exists.".to_string());
                 }
+                let faction = optional_string(&row, "faction").filter(|value| !value.trim().is_empty());
+                if faction.as_ref().map(|faction_id| ctx.db.faction_definition().id().find(faction_id).is_none()).unwrap_or(false) {
+                    return Err("NPC faction does not exist.".to_string());
+                }
                 ctx.db.npc().insert(Npc {
                     id,
                     name: string(&row, "name", "Unnamed NPC"),
                     description: optional_string(&row, "description"),
                     current_room: optional_string(&row, "current_room"),
                     dialogue_tree: row.get("dialogue_tree").filter(|value| !value.is_null()).map(|value| json_string(Some(value), "{}")),
-                    faction: optional_string(&row, "faction"),
+                    faction,
                     behavior_type: string(&row, "behavior_type", "static"),
                     created_at: ctx.timestamp,
                     alias: optional_string(&row, "alias"),
@@ -1798,12 +2015,16 @@ pub fn update_rows(
             require_admin(ctx)?;
             for id in ids {
                 let Some(existing) = ctx.db.npc().id().find(&id) else { continue };
+                let faction = payload.get("faction").map(|_| optional_string(&payload, "faction").filter(|value| !value.trim().is_empty())).unwrap_or(existing.faction.clone());
+                if payload.get("faction").is_some() && faction != existing.faction && faction.as_ref().map(|faction_id| ctx.db.faction_definition().id().find(faction_id).is_none()).unwrap_or(false) {
+                    return Err("NPC faction does not exist.".to_string());
+                }
                 ctx.db.npc().id().update(Npc {
                     name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(),
                     description: payload.get("description").map(|_| optional_string(&payload, "description")).unwrap_or(existing.description),
                     current_room: payload.get("current_room").map(|_| optional_string(&payload, "current_room")).unwrap_or(existing.current_room),
                     dialogue_tree: payload.get("dialogue_tree").map(|value| if value.is_null() { None } else { Some(json_string(Some(value), "{}")) }).unwrap_or(existing.dialogue_tree),
-                    faction: payload.get("faction").map(|_| optional_string(&payload, "faction")).unwrap_or(existing.faction),
+                    faction,
                     behavior_type: payload.get("behavior_type").and_then(Value::as_str).unwrap_or(&existing.behavior_type).to_string(),
                     alias: payload.get("alias").map(|_| optional_string(&payload, "alias")).unwrap_or(existing.alias),
                     greeting_behavior: payload.get("greeting_behavior").and_then(Value::as_str).unwrap_or(&existing.greeting_behavior).to_string(),
@@ -1841,8 +2062,8 @@ pub fn update_rows(
                     maximum_reputation,
                     hostile_threshold,
                     friendly_threshold,
-                    attack_penalty: payload.get("attack_penalty").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.attack_penalty),
-                    kill_penalty: payload.get("kill_penalty").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.kill_penalty),
+                    attack_penalty: payload.get("attack_penalty").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.attack_penalty).min(0),
+                    kill_penalty: payload.get("kill_penalty").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.kill_penalty).min(0),
                     updated_at: ctx.timestamp,
                     ..existing
                 };
@@ -1953,6 +2174,61 @@ pub fn update_rows(
                 });
             }
         }
+        "spawn_points" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.spawn_point().id().find(&id) else { continue };
+                let room_id = payload.get("room_id").and_then(Value::as_str).unwrap_or(&existing.room_id).to_string();
+                if ctx.db.room().id().find(&room_id).is_none() { return Err("Spawn point room does not exist.".to_string()); }
+                ctx.db.spawn_point().id().update(SpawnPoint {
+                    name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(),
+                    description: payload.get("description").and_then(Value::as_str).unwrap_or(&existing.description).to_string(),
+                    room_id,
+                    allows_initial_spawn: payload.get("allows_initial_spawn").and_then(Value::as_bool).unwrap_or(existing.allows_initial_spawn),
+                    allows_respawn: payload.get("allows_respawn").and_then(Value::as_bool).unwrap_or(existing.allows_respawn),
+                    active: payload.get("active").and_then(Value::as_bool).unwrap_or(existing.active),
+                    priority: payload.get("priority").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.priority),
+                    updated_at: ctx.timestamp,
+                    ..existing
+                });
+            }
+        }
+        "world_lifecycle_configs" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.world_lifecycle_config().id().find(&id) else { continue };
+                let initial_spawn_policy = payload.get("initial_spawn_policy").and_then(Value::as_str).unwrap_or(&existing.initial_spawn_policy).to_string();
+                let respawn_policy = payload.get("respawn_policy").and_then(Value::as_str).unwrap_or(&existing.respawn_policy).to_string();
+                let death_mode = payload.get("death_mode").and_then(Value::as_str).unwrap_or(&existing.death_mode).to_string();
+                let inventory_loss_mode = payload.get("inventory_loss_mode").and_then(Value::as_str).unwrap_or(&existing.inventory_loss_mode).to_string();
+                validate_lifecycle_policy_values(&initial_spawn_policy, &respawn_policy, &death_mode, &inventory_loss_mode)?;
+                let fixed_initial_spawn_point_id = payload.get("fixed_initial_spawn_point_id").map(|_| optional_string(&payload, "fixed_initial_spawn_point_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.fixed_initial_spawn_point_id.clone());
+                let fixed_respawn_point_id = payload.get("fixed_respawn_point_id").map(|_| optional_string(&payload, "fixed_respawn_point_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.fixed_respawn_point_id.clone());
+                for spawn_point_id in [fixed_initial_spawn_point_id.as_ref(), fixed_respawn_point_id.as_ref()].into_iter().flatten() {
+                    if ctx.db.spawn_point().id().find(spawn_point_id).is_none() { return Err(format!("Lifecycle configuration references missing spawn point: {spawn_point_id}")); }
+                }
+                ctx.db.world_lifecycle_config().id().update(WorldLifecycleConfig {
+                    initial_spawn_policy,
+                    fixed_initial_spawn_point_id,
+                    respawn_policy,
+                    fixed_respawn_point_id,
+                    death_mode,
+                    respawn_delay_seconds: payload.get("respawn_delay_seconds").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.respawn_delay_seconds),
+                    inventory_loss_mode,
+                    inventory_loss_percent: payload.get("inventory_loss_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.inventory_loss_percent).min(100),
+                    include_equipped_in_loss: payload.get("include_equipped_in_loss").and_then(Value::as_bool).unwrap_or(existing.include_equipped_in_loss),
+                    gold_loss_percent: payload.get("gold_loss_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.gold_loss_percent).min(100),
+                    experience_loss_percent: payload.get("experience_loss_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.experience_loss_percent).min(100),
+                    respawn_health_percent: payload.get("respawn_health_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.respawn_health_percent).clamp(1, 100),
+                    respawn_resource_percent: payload.get("respawn_resource_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.respawn_resource_percent).min(100),
+                    spawn_protection_seconds: payload.get("spawn_protection_seconds").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.spawn_protection_seconds),
+                    reset_quests_on_death: payload.get("reset_quests_on_death").and_then(Value::as_bool).unwrap_or(existing.reset_quests_on_death),
+                    clear_wanted_on_respawn: payload.get("clear_wanted_on_respawn").and_then(Value::as_bool).unwrap_or(existing.clear_wanted_on_respawn),
+                    updated_at: ctx.timestamp,
+                    ..existing
+                });
+            }
+        }
         _ => return Err(format!("Unsupported update table: {table_name}")),
     }
     Ok(())
@@ -1997,6 +2273,7 @@ fn delete_actor_rpg_state(ctx: &ReducerContext, actor_id: &String) {
     let progress_ids = ctx.db.actor_quest_progress().iter().filter(|row| row.actor_id == *actor_id).map(|row| row.id).collect::<Vec<_>>();
     for progress_id in progress_ids { ctx.db.actor_quest_progress().id().delete(&progress_id); }
     ctx.db.actor_wallet().id().delete(actor_id);
+    ctx.db.actor_life_state().id().delete(actor_id);
     ctx.db.actor_progression().id().delete(actor_id);
 }
 
@@ -2109,6 +2386,9 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
         "rooms" => {
             require_admin(ctx)?;
             for id in ids {
+                if ctx.db.spawn_point().iter().any(|point| point.room_id == id) {
+                    return Err("This room is used by a spawn point. Move or delete that spawn point first.".to_string());
+                }
                 if ctx.db.quest_objective().iter().any(|objective| objective.objective_type == "explore_room" && objective.target_id == id) {
                     return Err("This room is used by a quest objective. Reassign or delete that objective first.".to_string());
                 }
@@ -2203,6 +2483,31 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
         "actor_wallets" => {
             require_admin(ctx)?;
             for id in ids { ctx.db.actor_wallet().id().delete(&id); }
+        }
+        "spawn_points" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let configs = ctx.db.world_lifecycle_config().iter().filter(|config| config.fixed_initial_spawn_point_id.as_deref() == Some(id.as_str()) || config.fixed_respawn_point_id.as_deref() == Some(id.as_str())).collect::<Vec<_>>();
+                for config in configs {
+                    ctx.db.world_lifecycle_config().id().update(WorldLifecycleConfig {
+                        fixed_initial_spawn_point_id: config.fixed_initial_spawn_point_id.clone().filter(|value| value != &id),
+                        fixed_respawn_point_id: config.fixed_respawn_point_id.clone().filter(|value| value != &id),
+                        updated_at: ctx.timestamp,
+                        ..config
+                    });
+                }
+                let life_states = ctx.db.actor_life_state().iter().filter(|state| state.pending_spawn_point_id.as_deref() == Some(id.as_str())).collect::<Vec<_>>();
+                for state in life_states { ctx.db.actor_life_state().id().update(ActorLifeState { pending_spawn_point_id: None, updated_at: ctx.timestamp, ..state }); }
+                ctx.db.spawn_point().id().delete(&id);
+            }
+        }
+        "world_lifecycle_configs" => {
+            require_admin(ctx)?;
+            for id in ids { ctx.db.world_lifecycle_config().id().delete(&id); }
+        }
+        "actor_death_records" => {
+            require_admin(ctx)?;
+            for id in ids { ctx.db.actor_death_record().id().delete(&id); }
         }
         "exits" => {
             require_admin(ctx)?;
@@ -2340,6 +2645,131 @@ fn ensure_actor_progression(ctx: &ReducerContext, actor_id: &str) -> ActorProgre
         }
     }
     progression
+}
+
+fn world_lifecycle_config(ctx: &ReducerContext) -> WorldLifecycleConfig {
+    ctx.db.world_lifecycle_config().id().find(&"world".to_string())
+        .or_else(|| ctx.db.world_lifecycle_config().iter().next())
+        .unwrap_or(WorldLifecycleConfig {
+            id: "world".to_string(),
+            initial_spawn_policy: "fixed".to_string(),
+            fixed_initial_spawn_point_id: None,
+            respawn_policy: "nearest".to_string(),
+            fixed_respawn_point_id: None,
+            death_mode: "respawn".to_string(),
+            respawn_delay_seconds: 0,
+            inventory_loss_mode: "keep".to_string(),
+            inventory_loss_percent: 0,
+            include_equipped_in_loss: false,
+            gold_loss_percent: 0,
+            experience_loss_percent: 0,
+            respawn_health_percent: 100,
+            respawn_resource_percent: 100,
+            spawn_protection_seconds: 0,
+            reset_quests_on_death: false,
+            clear_wanted_on_respawn: false,
+            created_at: ctx.timestamp,
+            updated_at: ctx.timestamp,
+        })
+}
+
+fn ensure_actor_life_state(ctx: &ReducerContext, actor_id: &str) -> ActorLifeState {
+    let id = actor_id.to_string();
+    if let Some(state) = ctx.db.actor_life_state().id().find(&id) { return state; }
+    let state = ActorLifeState {
+        id: id.clone(), actor_id: id, state: "alive".to_string(), death_room_id: None,
+        pending_spawn_point_id: None, death_count: 0, died_at: None,
+        respawn_available_at_micros: 0, protected_until_micros: 0, updated_at: ctx.timestamp,
+    };
+    ctx.db.actor_life_state().insert(state.clone());
+    state
+}
+
+fn active_spawn_points(ctx: &ReducerContext, initial: bool) -> Vec<SpawnPoint> {
+    ctx.db.spawn_point().iter()
+        .filter(|point| point.active && if initial { point.allows_initial_spawn } else { point.allows_respawn })
+        .filter(|point| ctx.db.room().id().find(&point.room_id).is_some())
+        .collect::<Vec<_>>()
+}
+
+fn highest_priority_spawn(mut points: Vec<SpawnPoint>) -> Option<SpawnPoint> {
+    points.sort_by(|left, right| right.priority.cmp(&left.priority).then(left.name.cmp(&right.name)).then(left.id.cmp(&right.id)));
+    points.into_iter().next()
+}
+
+fn choose_initial_spawn(ctx: &ReducerContext, actor_id: &str) -> Option<SpawnPoint> {
+    let config = world_lifecycle_config(ctx);
+    let points = active_spawn_points(ctx, true);
+    if points.is_empty() { return None; }
+    match config.initial_spawn_policy.as_str() {
+        "fixed" => config.fixed_initial_spawn_point_id.as_ref().and_then(|id| points.iter().find(|point| &point.id == id).cloned()).or_else(|| highest_priority_spawn(points)),
+        "random" => {
+            let index = deterministic_roll(&format!("initial:{actor_id}:{}", ctx.timestamp.to_micros_since_unix_epoch())) as usize % points.len();
+            points.get(index).cloned()
+        }
+        _ => highest_priority_spawn(points),
+    }
+}
+
+fn room_distances(ctx: &ReducerContext, origin_room: &str) -> BTreeMap<String, u32> {
+    let mut distances = BTreeMap::new();
+    let mut queue = VecDeque::new();
+    distances.insert(origin_room.to_string(), 0u32);
+    queue.push_back(origin_room.to_string());
+    while let Some(room_id) = queue.pop_front() {
+        let distance = *distances.get(&room_id).unwrap_or(&0);
+        let neighbors = ctx.db.exit().iter().filter_map(|exit| {
+            if exit.from_room.as_deref() == Some(room_id.as_str()) { exit.to_room }
+            else if exit.to_room.as_deref() == Some(room_id.as_str()) { exit.from_room }
+            else { None }
+        }).collect::<Vec<_>>();
+        for neighbor in neighbors {
+            if distances.contains_key(&neighbor) { continue; }
+            distances.insert(neighbor.clone(), distance.saturating_add(1));
+            queue.push_back(neighbor);
+        }
+    }
+    distances
+}
+
+fn nearest_spawn(ctx: &ReducerContext, origin_room: &str, mut points: Vec<SpawnPoint>) -> Option<SpawnPoint> {
+    let distances = room_distances(ctx, origin_room);
+    points.sort_by(|left, right| {
+        let left_distance = distances.get(&left.room_id).copied().unwrap_or(u32::MAX);
+        let right_distance = distances.get(&right.room_id).copied().unwrap_or(u32::MAX);
+        left_distance.cmp(&right_distance).then(right.priority.cmp(&left.priority)).then(left.name.cmp(&right.name)).then(left.id.cmp(&right.id))
+    });
+    points.into_iter().next()
+}
+
+fn choose_respawn_point(ctx: &ReducerContext, actor_id: &str, origin_room: &str) -> Option<SpawnPoint> {
+    let config = world_lifecycle_config(ctx);
+    let mut points = active_spawn_points(ctx, false);
+    if points.is_empty() { return None; }
+    match config.respawn_policy.as_str() {
+        "fixed" => config.fixed_respawn_point_id.as_ref().and_then(|id| points.iter().find(|point| &point.id == id).cloned()).or_else(|| highest_priority_spawn(points)),
+        "random" => {
+            let index = deterministic_roll(&format!("respawn:{actor_id}:{origin_room}:{}", ctx.timestamp.to_micros_since_unix_epoch())) as usize % points.len();
+            points.get(index).cloned()
+        }
+        "highest_priority" => highest_priority_spawn(points),
+        "region_nearest" => {
+            let origin_region = ctx.db.room().id().find(&origin_room.to_string()).and_then(|room| room.region_name);
+            let regional = origin_region.as_ref().map(|region_id| points.iter().filter(|point| ctx.db.room().id().find(&point.room_id).and_then(|room| room.region_name).as_deref() == Some(region_id.as_str())).cloned().collect::<Vec<_>>()).unwrap_or_default();
+            if regional.is_empty() { nearest_spawn(ctx, origin_room, points) } else { nearest_spawn(ctx, origin_room, regional) }
+        }
+        _ => nearest_spawn(ctx, origin_room, std::mem::take(&mut points)),
+    }
+}
+
+fn actor_is_dead(ctx: &ReducerContext, actor_id: &str) -> bool {
+    ctx.db.actor_life_state().id().find(&actor_id.to_string()).map(|state| state.state == "dead").unwrap_or(false)
+}
+
+fn actor_has_spawn_protection(ctx: &ReducerContext, actor_id: &str) -> bool {
+    ctx.db.actor_life_state().id().find(&actor_id.to_string())
+        .map(|state| state.protected_until_micros > ctx.timestamp.to_micros_since_unix_epoch())
+        .unwrap_or(false)
 }
 
 fn xp_for_next_level(config: &ProgressionConfig, level: u32) -> u32 {
@@ -2910,7 +3340,7 @@ fn turn_in_quest(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &st
     let objectives = ctx.db.quest_objective().iter().filter(|objective| objective.quest_id == quest.id && objective.objective_type == "acquire_item" && objective.consume_on_turn_in).collect::<Vec<_>>();
     let mut required_items = BTreeMap::<String, u32>::new();
     for objective in objectives {
-        required_items.entry(objective.target_id).and_modify(|quantity| *quantity = quantity.saturating_add(objective.required_count)).or_insert(objective.required_count);
+        required_items.entry(objective.target_id).and_modify(|quantity| *quantity = (*quantity).max(objective.required_count)).or_insert(objective.required_count);
     }
     if required_items.iter().any(|(definition_id, quantity)| actor_item_quantity(ctx, actor_id, definition_id) < *quantity) {
         rpg_message(ctx, room_id, actor_id, "error", "A required quest item is no longer in your inventory.".to_string());
@@ -3013,7 +3443,7 @@ fn record_safe_zone_crime(ctx: &ReducerContext, room_id: &str, actor_id: &str, a
     rpg_message(ctx, room_id, actor_id, "error", format!("That is a crime in this safe region. You are wanted for {wanted_seconds} seconds."));
     let Some(health) = stat_definition_by_role(ctx, "health") else { return };
     for guard in guards_in_region.into_iter().filter(|guard| {
-        guard.current_room.as_deref() == Some(room_id) && ((victim_is_player && guard.protect_players) || (!victim_is_player && guard.protect_faction_members && (guard.faction.is_none() || guard.faction.as_deref() == victim_faction)))
+        guard.current_room.as_deref() == Some(room_id) && ((victim_is_player && guard.protect_players) || (!victim_is_player && guard.protect_faction_members))
     }) {
         add_message(ctx, Some(room_id.to_string()), Some(guard.id.clone()), Some(guard.name.clone()), None, "npc_speech", format!("{}: \"Stop! You have broken the peace, {actor_name}!\"", guard.name), None, None);
         npc_attack_player(ctx, guard, room_id, actor_id, actor_name, &health);
@@ -3191,6 +3621,14 @@ fn cast_ability(
     };
     let target_npc = if target_is_npc { ctx.db.npc().id().find(&target_id) } else { None };
     if ability.target_type == "enemy" {
+        if !target_is_npc && actor_is_dead(ctx, &target_id) {
+            rpg_message(ctx, room_id, actor_id, "error", format!("{target_name} is awaiting respawn and cannot be attacked."));
+            return;
+        }
+        if !target_is_npc && actor_has_spawn_protection(ctx, &target_id) {
+            rpg_message(ctx, room_id, actor_id, "error", format!("{target_name} is protected after respawning."));
+            return;
+        }
         if let Some(npc) = target_npc.as_ref() {
             penalize_npc_attack(ctx, room_id, actor_id, actor_name, npc, false);
             if actor_current_room(ctx, actor_id).as_deref() != Some(room_id) { return; }
@@ -3236,6 +3674,7 @@ fn cast_ability(
         let row = actor_stat_row(ctx, actor_id, resource);
         set_actor_stat_current(ctx, actor_id, resource, row.current_value.saturating_sub(ability.resource_cost));
     }
+    if ability.target_type == "enemy" { clear_actor_spawn_protection(ctx, actor_id); }
     set_cooldown(ctx, actor_id, &action_id, ability.cooldown_ms.max(ability.cast_time_ms));
     let mut power = ability_power(ctx, actor_id, &ability);
     if ability.effect_type == "damage" && ability.mitigation_type == "armor" {
@@ -3264,7 +3703,7 @@ fn cast_ability(
                     rpg_message(ctx, room_id, actor_id, "system", award_experience(ctx, actor_id, xp_reward));
                     if !drops.is_empty() { rpg_message(ctx, room_id, actor_id, "system", format!("{target_name} drops {}.", drops.join(", "))); }
                 } else {
-                    respawn_player(ctx, &target_id, room_id, &target_name, &effect_stat);
+                    defeat_player(ctx, &target_id, room_id, &target_name, Some(actor_name));
                 }
             } else if let Some(npc) = target_npc {
                 if npc_disposition(&npc) != "friendly" {
@@ -3332,29 +3771,211 @@ fn defeat_npc(ctx: &ReducerContext, npc: Npc, room_id: &str) -> Vec<String> {
     drops
 }
 
-fn respawn_player(ctx: &ReducerContext, actor_id: &str, origin_room: &str, actor_name: &str, health: &StatDefinition) {
-    let fallback = if ctx.db.room().id().find(&STARTING_ROOM_ID.to_string()).is_some() {
-        STARTING_ROOM_ID.to_string()
-    } else {
-        origin_room.to_string()
-    };
-    let destination = region_for_room(ctx, origin_room)
+fn object_is_protected_on_death(definition: &ObjectDefinition) -> bool {
+    serde_json::from_str::<Vec<String>>(&definition.tags).unwrap_or_default().iter().any(|tag| {
+        tag.eq_ignore_ascii_case("soulbound") || tag.eq_ignore_ascii_case("keep-on-death")
+    })
+}
+
+fn apply_death_item_loss(
+    ctx: &ReducerContext,
+    actor_id: &str,
+    origin_room: &str,
+    config: &WorldLifecycleConfig,
+) -> (u32, u32) {
+    let mode = config.inventory_loss_mode.as_str();
+    if mode == "keep" { return (0, 0); }
+    let include_equipped = matches!(mode, "drop_all" | "destroy_all") || config.include_equipped_in_loss;
+    let candidates = ctx.db.world_object().iter()
+        .filter(|object| object.location_id == actor_id
+            && (object.location_kind == "inventory" || (include_equipped && object.location_kind == "equipped")))
+        .filter(|object| object_definition_for(ctx, object).map(|definition| !object_is_protected_on_death(&definition)).unwrap_or(true))
+        .collect::<Vec<_>>();
+    let percentage_mode = matches!(mode, "drop_percentage" | "destroy_percentage");
+    let destroy = matches!(mode, "destroy_inventory" | "destroy_all" | "destroy_percentage");
+    let mut dropped = 0u32;
+    let mut destroyed = 0u32;
+    for object in candidates {
+        if percentage_mode {
+            let roll = deterministic_roll(&format!("death:{}:{}:{}", actor_id, object.id, ctx.timestamp.to_micros_since_unix_epoch())) % 100;
+            if roll >= config.inventory_loss_percent { continue; }
+        }
+        if destroy {
+            delete_world_object_tree(ctx, &object.id);
+            destroyed = destroyed.saturating_add(1);
+        } else {
+            ctx.db.world_object().id().update(WorldObject {
+                location_kind: "room".to_string(),
+                location_id: origin_room.to_string(),
+                equipped_slot: None,
+                is_active: false,
+                state_json: format!(r#"{{"dropped_on_death_by":"{}"}}"#, actor_id),
+                updated_at: ctx.timestamp,
+                ..object
+            });
+            dropped = dropped.saturating_add(1);
+        }
+    }
+    (dropped, destroyed)
+}
+
+fn apply_death_progression_loss(ctx: &ReducerContext, actor_id: &str, config: &WorldLifecycleConfig) -> (i32, u32) {
+    let actor_key = actor_id.to_string();
+    let gold_lost = ctx.db.actor_wallet().id().find(&actor_key).map(|wallet| {
+        let loss = i64::from(wallet.gold.max(0)).saturating_mul(i64::from(config.gold_loss_percent)) / 100;
+        let loss = i32::try_from(loss).unwrap_or(i32::MAX);
+        ctx.db.actor_wallet().id().update(ActorWallet { gold: wallet.gold.saturating_sub(loss), updated_at: ctx.timestamp, ..wallet });
+        loss
+    }).unwrap_or(0);
+    let experience_lost = ctx.db.actor_progression().id().find(&actor_key).map(|progression| {
+        let loss = u64::from(progression.experience).saturating_mul(u64::from(config.experience_loss_percent)) / 100;
+        let loss = u32::try_from(loss).unwrap_or(u32::MAX);
+        ctx.db.actor_progression().id().update(ActorProgression {
+            experience: progression.experience.saturating_sub(loss), updated_at: ctx.timestamp, ..progression
+        });
+        loss
+    }).unwrap_or(0);
+    (gold_lost, experience_lost)
+}
+
+fn reset_active_quests_on_death(ctx: &ReducerContext, actor_id: &str) {
+    let quest_ids = ctx.db.actor_quest().iter()
+        .filter(|quest| quest.actor_id == actor_id && quest.status != "completed")
+        .map(|quest| quest.id)
+        .collect::<Vec<_>>();
+    for quest_id in quest_ids { ctx.db.actor_quest().id().delete(&quest_id); }
+    let progress_ids = ctx.db.actor_quest_progress().iter()
+        .filter(|progress| progress.actor_id == actor_id && ctx.db.actor_quest().id().find(&actor_quest_id(actor_id, &progress.quest_id)).is_none())
+        .map(|progress| progress.id)
+        .collect::<Vec<_>>();
+    for progress_id in progress_ids { ctx.db.actor_quest_progress().id().delete(&progress_id); }
+}
+
+fn legacy_respawn_room(ctx: &ReducerContext, origin_room: &str) -> String {
+    region_for_room(ctx, origin_room)
         .and_then(|region| region.respawn_room_id)
         .filter(|room_id| ctx.db.room().id().find(room_id).is_some())
-        .unwrap_or(fallback);
+        .or_else(|| ctx.db.room().id().find(&STARTING_ROOM_ID.to_string()).map(|room| room.id))
+        .unwrap_or_else(|| origin_room.to_string())
+}
+
+fn restore_actor_after_respawn(ctx: &ReducerContext, actor_id: &str, config: &WorldLifecycleConfig) -> Option<i32> {
+    let definitions = ctx.db.stat_definition().iter().collect::<Vec<_>>();
+    let mut restored_health = None;
+    for definition in definitions {
+        let Some(role) = definition.role.as_deref() else { continue };
+        let percentage = if role == "health" { config.respawn_health_percent }
+            else if matches!(role, "mana" | "energy" | "focus" | "resource") { config.respawn_resource_percent }
+            else { continue };
+        let row = actor_stat_row(ctx, actor_id, &definition);
+        let usable = row.base_value.saturating_sub(definition.minimum).max(0);
+        let restored = definition.minimum.saturating_add(usable.saturating_mul(percentage as i32) / 100)
+            .clamp(definition.minimum, row.base_value.clamp(definition.minimum, definition.maximum));
+        let restored = if role == "health" && restored <= definition.minimum && row.base_value > definition.minimum {
+            definition.minimum.saturating_add(1)
+        } else { restored };
+        set_actor_stat_current(ctx, actor_id, &definition, restored);
+        if role == "health" { restored_health = Some(restored); }
+    }
+    restored_health
+}
+
+fn clear_actor_spawn_protection(ctx: &ReducerContext, actor_id: &str) {
     let actor_key = actor_id.to_string();
+    if let Some(state) = ctx.db.actor_life_state().id().find(&actor_key).filter(|state| state.protected_until_micros > 0) {
+        ctx.db.actor_life_state().id().update(ActorLifeState { protected_until_micros: 0, updated_at: ctx.timestamp, ..state });
+    }
+}
+
+fn complete_actor_respawn(ctx: &ReducerContext, actor_id: &str, actor_name: &str) -> Result<(), String> {
+    let actor_key = actor_id.to_string();
+    let Some(state) = ctx.db.actor_life_state().id().find(&actor_key) else { return Err("No death state exists for this actor.".to_string()) };
+    if state.state != "dead" { return Err("You are already alive.".to_string()); }
+    let now = ctx.timestamp.to_micros_since_unix_epoch();
+    if now < state.respawn_available_at_micros {
+        let seconds = (state.respawn_available_at_micros.saturating_sub(now).saturating_add(999_999)) / 1_000_000;
+        return Err(format!("You can respawn in {seconds} second{}.", if seconds == 1 { "" } else { "s" }));
+    }
+    let origin_room = state.death_room_id.clone().or_else(|| actor_current_room(ctx, actor_id)).unwrap_or_else(|| STARTING_ROOM_ID.to_string());
+    let point = state.pending_spawn_point_id.as_ref().and_then(|id| ctx.db.spawn_point().id().find(id))
+        .filter(|point| point.active && point.allows_respawn)
+        .or_else(|| choose_respawn_point(ctx, actor_id, &origin_room));
+    let destination = point.as_ref().map(|point| point.room_id.clone()).unwrap_or_else(|| legacy_respawn_room(ctx, &origin_room));
     if let Some(character) = ctx.db.character().id().find(&actor_key) {
         ctx.db.character().id().update(Character { current_room: Some(destination.clone()), ..character });
     } else if let Some(profile) = ctx.db.profile().id().find(&actor_key) {
         ctx.db.profile().id().update(Profile { current_room: Some(destination.clone()), ..profile });
+    } else {
+        return Err("This character no longer exists.".to_string());
     }
-    let restored = actor_health_max(ctx, actor_id, health);
-    set_actor_stat_current(ctx, actor_id, health, restored);
-    add_message(ctx, Some(origin_room.to_string()), Some(actor_id.to_string()), None, None, "combat", format!("{actor_name} is defeated and vanishes from the fight."), None, None);
-    add_message(ctx, Some(destination), Some(actor_id.to_string()), None, Some(actor_id.to_string()), "system", format!("You recover at a safe haven with {restored} {}.", health.name), None, None);
+    let config = world_lifecycle_config(ctx);
+    if config.clear_wanted_on_respawn {
+        let crime_ids = ctx.db.actor_crime().iter().filter(|crime| crime.actor_id == actor_id).map(|crime| crime.id).collect::<Vec<_>>();
+        for crime_id in crime_ids { ctx.db.actor_crime().id().delete(&crime_id); }
+    }
+    let restored_health = restore_actor_after_respawn(ctx, actor_id, &config);
+    let protected_until_micros = now.saturating_add(i64::from(config.spawn_protection_seconds) * 1_000_000);
+    ctx.db.actor_life_state().id().update(ActorLifeState {
+        state: "alive".to_string(), death_room_id: None, pending_spawn_point_id: None,
+        respawn_available_at_micros: 0, protected_until_micros, updated_at: ctx.timestamp, ..state
+    });
+    let recovery = restored_health.map(|value| format!(" with {value} health")).unwrap_or_default();
+    let protection = if config.spawn_protection_seconds > 0 { format!(" You are protected from attacks for {} seconds, or until you attack.", config.spawn_protection_seconds) } else { String::new() };
+    add_message(ctx, Some(destination), Some(actor_id.to_string()), None, Some(actor_id.to_string()), "system",
+        format!("{actor_name} returns to the world{recovery}.{protection}"), None, None);
+    Ok(())
+}
+
+fn defeat_player(ctx: &ReducerContext, actor_id: &str, origin_room: &str, actor_name: &str, defeated_by: Option<&str>) {
+    if actor_is_dead(ctx, actor_id) { return; }
+    let config = world_lifecycle_config(ctx);
+    let spawn_point = choose_respawn_point(ctx, actor_id, origin_room);
+    let (dropped, mut destroyed) = apply_death_item_loss(ctx, actor_id, origin_room, &config);
+    let (gold_lost, experience_lost) = apply_death_progression_loss(ctx, actor_id, &config);
+    if config.reset_quests_on_death { reset_active_quests_on_death(ctx, actor_id); }
+    let actor_key = actor_id.to_string();
+    let previous = ensure_actor_life_state(ctx, actor_id);
+    let record_id = format!("{actor_id}:{}", ctx.timestamp.to_micros_since_unix_epoch());
+    ctx.db.actor_death_record().insert(ActorDeathRecord {
+        id: record_id, actor_id: actor_key.clone(), actor_name: actor_name.to_string(), death_room_id: origin_room.to_string(),
+        spawn_point_id: spawn_point.as_ref().map(|point| point.id.clone()), death_mode: config.death_mode.clone(),
+        defeated_by: defeated_by.map(str::to_string), item_stacks_dropped: dropped, item_stacks_destroyed: destroyed,
+        gold_lost, experience_lost, died_at: ctx.timestamp,
+    });
+    add_message(ctx, Some(origin_room.to_string()), Some(actor_key.clone()), None, None, "combat", format!("{actor_name} is defeated."), None, None);
+
+    if config.death_mode == "hardcore" && ctx.db.character().id().find(&actor_key).is_some() {
+        let remaining = ctx.db.world_object().iter()
+            .filter(|object| object.location_id == actor_id && matches!(object.location_kind.as_str(), "inventory" | "equipped"))
+            .count() as u32;
+        destroyed = destroyed.saturating_add(remaining);
+        if let Some(record) = ctx.db.actor_death_record().id().find(&format!("{actor_id}:{}", ctx.timestamp.to_micros_since_unix_epoch())) {
+            ctx.db.actor_death_record().id().update(ActorDeathRecord { item_stacks_destroyed: destroyed, ..record });
+        }
+        add_message(ctx, Some(origin_room.to_string()), Some(actor_key.clone()), None, Some(actor_key.clone()), "system",
+            "Hardcore death is permanent. This character has been lost; create a new character to return.".to_string(), None, None);
+        delete_actor_rpg_state(ctx, &actor_key);
+        ctx.db.character().id().delete(&actor_key);
+        return;
+    }
+
+    let respawn_available_at_micros = ctx.timestamp.to_micros_since_unix_epoch()
+        .saturating_add(i64::from(config.respawn_delay_seconds) * 1_000_000);
+    ctx.db.actor_life_state().id().update(ActorLifeState {
+        state: "dead".to_string(), death_room_id: Some(origin_room.to_string()),
+        pending_spawn_point_id: spawn_point.map(|point| point.id), death_count: previous.death_count.saturating_add(1),
+        died_at: Some(ctx.timestamp), respawn_available_at_micros, protected_until_micros: 0, updated_at: ctx.timestamp, ..previous
+    });
+    if config.respawn_delay_seconds == 0 {
+        let _ = complete_actor_respawn(ctx, actor_id, actor_name);
+    } else {
+        add_message(ctx, Some(origin_room.to_string()), Some(actor_key.clone()), None, Some(actor_key), "system",
+            format!("You may respawn in {} seconds. Use `respawn` when the time has elapsed.", config.respawn_delay_seconds), None, None);
+    }
 }
 
 fn npc_attack_player(ctx: &ReducerContext, npc: Npc, room_id: &str, actor_id: &str, actor_name: &str, health: &StatDefinition) {
+    if actor_is_dead(ctx, actor_id) || actor_has_spawn_protection(ctx, actor_id) { return; }
     let current_health = actor_stat_row(ctx, actor_id, health).current_value;
     if current_health <= health.minimum { return; }
     let (damage, weapon_name) = combat_damage(ctx, &npc.id, actor_id);
@@ -3369,7 +3990,7 @@ fn npc_attack_player(ctx: &ReducerContext, npc: Npc, room_id: &str, actor_id: &s
     add_message(ctx, Some(room_id.to_string()), Some(npc.id.clone()), Some(npc.name.clone()), None, "combat",
         format!("{} attacks {actor_name} with {weapon_name} for {damage} damage.{result}", npc.name), None, None);
     if next_health <= health.minimum {
-        respawn_player(ctx, actor_id, room_id, actor_name, health);
+        defeat_player(ctx, actor_id, room_id, actor_name, Some(&npc.name));
     }
 }
 
@@ -3463,8 +4084,26 @@ fn handle_rpg_command(
     actor_id: &str,
     actor_name: &str,
 ) -> Result<bool, String> {
-    let lower = raw.to_lowercase();
+    let lower = raw.trim().to_lowercase();
     ensure_actor_progression(ctx, actor_id);
+    let life_state = ensure_actor_life_state(ctx, actor_id);
+    if life_state.state == "dead" {
+        if lower == "respawn" {
+            if let Err(error) = complete_actor_respawn(ctx, actor_id, actor_name) {
+                rpg_message(ctx, room_id, actor_id, "error", error);
+            }
+        } else {
+            let remaining_micros = life_state.respawn_available_at_micros.saturating_sub(ctx.timestamp.to_micros_since_unix_epoch());
+            let remaining_seconds = remaining_micros.saturating_add(999_999) / 1_000_000;
+            let message = if remaining_seconds > 0 {
+                format!("You are defeated. You can respawn in {remaining_seconds} second{}. Use `respawn` when ready.", if remaining_seconds == 1 { "" } else { "s" })
+            } else {
+                "You are defeated. Use `respawn` to return to the world.".to_string()
+            };
+            rpg_message(ctx, room_id, actor_id, "error", message);
+        }
+        return Ok(true);
+    }
 
     if matches!(lower.as_str(), "inventory" | "inv" | "i" | "equipment") {
         list_inventory(ctx, room_id, actor_id);
@@ -3851,6 +4490,14 @@ fn handle_rpg_command(
             return Ok(true);
         };
         let target_npc = if target_is_npc { ctx.db.npc().id().find(&target_id) } else { None };
+        if !target_is_npc && actor_is_dead(ctx, &target_id) {
+            rpg_message(ctx, room_id, actor_id, "error", format!("{target_name} is awaiting respawn and cannot be attacked."));
+            return Ok(true);
+        }
+        if !target_is_npc && actor_has_spawn_protection(ctx, &target_id) {
+            rpg_message(ctx, room_id, actor_id, "error", format!("{target_name} is protected after respawning."));
+            return Ok(true);
+        }
         if let Some(npc) = target_npc.as_ref() {
             penalize_npc_attack(ctx, room_id, actor_id, actor_name, npc, false);
             if actor_current_room(ctx, actor_id).as_deref() != Some(room_id) { return Ok(true); }
@@ -3881,6 +4528,7 @@ fn handle_rpg_command(
             rpg_message(ctx, room_id, actor_id, "error", format!("{target_name} is already defeated."));
             return Ok(true);
         }
+        clear_actor_spawn_protection(ctx, actor_id);
         set_cooldown(ctx, actor_id, "basic-attack", basic_attack_cooldown_ms(ctx, actor_id));
         let next_health = current_health.saturating_sub(damage).max(health_definition.minimum);
         set_actor_stat_current(ctx, &target_id, &health_definition, next_health);
@@ -3902,7 +4550,7 @@ fn handle_rpg_command(
                 };
                 rpg_message(ctx, room_id, actor_id, "system", loot_message);
             } else {
-                respawn_player(ctx, &target_id, room_id, &target_name, &health_definition);
+                defeat_player(ctx, &target_id, room_id, &target_name, Some(actor_name));
             }
         } else if let Some(npc) = target_npc {
             if npc_disposition(&npc) != "friendly" {
@@ -3964,7 +4612,7 @@ pub fn submit_command(
     }
 
     if raw == "help" {
-        add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", "[AVAILABLE COMMANDS]\n\n• say <message> - Speak to everyone in the room\n• whisper <name> <message> - Send a private message\n• look / who - Examine the room and nearby actors\n• talk <npc> <message> - Speak to an AI-powered NPC\n• inspect <name> - Inspect a character\n• inventory / equipment / stats - View capacity, level, XP, resources, and gear\n• abilities - View learned and upcoming abilities\n• cast <ability> at <target> - Use magic, techniques, or utility powers\n• take / drop / examine <item> - Interact with objects\n• open / loot <container> - View chest or container contents\n• take all from <container> - Collect portable contents\n• put <item> in <container> - Store an item or add fuel\n• equip / unequip / use <item> - Use gear and consumables\n• light / extinguish <object> - Control fuel-burning objects\n• combat / attack <target> - Check rules or make a weapon-speed-limited attack\n• rest / wait - Recover safely or let the world advance\n• flee <direction> - Escape through an exit\n• set handle <name> - Set your saved-world handle\n• <direction> - Move through an exit".to_string(), None, None);
+        add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", "[AVAILABLE COMMANDS]\n\n• say <message> - Speak to everyone in the room\n• whisper <name> <message> - Send a private message\n• look / who - Examine the room and nearby actors\n• talk <npc> <message> - Speak to an AI-powered NPC\n• inspect <name> - Inspect a character\n• inventory / equipment / stats - View capacity, level, XP, resources, and gear\n• abilities - View learned and upcoming abilities\n• cast <ability> at <target> - Use magic, techniques, or utility powers\n• quests / quest <npc> - Review your journal or a nearby NPC's quests\n• accept <quest> / turn in <quest> - Start or complete quest work\n• reputation - View faction standings\n• take / drop / examine <item> - Interact with objects\n• open / loot <container> - View chest or container contents\n• take all from <container> - Collect portable contents\n• put <item> in <container> - Store an item or add fuel\n• equip / unequip / use <item> - Use gear and consumables\n• light / extinguish <object> - Control fuel-burning objects\n• combat / attack <target> - Check rules or make a weapon-speed-limited attack\n• rest / wait - Recover safely or let the world advance\n• flee <direction> - Escape through an exit\n• respawn - Return after the configured death delay\n• set handle <name> - Set your saved-world handle\n• <direction> - Move through an exit".to_string(), None, None);
     } else if let Some(handle) = raw.strip_prefix("set handle ") {
         let handle = handle.trim();
         if !is_profile || handle.is_empty() || handle.len() > 30 {
