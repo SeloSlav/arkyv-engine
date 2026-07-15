@@ -183,6 +183,8 @@ pub struct ObjectDefinition {
     pub on_use: String,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
+    #[default(None::<String>)]
+    pub image_url: Option<String>,
 }
 
 /// A concrete object. `location_kind` is one of room, inventory, equipped, or
@@ -382,7 +384,7 @@ fn seed_rpg_definitions(ctx: &ReducerContext) {
     let definitions = [
         ObjectDefinition {
             id: "wood".to_string(), name: "Firewood".to_string(), description: "A dry split log suitable for fuel.".to_string(),
-            primitive_kind: "item".to_string(), icon: "🪵".to_string(), tags: r#"["fuel","wood"]"#.to_string(),
+            primitive_kind: "item".to_string(), icon: "🪵".to_string(), image_url: None, tags: r#"["fuel","wood"]"#.to_string(),
             portable: true, stackable: true, max_stack: 20, capacity: 0, equipment_slot: None,
             weapon_damage: 0, armor_value: 0, scales_with_stat: None, fuel_value: 300, burn_rate: 0,
             accepted_fuel_tags: "[]".to_string(), stat_modifiers: "{}".to_string(), on_use: "{}".to_string(),
@@ -390,7 +392,7 @@ fn seed_rpg_definitions(ctx: &ReducerContext) {
         },
         ObjectDefinition {
             id: "wooden-box".to_string(), name: "Wooden Box".to_string(), description: "A simple container for loose possessions.".to_string(),
-            primitive_kind: "container".to_string(), icon: "📦".to_string(), tags: r#"["container","wood"]"#.to_string(),
+            primitive_kind: "container".to_string(), icon: "📦".to_string(), image_url: None, tags: r#"["container","wood"]"#.to_string(),
             portable: true, stackable: false, max_stack: 1, capacity: 12, equipment_slot: None,
             weapon_damage: 0, armor_value: 0, scales_with_stat: None, fuel_value: 0, burn_rate: 0,
             accepted_fuel_tags: "[]".to_string(), stat_modifiers: "{}".to_string(), on_use: "{}".to_string(),
@@ -398,7 +400,7 @@ fn seed_rpg_definitions(ctx: &ReducerContext) {
         },
         ObjectDefinition {
             id: "campfire".to_string(), name: "Campfire".to_string(), description: "A stone-ringed fire that burns while it has fuel.".to_string(),
-            primitive_kind: "fixture".to_string(), icon: "🔥".to_string(), tags: r#"["fire","light"]"#.to_string(),
+            primitive_kind: "fixture".to_string(), icon: "🔥".to_string(), image_url: None, tags: r#"["fire","light"]"#.to_string(),
             portable: false, stackable: false, max_stack: 1, capacity: 0, equipment_slot: None,
             weapon_damage: 0, armor_value: 0, scales_with_stat: None, fuel_value: 0, burn_rate: 1,
             accepted_fuel_tags: r#"["fuel"]"#.to_string(), stat_modifiers: "{}".to_string(), on_use: "{}".to_string(),
@@ -406,7 +408,7 @@ fn seed_rpg_definitions(ctx: &ReducerContext) {
         },
         ObjectDefinition {
             id: "iron-sword".to_string(), name: "Iron Sword".to_string(), description: "A dependable one-handed blade.".to_string(),
-            primitive_kind: "weapon".to_string(), icon: "⚔️".to_string(), tags: r#"["weapon","blade"]"#.to_string(),
+            primitive_kind: "weapon".to_string(), icon: "⚔️".to_string(), image_url: None, tags: r#"["weapon","blade"]"#.to_string(),
             portable: true, stackable: false, max_stack: 1, capacity: 0, equipment_slot: Some("main-hand".to_string()),
             weapon_damage: 5, armor_value: 0, scales_with_stat: Some("strength".to_string()), fuel_value: 0, burn_rate: 0,
             accepted_fuel_tags: "[]".to_string(), stat_modifiers: "{}".to_string(), on_use: "{}".to_string(),
@@ -414,7 +416,7 @@ fn seed_rpg_definitions(ctx: &ReducerContext) {
         },
         ObjectDefinition {
             id: "leather-armor".to_string(), name: "Leather Armor".to_string(), description: "Flexible protection made from boiled leather.".to_string(),
-            primitive_kind: "armor".to_string(), icon: "🛡️".to_string(), tags: r#"["armor","leather"]"#.to_string(),
+            primitive_kind: "armor".to_string(), icon: "🛡️".to_string(), image_url: None, tags: r#"["armor","leather"]"#.to_string(),
             portable: true, stackable: false, max_stack: 1, capacity: 0, equipment_slot: Some("body".to_string()),
             weapon_damage: 0, armor_value: 2, scales_with_stat: None, fuel_value: 0, burn_rate: 0,
             accepted_fuel_tags: "[]".to_string(), stat_modifiers: "{}".to_string(), on_use: "{}".to_string(),
@@ -422,7 +424,7 @@ fn seed_rpg_definitions(ctx: &ReducerContext) {
         },
         ObjectDefinition {
             id: "healing-potion".to_string(), name: "Healing Potion".to_string(), description: "A crimson restorative draught.".to_string(),
-            primitive_kind: "consumable".to_string(), icon: "🧪".to_string(), tags: r#"["consumable","potion"]"#.to_string(),
+            primitive_kind: "consumable".to_string(), icon: "🧪".to_string(), image_url: None, tags: r#"["consumable","potion"]"#.to_string(),
             portable: true, stackable: true, max_stack: 10, capacity: 0, equipment_slot: None,
             weapon_damage: 0, armor_value: 0, scales_with_stat: None, fuel_value: 0, burn_rate: 0,
             accepted_fuel_tags: "[]".to_string(), stat_modifiers: "{}".to_string(),
@@ -620,6 +622,7 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                     description: string(&row, "description", ""),
                     primitive_kind: string(&row, "primitive_kind", "item"),
                     icon: string(&row, "icon", "◇"),
+                    image_url: optional_string(&row, "image_url"),
                     tags: json_string(row.get("tags"), "[]"),
                     portable: bool_value(&row, "portable", true),
                     stackable: bool_value(&row, "stackable", false),
@@ -854,6 +857,7 @@ pub fn update_rows(
                     description: payload.get("description").and_then(Value::as_str).unwrap_or(&existing.description).to_string(),
                     primitive_kind: payload.get("primitive_kind").and_then(Value::as_str).unwrap_or(&existing.primitive_kind).to_string(),
                     icon: payload.get("icon").and_then(Value::as_str).unwrap_or(&existing.icon).to_string(),
+                    image_url: payload.get("image_url").map(|_| optional_string(&payload, "image_url")).unwrap_or(existing.image_url),
                     tags: payload.get("tags").map(|value| json_string(Some(value), &existing.tags)).unwrap_or(existing.tags),
                     portable: payload.get("portable").and_then(Value::as_bool).unwrap_or(existing.portable),
                     stackable: payload.get("stackable").and_then(Value::as_bool).unwrap_or(existing.stackable),
@@ -1535,6 +1539,10 @@ fn handle_rpg_command(
             .sum::<i32>();
         let damage = attack.saturating_sub(innate_defense.saturating_add(armor)).max(1);
         let current_health = actor_stat_row(ctx, &target_id, &health_definition).current_value;
+        if current_health <= health_definition.minimum {
+            rpg_message(ctx, room_id, actor_id, "error", format!("{target_name} is already defeated."));
+            return Ok(true);
+        }
         let next_health = current_health.saturating_sub(damage).max(health_definition.minimum);
         set_actor_stat_current(ctx, &target_id, &health_definition, next_health);
         let weapon_name = equipped_weapon.map(|weapon| weapon.name).unwrap_or_else(|| "bare hands".to_string());
@@ -1589,7 +1597,7 @@ pub fn submit_command(
     }
 
     if raw == "help" {
-        add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", "[AVAILABLE COMMANDS]\n\n• say <message> - Speak to everyone in the room\n• whisper <name> <message> - Send a private message\n• look - Examine your current location\n• talk <npc> <message> - Speak to an AI-powered NPC\n• who - See who is nearby\n• inspect <name> - Inspect a character\n• set handle <name> - Set your saved-world handle\n• <direction> - Move through an exit".to_string(), None, None);
+        add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", "[AVAILABLE COMMANDS]\n\n• say <message> - Speak to everyone in the room\n• whisper <name> <message> - Send a private message\n• look - Examine your current location and its objects\n• who - See who is nearby\n• talk <npc> <message> - Speak to an AI-powered NPC\n• inspect <name> - Inspect a character\n• inventory / equipment - View carried and equipped items\n• stats - View configured hero stats\n• take / drop / examine <item> - Interact with objects\n• put <item> in <container> - Store an item or add fuel\n• equip / unequip <item> - Manage weapons and armor\n• use <item> - Run an item behavior\n• light / extinguish <object> - Control fuel-burning objects\n• attack <target> - Fight using stats, weapons, and armor\n• set handle <name> - Set your saved-world handle\n• <direction> - Move through an exit".to_string(), None, None);
     } else if let Some(handle) = raw.strip_prefix("set handle ") {
         let handle = handle.trim();
         if !is_profile || handle.is_empty() || handle.len() > 30 {

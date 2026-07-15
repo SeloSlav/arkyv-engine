@@ -9,7 +9,7 @@ export default function SetupPage() {
   return (
     <>
       <Head><title>Setup | Arkyv Engine</title></Head>
-      <div className="min-h-screen bg-slate-950 px-4 py-20 text-slate-200">
+      <div className="arkyv-app-shell min-h-screen px-3 py-20 text-slate-200 sm:px-6">
         <HamburgerIcon />
         <main className="mx-auto max-w-4xl space-y-10">
           <header>

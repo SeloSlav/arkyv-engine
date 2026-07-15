@@ -22,7 +22,7 @@ const labelClass = 'text-[0.65rem] uppercase tracking-[0.22em] text-slate-400';
 const buttonClass = 'rounded-md border border-cyan-400/50 bg-cyan-500/10 px-4 py-2 text-xs font-terminal uppercase tracking-[0.18em] text-cyan-200 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-40';
 
 const emptyDefinition = () => ({
-    id: '', name: '', description: '', primitive_kind: 'item', icon: '◇', tags: '', portable: true,
+    id: '', name: '', description: '', primitive_kind: 'item', icon: '◇', image_url: '', tags: '', portable: true,
     stackable: false, max_stack: 1, capacity: 0, equipment_slot: '', weapon_damage: 0, armor_value: 0,
     scales_with_stat: '', fuel_value: 0, burn_rate: 0, accepted_fuel_tags: '', stat_modifiers: '{}',
     use_stat_id: '', use_delta: 0, use_consume: true,
@@ -53,6 +53,7 @@ function definitionToForm(definition) {
     return {
         ...emptyDefinition(),
         ...definition,
+        image_url: definition.image_url || '',
         tags: arrayToCsv(definition.tags),
         accepted_fuel_tags: arrayToCsv(definition.accepted_fuel_tags),
         equipment_slot: definition.equipment_slot || '',
@@ -74,6 +75,7 @@ function definitionPayload(form) {
         description: form.description.trim(),
         primitive_kind: form.primitive_kind,
         icon: form.icon || '◇',
+        image_url: form.image_url || null,
         tags: csvToArray(form.tags),
         portable: Boolean(form.portable),
         stackable: Boolean(form.stackable),
@@ -123,6 +125,7 @@ export default function RpgSystemsEditor({ enabled }) {
     const [editingInstance, setEditingInstance] = useState(null);
     const [editingActorStat, setEditingActorStat] = useState(null);
     const [busy, setBusy] = useState(false);
+    const [generatingImage, setGeneratingImage] = useState(false);
     const [message, setMessage] = useState(null);
 
     const actors = useMemo(() => [
@@ -182,6 +185,36 @@ export default function RpgSystemsEditor({ enabled }) {
         setEditingDefinition(null);
         setDefinitionForm({ ...emptyDefinition(), ...preset, primitive_kind: preset.kind, name: '', id: '' });
         setActiveTab('objects');
+    };
+
+    const generateItemImage = async () => {
+        if (!definitionForm.name.trim() || !definitionForm.description.trim()) {
+            setMessage({ type: 'error', text: 'Add a name and description before generating item art.' });
+            return;
+        }
+        setGeneratingImage(true);
+        setMessage(null);
+        try {
+            const response = await fetch('/api/arkyv/generate-item-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: definitionForm.name,
+                    description: definitionForm.description,
+                    primitiveKind: definitionForm.primitive_kind,
+                    tags: csvToArray(definitionForm.tags),
+                }),
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.message || data.error || 'Item image generation failed.');
+            setDefinitionForm((value) => ({ ...value, image_url: data.imageUrl }));
+            const credits = Number.isFinite(Number(data.creditsRemaining)) ? ` ${data.creditsRemaining} credits remain.` : '';
+            setMessage({ type: 'success', text: `Generated a ${data.width}×${data.height} inventory image.${credits}` });
+        } catch (error) {
+            setMessage({ type: 'error', text: error?.message || String(error) });
+        } finally {
+            setGeneratingImage(false);
+        }
     };
 
     const saveDefinition = async () => {
@@ -272,28 +305,28 @@ export default function RpgSystemsEditor({ enabled }) {
     };
 
     return (
-        <section className="overflow-hidden rounded-xl border border-purple-400/40 bg-slate-900/70 shadow-xl shadow-purple-500/10">
-            <div className="flex flex-col gap-4 border-b border-purple-400/20 p-6 lg:flex-row lg:items-start lg:justify-between">
+        <section id="rpg-studio" className="scroll-mt-28 overflow-hidden rounded-2xl border border-purple-400/30 bg-slate-900/70 shadow-xl shadow-purple-500/10">
+            <div className="flex flex-col gap-4 border-b border-purple-400/20 p-4 sm:p-6 lg:flex-row lg:items-start lg:justify-between">
                 <div>
-                    <h2 className="font-terminal text-base uppercase tracking-[0.35em] text-purple-200">RPG Systems Studio</h2>
-                    <p className="mt-1 max-w-3xl text-xs uppercase tracking-[0.18em] text-slate-400">Definition-driven inventory, containers, fuel, equipment, hero stats, consumables, and combat</p>
+                    <h2 className="font-terminal text-sm uppercase tracking-[0.24em] text-purple-200 sm:text-base sm:tracking-[0.35em]">RPG Systems Studio</h2>
+                    <p className="mt-1 max-w-3xl text-[0.65rem] uppercase leading-5 tracking-[0.14em] text-slate-400 sm:text-xs sm:tracking-[0.18em]">Definition-driven inventory, containers, fuel, equipment, hero stats, consumables, and combat</p>
                 </div>
                 <button type="button" onClick={installStarterKit} disabled={busy} className={buttonClass}>Install starter kit</button>
             </div>
 
-            <div className="flex flex-wrap gap-2 border-b border-slate-700/50 px-6 py-4" role="tablist" aria-label="RPG editor sections">
+            <div className="flex gap-2 overflow-x-auto border-b border-slate-700/50 px-4 py-3 sm:flex-wrap sm:px-6 sm:py-4" role="tablist" aria-label="RPG editor sections">
                 {TAB_OPTIONS.map((tab) => (
                     <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} onClick={() => setActiveTab(tab.id)}
-                        className={`rounded-full border px-4 py-2 text-[0.65rem] uppercase tracking-[0.18em] transition ${activeTab === tab.id ? 'border-purple-300 bg-purple-400/20 text-purple-100' : 'border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200'}`}>
+                        className={`shrink-0 rounded-full border px-4 py-2 text-[0.65rem] uppercase tracking-[0.18em] transition ${activeTab === tab.id ? 'border-purple-300 bg-purple-400/20 text-purple-100' : 'border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200'}`}>
                         {tab.label}
                     </button>
                 ))}
             </div>
 
-            {message && <div className={`mx-6 mt-5 rounded-md border px-4 py-3 text-sm ${message.type === 'error' ? 'border-rose-400/50 bg-rose-500/10 text-rose-200' : 'border-emerald-400/50 bg-emerald-500/10 text-emerald-200'}`}>{message.text}</div>}
+            {message && <div className={`mx-4 mt-4 rounded-lg border px-4 py-3 text-sm sm:mx-6 sm:mt-5 ${message.type === 'error' ? 'border-rose-400/50 bg-rose-500/10 text-rose-200' : 'border-emerald-400/50 bg-emerald-500/10 text-emerald-200'}`}>{message.text}</div>}
 
             {activeTab === 'objects' && (
-                <div className="grid gap-6 p-6 xl:grid-cols-[360px_1fr]">
+                <div className="grid gap-5 p-4 sm:p-6 xl:grid-cols-[340px_1fr]">
                     <div className="space-y-5">
                         <div>
                             <h3 className="mb-3 text-xs uppercase tracking-[0.24em] text-slate-300">Start from a primitive</h3>
@@ -309,15 +342,15 @@ export default function RpgSystemsEditor({ enabled }) {
                             <div className="mb-3 flex items-center justify-between"><h3 className="text-xs uppercase tracking-[0.24em] text-slate-300">Definitions</h3><span className="text-xs text-slate-500">{definitions.length}</span></div>
                             <div className="max-h-[560px] space-y-2 overflow-y-auto pr-1">
                                 {definitions.map((definition) => (
-                                    <button key={definition.id} type="button" aria-pressed={editingDefinition === definition.id} onClick={() => { setEditingDefinition(definition.id); setDefinitionForm(definitionToForm(definition)); }} className={`w-full rounded-lg border p-3 text-left ${editingDefinition === definition.id ? 'border-purple-300 bg-purple-500/15' : 'border-slate-700/70 bg-slate-950/40 hover:border-slate-500'}`}>
-                                        <span className="mr-2 text-lg">{definition.icon}</span><span className="text-sm text-slate-100">{definition.name}</span><span className="mt-1 block text-[0.62rem] uppercase tracking-[0.18em] text-slate-500">{definition.primitive_kind} · {definition.id}</span>
+                                    <button key={definition.id} type="button" aria-pressed={editingDefinition === definition.id} onClick={() => { setEditingDefinition(definition.id); setDefinitionForm(definitionToForm(definition)); }} className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition ${editingDefinition === definition.id ? 'border-purple-300 bg-purple-500/15' : 'border-slate-700/70 bg-slate-950/40 hover:border-slate-500'}`}>
+                                        <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-700 bg-black/40 text-xl">{definition.image_url ? <img src={definition.image_url} alt="" className="h-full w-full object-cover [image-rendering:pixelated]" /> : definition.icon}</span><span className="min-w-0"><span className="block truncate text-sm text-slate-100">{definition.name}</span><span className="mt-1 block truncate text-[0.62rem] uppercase tracking-[0.18em] text-slate-500">{definition.primitive_kind} · {definition.id}</span></span>
                                     </button>
                                 ))}
                             </div>
                         </div>
                     </div>
 
-                    <div className="space-y-5 rounded-xl border border-slate-700/70 bg-slate-950/35 p-5">
+                    <div className="space-y-5 rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5">
                         <div className="flex items-center justify-between"><h3 className="text-sm uppercase tracking-[0.25em] text-purple-200">{editingDefinition ? 'Edit primitive' : 'New primitive'}</h3>{editingDefinition && <button type="button" onClick={() => { setEditingDefinition(null); setDefinitionForm(emptyDefinition()); }} className="text-xs text-slate-400 hover:text-white">New</button>}</div>
                         <div className="grid gap-4 md:grid-cols-[90px_1fr_1fr]">
                             <Field label="Icon"><input className={inputClass} value={definitionForm.icon} onChange={(e) => setDefinitionForm((value) => ({ ...value, icon: e.target.value }))} /></Field>
@@ -325,6 +358,16 @@ export default function RpgSystemsEditor({ enabled }) {
                             <Field label="Stable id"><input className={inputClass} disabled={Boolean(editingDefinition)} value={definitionForm.id} onChange={(e) => setDefinitionForm((value) => ({ ...value, id: e.target.value }))} placeholder="iron-sword" /></Field>
                         </div>
                         <Field label="Description"><textarea className={`${inputClass} min-h-24`} value={definitionForm.description} onChange={(e) => setDefinitionForm((value) => ({ ...value, description: e.target.value }))} /></Field>
+                        <div className="grid gap-4 rounded-xl border border-cyan-400/20 bg-cyan-500/[0.04] p-4 sm:grid-cols-[128px_1fr]">
+                            <div className="flex aspect-square h-32 w-32 items-center justify-center overflow-hidden rounded-xl border border-cyan-400/30 bg-slate-950 text-4xl shadow-inner">
+                                {definitionForm.image_url ? <img src={definitionForm.image_url} alt={`${definitionForm.name || 'Object'} preview`} className="h-full w-full object-cover [image-rendering:pixelated]" /> : definitionForm.icon || '◇'}
+                            </div>
+                            <div className="min-w-0 space-y-3">
+                                <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">Inventory artwork</p><p className="mt-1 text-xs leading-5 text-slate-500">RetroDiffusion generates a crisp 128×128 item icon, suitable for inventory cards and pixel-perfect scaling.</p></div>
+                                <Field label="Image URL or generated data"><input className={inputClass} value={definitionForm.image_url} onChange={(event) => setDefinitionForm((value) => ({ ...value, image_url: event.target.value }))} placeholder="Generate art or paste an image URL" /></Field>
+                                <div className="flex flex-wrap gap-2"><button type="button" onClick={generateItemImage} disabled={generatingImage || busy} className={buttonClass}>{generatingImage ? 'Generating…' : 'Generate item art'}</button>{definitionForm.image_url && <button type="button" onClick={() => setDefinitionForm((value) => ({ ...value, image_url: '' }))} className="rounded-md border border-slate-600 px-3 py-2 text-xs uppercase tracking-[0.16em] text-slate-400 hover:text-white">Remove</button>}</div>
+                            </div>
+                        </div>
                         <div className="grid gap-4 md:grid-cols-2">
                             <Field label="Primitive type"><select className={inputClass} value={definitionForm.primitive_kind} onChange={(e) => setDefinitionForm((value) => ({ ...value, primitive_kind: e.target.value }))}>{PRIMITIVE_PRESETS.map((preset) => <option key={preset.kind} value={preset.kind}>{preset.label}</option>)}</select></Field>
                             <Field label="Tags (comma separated)"><input className={inputClass} value={definitionForm.tags} onChange={(e) => setDefinitionForm((value) => ({ ...value, tags: e.target.value }))} placeholder="fuel, wood, crafting" /></Field>
@@ -351,7 +394,7 @@ export default function RpgSystemsEditor({ enabled }) {
             )}
 
             {activeTab === 'stats' && (
-                <div className="grid gap-6 p-6 lg:grid-cols-[340px_1fr]">
+                <div className="grid gap-6 p-4 sm:p-6 lg:grid-cols-[340px_1fr]">
                     <div className="space-y-2">{stats.map((stat) => <button key={stat.id} type="button" aria-pressed={editingStat === stat.id} onClick={() => { setEditingStat(stat.id); setStatForm({ ...emptyStat(), ...stat, role: stat.role || '' }); }} className={`w-full rounded-lg border p-4 text-left ${editingStat === stat.id ? 'border-purple-300 bg-purple-500/15' : 'border-slate-700/70 bg-slate-950/40 hover:border-slate-500'}`}><span className="text-sm text-slate-100">{stat.name}</span><span className="mt-1 block text-xs text-slate-500">{stat.default_value} default · {stat.minimum}–{stat.maximum}{stat.role ? ` · ${stat.role}` : ''}</span></button>)}</div>
                     <div className="space-y-5 rounded-xl border border-slate-700/70 bg-slate-950/35 p-5">
                         <div className="flex items-center justify-between"><h3 className="text-sm uppercase tracking-[0.25em] text-purple-200">{editingStat ? 'Edit hero stat' : 'New hero stat'}</h3>{editingStat && <button type="button" onClick={() => { setEditingStat(null); setStatForm(emptyStat()); }} className="text-xs text-slate-400">New</button>}</div>
@@ -365,15 +408,15 @@ export default function RpgSystemsEditor({ enabled }) {
             )}
 
             {activeTab === 'instances' && (
-                <div className="grid gap-6 p-6 xl:grid-cols-[1fr_420px]">
-                    <div className="overflow-hidden rounded-xl border border-slate-700/70"><div className="grid grid-cols-[1.2fr_1fr_1fr_auto] gap-3 border-b border-slate-700 bg-slate-950/60 px-4 py-3 text-[0.62rem] uppercase tracking-[0.16em] text-slate-500"><span>Object</span><span>Location</span><span>State</span><span /></div><div className="max-h-[560px] overflow-y-auto">{instances.map((instance) => { const definition = definitionsById.get(instance.definition_id); return <button key={instance.id} type="button" aria-pressed={editingInstance === instance.id} onClick={() => { setEditingInstance(instance.id); setInstanceForm({ ...emptyInstance(), ...instance, state_json: JSON.stringify(jsonObject(instance.state_json), null, 2), equipped_slot: instance.equipped_slot || '' }); }} className={`grid w-full grid-cols-[1.2fr_1fr_1fr_auto] gap-3 border-b border-slate-800 px-4 py-3 text-left text-xs ${editingInstance === instance.id ? 'bg-purple-500/15' : 'hover:bg-slate-800/50'}`}><span className="text-slate-100">{definition?.icon} {definition?.name || instance.definition_id} {instance.quantity > 1 ? `×${instance.quantity}` : ''}</span><span className="text-slate-400">{instance.location_kind} · {locationLabel(instance)}</span><span className="text-slate-400">{instance.is_active ? 'active' : 'idle'}{instance.fuel_remaining > 0 ? ` · fuel ${instance.fuel_remaining}` : ''}</span><span className="text-purple-300">Edit</span></button>; })}</div></div>
-                    <div className="space-y-4 rounded-xl border border-slate-700/70 bg-slate-950/35 p-5"><div className="flex items-center justify-between"><h3 className="text-sm uppercase tracking-[0.22em] text-purple-200">{editingInstance ? 'Edit instance' : 'Place object'}</h3>{editingInstance && <button type="button" onClick={() => { setEditingInstance(null); setInstanceForm(emptyInstance()); }} className="text-xs text-slate-400">New</button>}</div><Field label="Definition"><select className={inputClass} value={instanceForm.definition_id} onChange={(e) => setInstanceForm((value) => ({ ...value, definition_id: e.target.value }))}><option value="">Choose primitive…</option>{definitions.map((definition) => <option key={definition.id} value={definition.id}>{definition.icon} {definition.name}</option>)}</select></Field><div className="grid grid-cols-2 gap-4"><Field label="Location type"><select className={inputClass} value={instanceForm.location_kind} onChange={(e) => setInstanceForm((value) => ({ ...value, location_kind: e.target.value, location_id: '' }))}><option value="room">Room</option><option value="inventory">Actor inventory</option><option value="equipped">Equipped by actor</option><option value="container">Inside container</option></select></Field><Field label="Location"><select className={inputClass} value={instanceForm.location_id} onChange={(e) => setInstanceForm((value) => ({ ...value, location_id: e.target.value }))}><option value="">Choose…</option>{validLocationTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</select></Field></div><div className="grid grid-cols-3 gap-4"><Field label="Quantity"><input type="number" min="1" className={inputClass} value={instanceForm.quantity} onChange={(e) => setInstanceForm((value) => ({ ...value, quantity: e.target.value }))} /></Field><Field label="Durability"><input type="number" min="0" className={inputClass} value={instanceForm.durability} onChange={(e) => setInstanceForm((value) => ({ ...value, durability: e.target.value }))} /></Field><Field label="Fuel"><input type="number" min="0" className={inputClass} value={instanceForm.fuel_remaining} onChange={(e) => setInstanceForm((value) => ({ ...value, fuel_remaining: e.target.value }))} /></Field></div>{instanceForm.location_kind === 'equipped' && <Field label="Equipment slot"><input className={inputClass} value={instanceForm.equipped_slot} onChange={(e) => setInstanceForm((value) => ({ ...value, equipped_slot: e.target.value }))} /></Field>}<Check label="Active / burning" checked={instanceForm.is_active} onChange={(is_active) => setInstanceForm((value) => ({ ...value, is_active }))} /><Field label="Custom state (JSON)"><textarea className={`${inputClass} min-h-24 font-mono text-xs`} value={instanceForm.state_json} onChange={(e) => setInstanceForm((value) => ({ ...value, state_json: e.target.value }))} /></Field><div className="flex justify-end gap-3">{editingInstance && <button type="button" disabled={busy} onClick={() => remove('world_objects', editingInstance, 'Object instance').then(() => { setEditingInstance(null); setInstanceForm(emptyInstance()); })} className="rounded-md border border-rose-400/50 px-4 py-2 text-xs uppercase tracking-[0.18em] text-rose-200">Delete</button>}<button type="button" disabled={busy} onClick={saveInstance} className={buttonClass}>Save placement</button></div></div>
+                <div className="grid gap-6 p-4 sm:p-6 xl:grid-cols-[1fr_420px]">
+                    <div className="overflow-x-auto rounded-xl border border-slate-700/70"><div className="grid min-w-[680px] grid-cols-[1.2fr_1fr_1fr_auto] gap-3 border-b border-slate-700 bg-slate-950/60 px-4 py-3 text-[0.62rem] uppercase tracking-[0.16em] text-slate-500"><span>Object</span><span>Location</span><span>State</span><span /></div><div className="max-h-[560px] min-w-[680px] overflow-y-auto">{instances.map((instance) => { const definition = definitionsById.get(instance.definition_id); return <button key={instance.id} type="button" aria-pressed={editingInstance === instance.id} onClick={() => { setEditingInstance(instance.id); setInstanceForm({ ...emptyInstance(), ...instance, state_json: JSON.stringify(jsonObject(instance.state_json), null, 2), equipped_slot: instance.equipped_slot || '' }); }} className={`grid w-full grid-cols-[1.2fr_1fr_1fr_auto] gap-3 border-b border-slate-800 px-4 py-3 text-left text-xs ${editingInstance === instance.id ? 'bg-purple-500/15' : 'hover:bg-slate-800/50'}`}><span className="text-slate-100">{definition?.icon} {definition?.name || instance.definition_id} {instance.quantity > 1 ? `×${instance.quantity}` : ''}</span><span className="text-slate-400">{instance.location_kind} · {locationLabel(instance)}</span><span className="text-slate-400">{instance.is_active ? 'active' : 'idle'}{instance.fuel_remaining > 0 ? ` · fuel ${instance.fuel_remaining}` : ''}</span><span className="text-purple-300">Edit</span></button>; })}</div></div>
+                    <div className="space-y-4 rounded-xl border border-slate-700/70 bg-slate-950/35 p-4 sm:p-5"><div className="flex items-center justify-between"><h3 className="text-sm uppercase tracking-[0.22em] text-purple-200">{editingInstance ? 'Edit instance' : 'Place object'}</h3>{editingInstance && <button type="button" onClick={() => { setEditingInstance(null); setInstanceForm(emptyInstance()); }} className="text-xs text-slate-400">New</button>}</div><Field label="Definition"><select className={inputClass} value={instanceForm.definition_id} onChange={(e) => setInstanceForm((value) => ({ ...value, definition_id: e.target.value }))}><option value="">Choose primitive…</option>{definitions.map((definition) => <option key={definition.id} value={definition.id}>{definition.icon} {definition.name}</option>)}</select></Field><div className="grid gap-4 sm:grid-cols-2"><Field label="Location type"><select className={inputClass} value={instanceForm.location_kind} onChange={(e) => setInstanceForm((value) => ({ ...value, location_kind: e.target.value, location_id: '' }))}><option value="room">Room</option><option value="inventory">Actor inventory</option><option value="equipped">Equipped by actor</option><option value="container">Inside container</option></select></Field><Field label="Location"><select className={inputClass} value={instanceForm.location_id} onChange={(e) => setInstanceForm((value) => ({ ...value, location_id: e.target.value }))}><option value="">Choose…</option>{validLocationTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</select></Field></div><div className="grid gap-4 sm:grid-cols-3"><Field label="Quantity"><input type="number" min="1" className={inputClass} value={instanceForm.quantity} onChange={(e) => setInstanceForm((value) => ({ ...value, quantity: e.target.value }))} /></Field><Field label="Durability"><input type="number" min="0" className={inputClass} value={instanceForm.durability} onChange={(e) => setInstanceForm((value) => ({ ...value, durability: e.target.value }))} /></Field><Field label="Fuel"><input type="number" min="0" className={inputClass} value={instanceForm.fuel_remaining} onChange={(e) => setInstanceForm((value) => ({ ...value, fuel_remaining: e.target.value }))} /></Field></div>{instanceForm.location_kind === 'equipped' && <Field label="Equipment slot"><input className={inputClass} value={instanceForm.equipped_slot} onChange={(e) => setInstanceForm((value) => ({ ...value, equipped_slot: e.target.value }))} /></Field>}<Check label="Active / burning" checked={instanceForm.is_active} onChange={(is_active) => setInstanceForm((value) => ({ ...value, is_active }))} /><Field label="Custom state (JSON)"><textarea className={`${inputClass} min-h-24 font-mono text-xs`} value={instanceForm.state_json} onChange={(e) => setInstanceForm((value) => ({ ...value, state_json: e.target.value }))} /></Field><div className="flex justify-end gap-3">{editingInstance && <button type="button" disabled={busy} onClick={() => remove('world_objects', editingInstance, 'Object instance').then(() => { setEditingInstance(null); setInstanceForm(emptyInstance()); })} className="rounded-md border border-rose-400/50 px-4 py-2 text-xs uppercase tracking-[0.18em] text-rose-200">Delete</button>}<button type="button" disabled={busy} onClick={saveInstance} className={buttonClass}>Save placement</button></div></div>
                 </div>
             )}
 
             {activeTab === 'actors' && (
-                <div className="grid gap-6 p-6 xl:grid-cols-[1fr_420px]">
-                    <div className="space-y-2">{actorStats.map((row) => <button key={row.id} type="button" aria-pressed={editingActorStat === row.id} onClick={() => { setEditingActorStat(row.id); setActorStatForm({ ...emptyActorStat(), ...row }); }} className={`grid w-full grid-cols-3 gap-3 rounded-lg border p-4 text-left text-sm ${editingActorStat === row.id ? 'border-purple-300 bg-purple-500/15' : 'border-slate-700/70 bg-slate-950/40 hover:border-purple-400/50'}`}><span className="text-slate-100">{actorsById.get(row.actor_id)?.label || row.actor_id}</span><span className="text-slate-300">{stats.find((stat) => stat.id === row.stat_definition_id)?.name || row.stat_definition_id}</span><span className="text-right text-purple-200">{row.current_value} / base {row.base_value}</span></button>)}</div>
+                <div className="grid gap-6 p-4 sm:p-6 xl:grid-cols-[1fr_420px]">
+                    <div className="space-y-2">{actorStats.map((row) => <button key={row.id} type="button" aria-pressed={editingActorStat === row.id} onClick={() => { setEditingActorStat(row.id); setActorStatForm({ ...emptyActorStat(), ...row }); }} className={`grid w-full gap-2 rounded-lg border p-4 text-left text-sm sm:grid-cols-3 sm:gap-3 ${editingActorStat === row.id ? 'border-purple-300 bg-purple-500/15' : 'border-slate-700/70 bg-slate-950/40 hover:border-purple-400/50'}`}><span className="text-slate-100">{actorsById.get(row.actor_id)?.label || row.actor_id}</span><span className="text-slate-300">{stats.find((stat) => stat.id === row.stat_definition_id)?.name || row.stat_definition_id}</span><span className="text-purple-200 sm:text-right">{row.current_value} / base {row.base_value}</span></button>)}</div>
                     <div className="space-y-4 rounded-xl border border-slate-700/70 bg-slate-950/35 p-5"><div className="flex items-center justify-between"><h3 className="text-sm uppercase tracking-[0.22em] text-purple-200">{editingActorStat ? 'Edit actor value' : 'Set actor value'}</h3>{editingActorStat && <button type="button" onClick={() => { setEditingActorStat(null); setActorStatForm(emptyActorStat()); }} className="text-xs text-slate-400">New</button>}</div><Field label="Actor"><select disabled={Boolean(editingActorStat)} className={inputClass} value={actorStatForm.actor_id} onChange={(e) => setActorStatForm((value) => ({ ...value, actor_id: e.target.value }))}><option value="">Choose actor…</option>{actors.map((actor) => <option key={actor.id} value={actor.id}>{actor.label}</option>)}</select></Field><Field label="Stat"><select disabled={Boolean(editingActorStat)} className={inputClass} value={actorStatForm.stat_definition_id} onChange={(e) => { const definition = stats.find((stat) => stat.id === e.target.value); setActorStatForm((value) => ({ ...value, stat_definition_id: e.target.value, base_value: definition?.default_value ?? 0, current_value: definition?.default_value ?? 0 })); }}><option value="">Choose stat…</option>{stats.map((stat) => <option key={stat.id} value={stat.id}>{stat.name}</option>)}</select></Field><div className="grid grid-cols-2 gap-4"><Field label="Base value"><input type="number" className={inputClass} value={actorStatForm.base_value} onChange={(e) => setActorStatForm((value) => ({ ...value, base_value: e.target.value }))} /></Field><Field label="Current value"><input type="number" className={inputClass} value={actorStatForm.current_value} onChange={(e) => setActorStatForm((value) => ({ ...value, current_value: e.target.value }))} /></Field></div><p className="text-xs leading-5 text-slate-500">Actors without an override inherit the stat definition default. Equipment modifiers are applied at runtime without replacing these values.</p><div className="flex justify-end gap-3">{editingActorStat && <button type="button" disabled={busy} onClick={() => remove('actor_stats', editingActorStat, 'Actor stat').then(() => { setEditingActorStat(null); setActorStatForm(emptyActorStat()); })} className="rounded-md border border-rose-400/50 px-4 py-2 text-xs uppercase tracking-[0.18em] text-rose-200">Delete</button>}<button type="button" disabled={busy} onClick={saveActorStat} className={buttonClass}>Save value</button></div></div>
                 </div>
             )}

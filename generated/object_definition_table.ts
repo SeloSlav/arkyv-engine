@@ -32,4 +32,5 @@ export default __t.row({
   onUse: __t.string().name("on_use"),
   createdAt: __t.timestamp().name("created_at"),
   updatedAt: __t.timestamp().name("updated_at"),
+  imageUrl: __t.option(__t.string()).name("image_url"),
 });

@@ -89,6 +89,7 @@ export const ObjectDefinition = __t.object("ObjectDefinition", {
   onUse: __t.string(),
   createdAt: __t.timestamp(),
   updatedAt: __t.timestamp(),
+  imageUrl: __t.option(__t.string()),
 });
 export type ObjectDefinition = __Infer<typeof ObjectDefinition>;
 

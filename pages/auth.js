@@ -8,19 +8,21 @@ export default function AuthPage() {
   return (
     <>
       <Head><title>Saved Worlds | Arkyv Engine</title></Head>
-      <div className="min-h-screen bg-black px-4 py-20 text-white">
+      <div className="arkyv-app-shell flex min-h-[100dvh] items-center px-3 py-20 text-white sm:px-6">
         <HamburgerIcon />
-        <main className="mx-auto max-w-xl rounded-xl border border-cyan-400/35 bg-gradient-to-br from-slate-950 via-purple-950/70 to-slate-950 p-6 shadow-[0_0_40px_rgba(34,211,238,0.15)] md:p-10">
-          <img src="/arkyv_logo.jpg" alt="Arkyv" className="mx-auto mb-6 h-24 w-24 rounded-lg" />
-          <h1 className="mb-3 text-center font-terminal text-3xl tracking-[0.2em] text-cyan-100 uppercase">Saved Worlds</h1>
-          <p className="mb-8 text-center text-sm leading-relaxed text-slate-400">
-            Each save has its own SpacetimeDB identity and character roster. Its signed token stays only in this browser—there is no email or password.
-          </p>
-          <SavedWorldManager />
+        <main className="arkyv-panel mx-auto w-full max-w-2xl overflow-hidden">
+          <div className="border-b border-slate-800 bg-gradient-to-br from-cyan-400/[0.08] via-transparent to-fuchsia-400/[0.08] px-5 py-7 text-center sm:px-10 sm:py-9">
+            <img src="/arkyv_logo.jpg" alt="Arkyv" className="mx-auto mb-5 h-20 w-20 rounded-2xl border border-cyan-300/20 shadow-xl shadow-cyan-950 sm:h-24 sm:w-24" />
+            <p className="mb-2 text-[0.62rem] font-semibold uppercase tracking-[0.28em] text-cyan-300/70">Local profiles</p>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-50 sm:text-4xl">Choose a saved world</h1>
+            <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-slate-400">
+              Every save has its own characters, editor content, and identity. The access token stays in this browser—no email or password required.
+            </p>
+          </div>
+          <div className="p-4 sm:p-8"><SavedWorldManager /></div>
         </main>
       </div>
-      <Footer color="#000000" />
+      <Footer color="#050711" />
     </>
   );
 }
-

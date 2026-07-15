@@ -3933,22 +3933,22 @@ export default function ArkyvAdminPanel() {
                 <meta name="theme-color" content="#0ea5e9" />
                 <meta name="apple-mobile-web-app-title" content="Arkyv" />
             </Head>
-            <div className="min-h-screen bg-slate-950 text-slate-100 relative" style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif" }}>
+            <div className="arkyv-app-shell min-h-screen text-slate-100 relative" style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif" }}>
                 <HamburgerIcon />
-                <header className="border-b border-cyan-400/40 bg-slate-900/80 backdrop-blur">
-                    <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between">
-                        <div>
-                            <h1 className="font-terminal text-lg tracking-[0.35em] uppercase text-cyan-200">
-                                Arkyv // Admin Console
+                <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-xl">
+                    <div className="max-w-7xl mx-auto px-4 py-4 pr-16 sm:px-6 sm:py-5 sm:pr-20 flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                            <h1 className="font-terminal text-sm tracking-[0.24em] uppercase text-cyan-200 sm:text-lg sm:tracking-[0.35em]">
+                                Arkyv // World Editor
                             </h1>
-                            <p className="text-xs text-slate-400 font-terminal tracking-[0.25em] uppercase mt-1">
-                                Room topology & world management tools
+                            <p className="mt-1 text-[0.6rem] text-slate-500 font-terminal tracking-[0.18em] uppercase sm:text-xs sm:tracking-[0.25em]">
+                                Map, content, RPG rules, and characters
                             </p>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                             <button
                                 type="button"
-                                className="text-xs font-terminal uppercase tracking-[0.3em] text-purple-200 border border-purple-400/50 rounded-md px-3 py-1.5 hover:bg-purple-400/10 transition flex items-center gap-2"
+                                className="min-h-10 text-[0.62rem] font-terminal uppercase tracking-[0.2em] text-purple-200 border border-purple-400/40 rounded-lg px-3 hover:bg-purple-400/10 transition flex items-center gap-2 sm:text-xs"
                                 onClick={() => setShowHelpDialog(true)}
                                 title="Help & Guide"
                             >
@@ -3957,7 +3957,7 @@ export default function ArkyvAdminPanel() {
                             </button>
                             <button
                                 type="button"
-                                className="text-xs font-terminal uppercase tracking-[0.3em] text-cyan-200 border border-cyan-400/50 rounded-md px-4 py-1.5 hover:bg-cyan-400/10 transition flex items-center gap-2"
+                                className="min-h-10 text-[0.62rem] font-terminal uppercase tracking-[0.2em] text-cyan-200 border border-cyan-400/40 rounded-lg px-3 hover:bg-cyan-400/10 transition flex items-center gap-2 sm:text-xs sm:px-4"
                                 onClick={() => router.push('/play')}
                             >
                                 <FontAwesomeIcon icon={faGamepad} className="text-sm" />
@@ -3967,10 +3967,18 @@ export default function ArkyvAdminPanel() {
                     </div>
                 </header>
 
+                <nav className="sticky top-0 z-30 border-b border-slate-800 bg-slate-950/90 backdrop-blur-xl" aria-label="Editor sections">
+                    <div className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-3 py-2 sm:px-6">
+                        {[['room-map', 'Map'], ['rpg-studio', 'RPG systems'], ['regions', 'Regions'], ['npcs', 'NPCs']].map(([href, label]) => (
+                            <a key={href} href={`#${href}`} className="min-h-10 shrink-0 rounded-lg px-3 py-2.5 text-[0.62rem] font-semibold uppercase tracking-[0.16em] text-slate-400 transition hover:bg-white/5 hover:text-cyan-200 sm:px-4">{label}</a>
+                        ))}
+                    </div>
+                </nav>
+
                 {/* Low Credit Warning */}
                 {rdCredits !== null && rdCredits < 20 && (
-                    <div className="max-w-7xl mx-auto px-6 pt-6">
-                        <div className="bg-amber-500/10 border-2 border-amber-400/50 rounded-lg p-4 flex items-center justify-between gap-4">
+                    <div className="max-w-7xl mx-auto px-3 pt-4 sm:px-6 sm:pt-6">
+                        <div className="bg-amber-500/10 border border-amber-400/40 rounded-xl p-4 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
                             <div className="flex items-center gap-3">
                                 <span className="text-3xl">⚠️</span>
                                 <div>
@@ -3994,19 +4002,19 @@ export default function ArkyvAdminPanel() {
                     </div>
                 )}
 
-                <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
+                <main className="max-w-7xl mx-auto px-3 py-4 space-y-5 sm:px-6 sm:py-8 sm:space-y-8">
                     {/* Layers controls moved into Room Map Visualization header */}
-                    <section className="bg-slate-900/70 border border-cyan-400/40 rounded-xl shadow-xl shadow-cyan-400/10 h-[700px]">
-                        <div className="p-6 border-b border-cyan-400/20 flex items-center justify-between">
-                            <div>
-                                <h2 className="font-terminal text-base tracking-[0.35em] uppercase text-cyan-200">
+                    <section id="room-map" className="scroll-mt-16 bg-slate-900/70 border border-cyan-400/30 rounded-xl shadow-xl shadow-cyan-400/10 h-[600px] sm:h-[700px] flex flex-col overflow-hidden">
+                        <div className="p-4 sm:p-6 border-b border-cyan-400/20 flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
+                                <h2 className="font-terminal text-sm tracking-[0.24em] uppercase text-cyan-200 sm:text-base sm:tracking-[0.35em]">
                                     Room Map Visualization
                                 </h2>
-                                <p className="text-xs text-slate-400 font-terminal tracking-[0.25em] uppercase mt-1">
+                                <p className="text-[0.6rem] text-slate-400 font-terminal tracking-[0.16em] uppercase mt-1 sm:text-xs sm:tracking-[0.25em]">
                                     Interactive room topology - click nodes for details
                                 </p>
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                                 <button
                                     type="button"
                                     onClick={() => setCurrentLayer((prev) => {
@@ -4039,7 +4047,7 @@ export default function ArkyvAdminPanel() {
                                     +1
                                 </button>
                                 
-                                <div className="flex items-center gap-2 ml-3 pl-3 border-l border-slate-600">
+                                <div className="flex items-center gap-2 sm:ml-3 sm:pl-3 sm:border-l sm:border-slate-600">
                                     <input
                                         type="text"
                                         value={floorInputValue}
@@ -4075,7 +4083,7 @@ export default function ArkyvAdminPanel() {
                                 </div>
                             </div>
                         </div>
-                        <div className="h-[calc(100%-80px)] relative">
+                        <div className="min-h-0 flex-1 relative">
                             {ReactFlow && flowNodes.length > 0 ? (
                                 <ReactFlow
                                     nodes={flowNodes}
@@ -4146,8 +4154,8 @@ export default function ArkyvAdminPanel() {
 
                     <RpgSystemsEditor enabled={Boolean(session)} />
 
-                    <section className="bg-slate-900/70 border border-cyan-400/40 rounded-xl shadow-xl shadow-cyan-400/10">
-                        <div className="p-6 border-b border-cyan-400/20 flex justify-between items-start">
+                    <section id="regions" className="scroll-mt-16 bg-slate-900/70 border border-cyan-400/30 rounded-xl shadow-xl shadow-cyan-400/10">
+                        <div className="p-4 sm:p-6 border-b border-cyan-400/20 flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-start">
                             <div>
                                 <h2 className="font-terminal text-base tracking-[0.35em] uppercase text-cyan-200">
                                     Region Management
@@ -4164,7 +4172,7 @@ export default function ArkyvAdminPanel() {
                                 + Create Region
                             </button>
                         </div>
-                        <div className="p-6 space-y-4">
+                        <div className="p-4 sm:p-6 space-y-4">
                             {/* Search and Sort */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div className="flex flex-col gap-2">
@@ -4239,8 +4247,8 @@ export default function ArkyvAdminPanel() {
                         </div>
                     </section>
 
-                    <section className="bg-slate-900/70 border border-cyan-400/40 rounded-xl shadow-xl shadow-cyan-400/10">
-                        <div className="p-6 border-b border-cyan-400/20 flex justify-between items-start">
+                    <section id="npcs" className="scroll-mt-16 bg-slate-900/70 border border-cyan-400/30 rounded-xl shadow-xl shadow-cyan-400/10">
+                        <div className="p-4 sm:p-6 border-b border-cyan-400/20 flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-start">
                             <div>
                                 <h2 className="font-terminal text-base tracking-[0.35em] uppercase text-cyan-200">
                                     NPC Management
@@ -4257,7 +4265,7 @@ export default function ArkyvAdminPanel() {
                                 + Create NPC
                             </button>
                         </div>
-                        <div className="p-6 space-y-4">
+                        <div className="p-4 sm:p-6 space-y-4">
                             {/* Search and Filters */}
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <div className="flex flex-col gap-2">

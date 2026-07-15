@@ -1,37 +1,23 @@
 import React from 'react';
+import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/contexts/AuthContext';
 import HamburgerIcon from '@/components/HamburgerIcon';
 import Footer from '@/components/Footer';
 
-// Animated room network data with positions and connections
-const BACKGROUND_ROOMS = [
-  { id: 0, name: 'Neon Alleyway', region: 'Cyber District', color: '#FF1493', x: 10, y: 15 },
-  { id: 1, name: 'Data Vault', region: 'Cyber District', color: '#FF1493', x: 25, y: 25 },
-  { id: 2, name: 'Chrome Bazaar', region: 'Cyber District', color: '#FF1493', x: 15, y: 45 },
-  
-  { id: 3, name: 'Moonlit Grove', region: 'Elven Woods', color: '#34d399', x: 45, y: 10 },
-  { id: 4, name: 'Ancient Library', region: 'Elven Woods', color: '#34d399', x: 60, y: 20 },
-  { id: 5, name: 'Crystal Cavern', region: 'Elven Woods', color: '#34d399', x: 50, y: 40 },
-  { id: 6, name: 'Enchanted Pool', region: 'Elven Woods', color: '#34d399', x: 70, y: 50 },
-  
-  { id: 7, name: 'Bridge Deck', region: 'Star Vessel', color: '#38bdf8', x: 30, y: 65 },
-  { id: 8, name: 'Engine Room', region: 'Star Vessel', color: '#38bdf8', x: 45, y: 70 },
-  { id: 9, name: 'Cryo Chamber', region: 'Star Vessel', color: '#38bdf8', x: 25, y: 85 },
-  
-  { id: 10, name: 'Crypt Entrance', region: 'Shadowlands', color: '#a855f7', x: 75, y: 15 },
-  { id: 11, name: 'Bone Chapel', region: 'Shadowlands', color: '#a855f7', x: 85, y: 30 },
-  { id: 12, name: 'Necromancer Tower', region: 'Shadowlands', color: '#a855f7', x: 90, y: 55 },
-  
-  { id: 13, name: 'Gear Workshop', region: 'Brass City', color: '#f59e0b', x: 60, y: 75 },
-  { id: 14, name: 'Clock Tower', region: 'Brass City', color: '#f59e0b', x: 75, y: 85 },
+const ROOMS = [
+  { name: 'Moonlit Grove', x: 12, y: 22, color: '#34d399' },
+  { name: 'Data Vault', x: 40, y: 10, color: '#22d3ee' },
+  { name: 'Bone Chapel', x: 72, y: 25, color: '#d946ef' },
+  { name: 'Bridge Deck', x: 28, y: 72, color: '#38bdf8' },
+  { name: 'Gear Workshop', x: 66, y: 68, color: '#f59e0b' },
+  { name: 'Clock Tower', x: 88, y: 86, color: '#fb7185' },
 ];
 
-// Connections between rooms (creates the network)
-const ROOM_CONNECTIONS = [
-  [0, 1], [1, 2], [0, 3], [3, 4], [4, 5], [5, 6],
-  [2, 7], [7, 8], [8, 9], [4, 10], [10, 11], [11, 12],
-  [8, 13], [13, 14], [6, 13], [5, 8], [1, 4]
+const FEATURES = [
+  { mark: '01', title: 'Map a living world', body: 'Create rooms, directional exits, regions, characters, NPCs, dialogue, and generated pixel-art scenes in one visual editor.' },
+  { mark: '02', title: 'Build real game systems', body: 'Define items, containers, consumables, stats, equipment slots, weapons, armor, fuel, and combat without rebuilding the runtime.' },
+  { mark: '03', title: 'Play together instantly', body: 'SpacetimeDB keeps players, chat, inventory, and world state synchronized while the terminal stays fast on desktop and mobile.' },
 ];
 
 export default function HomePage() {
@@ -40,197 +26,78 @@ export default function HomePage() {
 
   return (
     <>
-      <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-black flex items-center justify-center p-4 relative overflow-hidden">
-        {/* Black overlay to reduce visibility */}
-        <div className="absolute inset-0 bg-black/50 z-0"></div>
-        
-        {/* Animated Room Network Background */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none" style={{ opacity: 0.4 }}>
-          <svg className="room-network-svg" width="100%" height="100%" style={{ position: 'absolute' }}>
-            {ROOM_CONNECTIONS.map(([from, to], idx) => {
-              const fromRoom = BACKGROUND_ROOMS.find(r => r.id === from);
-              const toRoom = BACKGROUND_ROOMS.find(r => r.id === to);
-              if (!fromRoom || !toRoom) return null;
-              
-              return (
-                <line
-                  key={idx}
-                  className="connection-line"
-                  x1={`${fromRoom.x}%`}
-                  y1={`${fromRoom.y}%`}
-                  x2={`${toRoom.x}%`}
-                  y2={`${toRoom.y}%`}
-                  stroke={fromRoom.color}
-                  strokeWidth="2"
-                  strokeDasharray="6 3"
-                  style={{
-                    animationDelay: `${idx * 0.5}s`
-                  }}
-                />
-              );
-            })}
-          </svg>
-          
-          {BACKGROUND_ROOMS.map((room) => (
-            <div
-              key={room.id}
-              className="room-node-floating"
-              style={{
-                left: `${room.x}%`,
-                top: `${room.y}%`,
-                borderColor: room.color,
-                animationDelay: `${room.id * 0.3}s`,
-              }}
-            >
-              <div className="room-name" style={{ color: room.color }}>
-                {room.name}
-              </div>
-              <div className="room-region">{room.region}</div>
-            </div>
-          ))}
-        </div>
-        
-        {/* Background Grid Effect */}
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:4rem_4rem] opacity-20"></div>
-        
-        {/* Cyan Glow Effect */}
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl"></div>
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl"></div>
-        
-        <div className="w-full max-w-4xl text-center relative z-10">
-          {/* Logo */}
-          <div className="mb-8">
-            <img
-              src="/arkyv_logo.jpg"
-              alt="Arkyv Logo"
-              className="w-48 h-48 mx-auto mb-6 drop-shadow-2xl rounded-xl border-4 border-cyan-500/30 shadow-lg shadow-cyan-500/50"
-            />
-          </div>
-          
-          {/* Title */}
-          <h1 className="text-5xl sm:text-7xl font-bold mb-4 bg-gradient-to-r from-cyan-400 via-blue-400 to-cyan-400 bg-clip-text text-transparent drop-shadow-lg uppercase tracking-[0.15em]">
-            ARKYV ENGINE
-          </h1>
-          
-          {/* Subtitle */}
-          <p className="text-cyan-400 font-terminal text-lg sm:text-2xl mb-2 uppercase tracking-[0.25em]">
-            Open-Source Multi-User Dungeon
-          </p>
-          
-          {/* Description */}
-          <p className="text-slate-400 font-terminal text-base mb-12 max-w-2xl mx-auto leading-relaxed">
-            A text-based virtual world where players explore interconnected regions, 
-            interact with AI-powered NPCs, and shape emergent narratives through collaborative gameplay.
-          </p>
-          
-          {/* CTA Buttons */}
-          <div className="flex flex-col items-center gap-4 mb-8">
-            <button
-              onClick={() => router.push(user ? '/play' : '/auth')}
-              className="px-10 py-4 bg-gradient-to-r from-pink-500 to-purple-500 text-white font-bold rounded-lg hover:from-pink-400 hover:to-purple-400 transition-all text-lg shadow-lg shadow-pink-500/30 hover:scale-105 transform uppercase tracking-[0.15em]"
-            >
-              {user ? 'Enter Arkyv' : 'Choose Saved World'}
-            </button>
-
-            <a
-              href="https://www.babushkabook.com/arkyv"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-10 py-4 bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-bold rounded-lg hover:from-cyan-400 hover:to-blue-400 transition-all text-lg shadow-lg shadow-cyan-500/50 hover:shadow-cyan-400/60 hover:scale-105 transform uppercase tracking-[0.15em]"
-            >
-              Try Demo
-            </a>
-            
-            <button
-              onClick={() => router.push('/setup')}
-              className="px-8 py-3 bg-slate-800/80 backdrop-blur-sm border-2 border-cyan-500/50 text-cyan-400 font-semibold rounded-lg hover:bg-slate-700 hover:border-cyan-400 transition-all hover:shadow-lg hover:shadow-cyan-500/30 uppercase tracking-[0.1em]"
-            >
-              Setup Guide & Documentation
-            </button>
-          </div>
-          
-          {/* Feature Pills */}
-          <div className="flex flex-wrap justify-center gap-3 text-slate-400 text-xs">
-            <span className="px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-full backdrop-blur-sm uppercase tracking-[0.15em]">
-              Next.js 15
-            </span>
-            <span className="px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-full backdrop-blur-sm uppercase tracking-[0.15em]">
-              AI-Powered NPCs
-            </span>
-            <span className="px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-full backdrop-blur-sm uppercase tracking-[0.15em]">
-              Real-time Multiplayer
-            </span>
-            <span className="px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-full backdrop-blur-sm uppercase tracking-[0.15em]">
-              Open Source
-            </span>
-          </div>
-        </div>
-        
+      <Head>
+        <title>Arkyv Engine | Build living text worlds</title>
+        <meta name="description" content="A responsive open-source MUD engine and world editor with real-time multiplayer, AI NPCs, inventories, equipment, and combat." />
+      </Head>
+      <div className="arkyv-app-shell relative overflow-hidden text-white">
         <HamburgerIcon />
+        <div className="pointer-events-none absolute inset-0 opacity-30" aria-hidden="true">
+          <svg width="100%" height="100%" className="absolute inset-0">
+            {ROOMS.slice(0, -1).map((room, index) => (
+              <line key={room.name} x1={`${room.x}%`} y1={`${room.y}%`} x2={`${ROOMS[index + 1].x}%`} y2={`${ROOMS[index + 1].y}%`} stroke={room.color} strokeWidth="1" strokeDasharray="5 8" />
+            ))}
+          </svg>
+          {ROOMS.map((room) => <span key={room.name} className="absolute hidden h-2 w-2 rounded-full shadow-[0_0_18px_currentColor] sm:block" style={{ left: `${room.x}%`, top: `${room.y}%`, color: room.color, backgroundColor: room.color }} />)}
+        </div>
+
+        <main className="relative z-10 mx-auto w-full max-w-7xl px-4 pb-20 pt-24 sm:px-6 sm:pt-28 lg:px-8 lg:pb-28">
+          <section className="grid items-center gap-12 lg:min-h-[650px] lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)] lg:gap-16">
+            <div>
+              <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-2 text-[0.62rem] font-semibold uppercase tracking-[0.22em] text-cyan-200">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_10px_#6ee7b7]" /> Open-source multiplayer world engine
+              </div>
+              <h1 className="max-w-4xl text-5xl font-black leading-[0.96] tracking-[-0.045em] text-slate-50 sm:text-6xl lg:text-7xl xl:text-8xl">
+                Build worlds that <span className="bg-gradient-to-r from-cyan-300 via-sky-300 to-fuchsia-400 bg-clip-text text-transparent">remember.</span>
+              </h1>
+              <p className="mt-6 max-w-2xl text-base leading-7 text-slate-400 sm:text-lg sm:leading-8">
+                Arkyv is a complete MUD engine maker: design the map, author AI characters, define RPG systems, then enter the same persistent world your players use.
+              </p>
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+                <button type="button" onClick={() => router.push(user ? '/play' : '/auth')} className="min-h-14 rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 px-7 text-sm font-bold uppercase tracking-[0.14em] text-slate-950 shadow-xl shadow-cyan-950/70 transition hover:from-cyan-300 hover:to-blue-400">
+                  {user ? 'Enter your world' : 'Create a saved world'}
+                </button>
+                <button type="button" onClick={() => router.push(user ? '/admin' : '/setup')} className="min-h-14 rounded-xl border border-slate-700 bg-slate-950/60 px-7 text-sm font-bold uppercase tracking-[0.14em] text-slate-200 transition hover:border-cyan-300/40 hover:bg-slate-900">
+                  {user ? 'Open world editor' : 'Explore the setup guide'}
+                </button>
+              </div>
+              <div className="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-500">
+                <span>✓ Local saved worlds</span><span>✓ Real-time state</span><span>✓ Mobile-first play</span><span>✓ Extensible RPG rules</span>
+              </div>
+            </div>
+
+            <div className="relative mx-auto w-full max-w-lg lg:max-w-none">
+              <div className="absolute -inset-10 rounded-full bg-cyan-500/10 blur-3xl" aria-hidden="true" />
+              <div className="arkyv-panel relative overflow-hidden p-3 sm:p-4">
+                <div className="mb-3 flex items-center gap-2 px-1 text-[0.58rem] uppercase tracking-[0.18em] text-slate-500"><span className="h-2 w-2 rounded-full bg-rose-400" /><span className="h-2 w-2 rounded-full bg-amber-300" /><span className="h-2 w-2 rounded-full bg-emerald-300" /><span className="ml-2">live world preview</span></div>
+                <div className="relative aspect-[4/5] overflow-hidden rounded-xl border border-slate-800 bg-slate-950 sm:aspect-square">
+                  <img src="/starter-images/town-square.png" alt="Pixel-art town square in an Arkyv world" className="h-full w-full object-cover [image-rendering:pixelated]" />
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950 via-slate-950/90 to-transparent p-5 pt-20">
+                    <p className="text-[0.6rem] font-semibold uppercase tracking-[0.22em] text-cyan-300">Starting Zone</p>
+                    <h2 className="mt-1 text-2xl font-bold text-white">Town Square</h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-300">Market voices carry across the cobbles. Archie is waiting beside a campfire.</p>
+                    <div className="mt-4 flex flex-wrap gap-2"><span className="arkyv-chip arkyv-chip--accent">North</span><span className="arkyv-chip">Talk Archie</span><span className="arkyv-chip">Take sword</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="mt-20 border-t border-slate-800/80 pt-10 lg:mt-28 lg:pt-14">
+            <div className="mb-8 max-w-2xl"><p className="text-[0.62rem] font-semibold uppercase tracking-[0.25em] text-fuchsia-300">One engine, full loop</p><h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-100 sm:text-4xl">Author, simulate, and play without changing tools.</h2></div>
+            <div className="grid gap-3 md:grid-cols-3">
+              {FEATURES.map((feature) => (
+                <article key={feature.mark} className="arkyv-panel p-5 sm:p-6">
+                  <span className="text-xs font-bold text-cyan-300/60">{feature.mark}</span>
+                  <h3 className="mt-8 text-lg font-bold text-slate-100">{feature.title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-slate-500">{feature.body}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+        </main>
       </div>
-      
-      <Footer color="#000000" />
-
-      <style jsx>{`
-        .room-network-svg {
-          filter: blur(1px);
-        }
-
-        .connection-line {
-          animation: pulse-line 4s ease-in-out infinite;
-          opacity: 1;
-        }
-
-        @keyframes pulse-line {
-          0%, 100% {
-            opacity: 0.6;
-          }
-          50% {
-            opacity: 1;
-          }
-        }
-
-        .room-node-floating {
-          position: absolute;
-          padding: 10px 16px;
-          border: 1px solid;
-          border-radius: 6px;
-          background: rgba(15, 23, 42, 0.7);
-          backdrop-filter: blur(2px);
-          min-width: 160px;
-          text-align: center;
-          transform: translate(-50%, -50%);
-          animation: float-node 8s ease-in-out infinite;
-        }
-
-        @keyframes float-node {
-          0%, 100% {
-            transform: translate(-50%, -50%) translateY(0px);
-          }
-          50% {
-            transform: translate(-50%, -50%) translateY(-15px);
-          }
-        }
-
-        .room-name {
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 0.65rem;
-          font-weight: 600;
-          letter-spacing: 0.1em;
-          text-transform: uppercase;
-          margin-bottom: 2px;
-          opacity: 0.7;
-        }
-
-        .room-region {
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 0.5rem;
-          letter-spacing: 0.15em;
-          text-transform: uppercase;
-          color: rgba(203, 213, 225, 0.4);
-        }
-      `}</style>
+      <Footer color="#050711" />
     </>
   );
 }
-

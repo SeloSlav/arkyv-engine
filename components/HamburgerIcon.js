@@ -2,15 +2,15 @@ import React, { useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/contexts/AuthContext';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { 
-  faHome, 
-  faBook, 
-  faGamepad, 
-  faUser, 
-  faShield, 
+import {
+  faHome,
+  faBook,
+  faGamepad,
+  faUser,
+  faShield,
   faRightFromBracket,
   faRightToBracket,
-  faCodeBranch
+  faCodeBranch,
 } from '@fortawesome/free-solid-svg-icons';
 
 export default function HamburgerIcon() {
@@ -18,43 +18,26 @@ export default function HamburgerIcon() {
   const triggerRef = useRef(null);
   const panelRef = useRef(null);
   const router = useRouter();
-  const { user, profile, signOut } = useAuth();
+  const { user, profile, activeWorld, signOut } = useAuth();
 
-  const handleSignOut = async () => {
-    try {
-      await signOut();
-      router.push('/');
-    } catch (error) {
-      console.error('Sign out error:', error);
-    }
-  };
-
-  // Add ESC key handler to close menu
   React.useEffect(() => {
-    const handleEsc = (e) => {
-      if (e.key === 'Escape' && isOpen) {
+    const handleEsc = (event) => {
+      if (event.key === 'Escape' && isOpen) {
         setIsOpen(false);
+        triggerRef.current?.focus();
       }
     };
-
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, [isOpen]);
 
-  // Dismiss the popover without placing a click-blocking layer over the page.
-  // This lets a single click switch directly from the menu to a card or control.
   React.useEffect(() => {
     if (!isOpen) return undefined;
     let closeTimer;
-
     const handleClickOutside = (event) => {
-      if (triggerRef.current?.contains(event.target) || panelRef.current?.contains(event.target)) {
-        return;
-      }
-      // Let the newly targeted control finish its own click handler first.
+      if (triggerRef.current?.contains(event.target) || panelRef.current?.contains(event.target)) return;
       closeTimer = window.setTimeout(() => setIsOpen(false), 0);
     };
-
     document.addEventListener('click', handleClickOutside);
     return () => {
       document.removeEventListener('click', handleClickOutside);
@@ -62,156 +45,82 @@ export default function HamburgerIcon() {
     };
   }, [isOpen]);
 
+  const go = async (path) => {
+    setIsOpen(false);
+    await router.push(path);
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    setIsOpen(false);
+    await router.push('/auth');
+  };
+
+  const navClass = (path, tone = 'default') => {
+    const active = router.pathname === path;
+    const base = 'flex min-h-12 w-full items-center gap-3 rounded-xl px-3.5 text-left text-sm font-semibold transition';
+    if (active) return `${base} border border-cyan-300/20 bg-cyan-300/10 text-cyan-100`;
+    if (tone === 'primary') return `${base} bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg shadow-cyan-950/60 hover:from-cyan-400 hover:to-blue-500`;
+    if (tone === 'danger') return `${base} text-rose-300 hover:bg-rose-400/10 hover:text-rose-200`;
+    return `${base} text-slate-300 hover:bg-white/5 hover:text-white`;
+  };
+
   return (
     <>
       <button
         ref={triggerRef}
-        onClick={() => setIsOpen(!isOpen)}
-        className="fixed top-4 right-4 z-50 p-3 bg-slate-900 border-2 border-cyan-500/30 rounded-xl hover:bg-slate-800 hover:border-cyan-400 transition-all shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/40 block"
-        aria-label="Menu"
+        type="button"
+        onClick={() => setIsOpen((value) => !value)}
+        className="fixed right-3 top-3 z-50 flex h-12 w-12 items-center justify-center rounded-xl border border-cyan-300/25 bg-slate-950/90 shadow-xl shadow-black/40 backdrop-blur-xl transition hover:border-cyan-300/50 hover:bg-slate-900 sm:right-4 sm:top-4"
+        aria-label={isOpen ? 'Close menu' : 'Open menu'}
         aria-expanded={isOpen}
         aria-haspopup="menu"
         aria-controls="arkyv-navigation-menu"
       >
-        <div className="w-6 h-5 flex flex-col justify-between">
-          <span className={`block h-0.5 bg-cyan-400 transition-all ${isOpen ? 'rotate-45 translate-y-2' : ''}`}></span>
-          <span className={`block h-0.5 bg-cyan-400 transition-all ${isOpen ? 'opacity-0' : ''}`}></span>
-          <span className={`block h-0.5 bg-cyan-400 transition-all ${isOpen ? '-rotate-45 -translate-y-2' : ''}`}></span>
-        </div>
+        <span className="flex h-5 w-6 flex-col justify-between" aria-hidden="true">
+          <span className={`block h-0.5 rounded bg-cyan-300 transition ${isOpen ? 'translate-y-[9px] rotate-45' : ''}`} />
+          <span className={`block h-0.5 rounded bg-cyan-300 transition ${isOpen ? 'opacity-0' : ''}`} />
+          <span className={`block h-0.5 rounded bg-cyan-300 transition ${isOpen ? '-translate-y-[9px] -rotate-45' : ''}`} />
+        </span>
       </button>
 
       {isOpen && (
-        <div
+        <aside
           ref={panelRef}
           id="arkyv-navigation-menu"
           role="menu"
-          className="fixed top-16 right-4 z-40 bg-slate-900 border border-cyan-500/30 rounded-xl shadow-2xl shadow-cyan-500/20 backdrop-blur-md w-[280px] max-w-[calc(100vw-2rem)] overflow-hidden"
+          aria-label="Main navigation"
+          className="arkyv-panel fixed right-3 top-[4.25rem] z-40 max-h-[calc(100dvh-5rem)] w-[min(22rem,calc(100vw-1.5rem))] overflow-y-auto p-2 shadow-2xl shadow-black/60 sm:right-4 sm:top-20"
         >
-          <div className="p-2">
-            <nav className="space-y-1">
-              {/* Home */}
-              <button
-                onClick={() => {
-                  router.push('/');
-                  setIsOpen(false);
-                }}
-                className="flex items-center gap-3 w-full text-left px-4 py-3 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all font-terminal uppercase tracking-[0.1em] text-sm"
-              >
-                <FontAwesomeIcon icon={faHome} className="w-4 h-4 text-slate-400" />
-                <span>Home</span>
-              </button>
-              
-              {/* Setup Guide */}
-              <button
-                onClick={() => {
-                  router.push('/setup');
-                  setIsOpen(false);
-                }}
-                className="flex items-center gap-3 w-full text-left px-4 py-3 text-cyan-400 hover:text-cyan-300 hover:bg-slate-800 rounded-lg transition-all font-terminal uppercase tracking-[0.1em] text-sm"
-              >
-                <FontAwesomeIcon icon={faBook} className="w-4 h-4" />
-                <span>Setup Guide</span>
-              </button>
-              
-              {/* Demo Link */}
-              <a
-                href="https://www.babushkabook.com/arkyv"
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => setIsOpen(false)}
-                className="flex items-center gap-3 w-full text-left px-4 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 text-white hover:from-cyan-400 hover:to-blue-400 rounded-lg transition-all font-terminal font-bold shadow-md shadow-cyan-500/50 uppercase tracking-[0.15em] text-sm"
-              >
-                <FontAwesomeIcon icon={faGamepad} className="w-4 h-4" />
-                <span>Demo</span>
-                <span className="ml-auto text-xs">↗</span>
-              </a>
-              
-              {user && (
-                <>
-                  {/* Play - Highlighted */}
-                  <button
-                    onClick={() => {
-                      router.push('/play');
-                      setIsOpen(false);
-                    }}
-                    className="flex items-center gap-3 w-full text-left px-4 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 text-white hover:from-cyan-400 hover:to-blue-400 rounded-lg transition-all font-terminal font-bold shadow-md shadow-cyan-500/50 uppercase tracking-[0.15em] text-sm"
-                  >
-                    <FontAwesomeIcon icon={faGamepad} className="w-4 h-4" />
-                    <span>Play</span>
-                  </button>
-                  
-                  {/* Saved World */}
-                  <button
-                    onClick={() => {
-                      router.push('/profile');
-                      setIsOpen(false);
-                    }}
-                    className="flex items-center gap-3 w-full text-left px-4 py-3 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all font-terminal uppercase tracking-[0.1em] text-sm"
-                  >
-                    <FontAwesomeIcon icon={faUser} className="w-4 h-4 text-slate-400" />
-                    <span>Saved World</span>
-                  </button>
-                  
-                  {/* Admin - Only show for admins */}
-                  {profile?.is_admin && (
-                    <button
-                      onClick={() => {
-                        router.push('/admin');
-                        setIsOpen(false);
-                      }}
-                      className="flex items-center gap-3 w-full text-left px-4 py-3 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all font-terminal uppercase tracking-[0.1em] text-sm"
-                    >
-                      <FontAwesomeIcon icon={faShield} className="w-4 h-4 text-slate-400" />
-                      <span>Admin</span>
-                    </button>
-                  )}
-                  
-                  <div className="my-2 border-t border-slate-700"></div>
-                  
-                  {/* Log Out */}
-                  <button
-                    onClick={handleSignOut}
-                    className="flex items-center gap-3 w-full text-left px-4 py-3 text-red-400 hover:text-red-300 hover:bg-slate-800 rounded-lg transition-all font-terminal uppercase tracking-[0.1em] text-sm"
-                  >
-                    <FontAwesomeIcon icon={faRightFromBracket} className="w-4 h-4" />
-                    <span>Log Out</span>
-                  </button>
-                </>
-              )}
-
-              {!user && (
-                <button
-                  onClick={() => {
-                    router.push('/auth');
-                    setIsOpen(false);
-                  }}
-                  className="flex items-center gap-3 w-full text-left px-4 py-3 text-cyan-400 hover:text-cyan-300 hover:bg-slate-800 rounded-lg transition-all font-terminal uppercase tracking-[0.1em] text-sm"
-                >
-                  <FontAwesomeIcon icon={faRightToBracket} className="w-4 h-4" />
-                  <span>Choose Saved World</span>
-                </button>
-              )}
-            </nav>
-            
-            {/* GitHub Link */}
-            <div className="mt-2 pt-2 border-t border-slate-700">
-              <a
-                href="https://github.com/SeloSlav/arkyv-engine"
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => setIsOpen(false)}
-                className="flex items-center gap-3 w-full px-4 py-3 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded-lg transition-all font-terminal uppercase tracking-[0.1em] text-sm"
-              >
-                <FontAwesomeIcon icon={faCodeBranch} className="w-4 h-4" />
-                <span>GitHub</span>
-                <span className="ml-auto text-xs">↗</span>
-              </a>
-            </div>
+          <div className="mb-2 rounded-xl border border-slate-800 bg-black/25 p-3">
+            <p className="text-[0.58rem] font-semibold uppercase tracking-[0.24em] text-cyan-300/70">Arkyv Engine</p>
+            <p className="mt-1 truncate text-sm font-semibold text-slate-100">{activeWorld?.name || 'World maker'}</p>
+            <p className="mt-0.5 text-xs text-slate-500">{user ? 'Saved locally in this browser' : 'Select a saved world to begin'}</p>
           </div>
-        </div>
-      )}
 
+          <nav className="space-y-1">
+            <button type="button" onClick={() => go('/')} className={navClass('/')}><FontAwesomeIcon icon={faHome} className="h-4 w-4 text-slate-500" /><span>Home</span></button>
+            <button type="button" onClick={() => go('/setup')} className={navClass('/setup')}><FontAwesomeIcon icon={faBook} className="h-4 w-4 text-slate-500" /><span>Setup guide</span></button>
+
+            {user ? (
+              <>
+                <button type="button" onClick={() => go('/play')} className={navClass('/play', 'primary')}><FontAwesomeIcon icon={faGamepad} className="h-4 w-4" /><span>Play world</span></button>
+                {profile?.is_admin && <button type="button" onClick={() => go('/admin')} className={navClass('/admin')}><FontAwesomeIcon icon={faShield} className="h-4 w-4 text-slate-500" /><span>World editor</span></button>}
+                <button type="button" onClick={() => go('/profile')} className={navClass('/profile')}><FontAwesomeIcon icon={faUser} className="h-4 w-4 text-slate-500" /><span>Saved world</span></button>
+                <button type="button" onClick={handleSignOut} className={navClass('/auth', 'danger')}><FontAwesomeIcon icon={faRightFromBracket} className="h-4 w-4" /><span>Switch world</span></button>
+              </>
+            ) : (
+              <button type="button" onClick={() => go('/auth')} className={navClass('/auth', 'primary')}><FontAwesomeIcon icon={faRightToBracket} className="h-4 w-4" /><span>Choose saved world</span></button>
+            )}
+          </nav>
+
+          <div className="mt-2 border-t border-slate-800 pt-2">
+            <a href="https://github.com/SeloSlav/arkyv-engine" target="_blank" rel="noopener noreferrer" onClick={() => setIsOpen(false)} className="flex min-h-11 items-center gap-3 rounded-xl px-3.5 text-sm text-slate-500 transition hover:bg-white/5 hover:text-cyan-200">
+              <FontAwesomeIcon icon={faCodeBranch} className="h-4 w-4" /><span>Source on GitHub</span><span className="ml-auto" aria-hidden="true">↗</span>
+            </a>
+          </div>
+        </aside>
+      )}
     </>
   );
 }
-

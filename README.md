@@ -16,7 +16,7 @@ This repository uses **SpacetimeDB 2.0.1** for its authoritative backend. The pr
 - Authoritative inventory, equipment, fuel consumption, stat effects, and combat reducers
 - Local saved worlds backed by persistent SpacetimeDB identity tokens
 - Multiple characters per saved world
-- Optional RetroDiffusion room images and NPC portraits
+- Optional RetroDiffusion room scenes, NPC portraits, and inventory item art
 - Self-hosted persistent state with no email/password service
 
 ## Stack
@@ -157,7 +157,7 @@ Administrators can open `/admin` and use **RPG Systems Studio** to create game r
 
 The studio has four authoring surfaces:
 
-- **Object primitives** define presentation, portability, stacking, container capacity, fuel production/acceptance, elapsed-time burn rate, equipment slot, weapon and armor values, stat scaling, equipment modifiers, and consumable stat effects.
+- **Object primitives** define presentation and pixel-art imagery, portability, stacking, container capacity, fuel production/acceptance, elapsed-time burn rate, equipment slot, weapon and armor values, stat scaling, equipment modifiers, and consumable stat effects.
 - **Hero stats** define numeric ranges, defaults, visibility, and optional system roles. Combat discovers Health, Combat Power, and Defense through these roles, so display names and additional custom stats remain game-specific.
 - **Placed objects** instantiate a primitive in a room, actor inventory, equipment slot, or another container. Instance state includes quantity, durability, remaining fuel, active/burning state, and a JSON extension object.
 - **Actor values** optionally override defaults for a particular hero or NPC. Actors without overrides automatically use the stat definition defaults.
@@ -206,7 +206,7 @@ spacetime generate --no-config --include-private -p ./spacetimedb -l typescript 
 
 Game state never passes through the AI provider. NPC conversation requests contain only the NPC prompt, recent conversation context, and the player's current message. The response is committed through an authenticated SpacetimeDB reducer.
 
-RetroDiffusion returns base64 PNGs. Arkyv stores them as data URLs in `room.image_url` or `npc.portrait_url`, avoiding a separate object-storage service. Large or numerous images will increase replicated database size; production operators may replace this with their own object storage and persist only URLs.
+RetroDiffusion returns base64 PNGs. Arkyv stores them as data URLs in `room.image_url`, `npc.portrait_url`, or `object_definition.image_url`, avoiding a separate object-storage service. The object editor requests centered 128×128 pixel-art assets so inventory cards remain readable and scale cleanly with nearest-neighbor rendering. Large or numerous images will increase replicated database size; production operators may replace this with their own object storage and persist only URLs.
 
 ## Docker
 

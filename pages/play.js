@@ -1,10 +1,26 @@
-import React, { useState, useCallback } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import Head from 'next/head';
 import HamburgerIcon from '@/components/HamburgerIcon';
 import ArkyvTerminal from '@/components/ArkyvTerminal';
 import RoomChatWindow from '@/components/RoomChatWindow';
 import ArkyvAudioManager from '@/components/ArkyvAudioManager';
 import RpgHud from '@/components/RpgHud';
+
+const MOBILE_TABS = [
+    { id: 'terminal', label: 'Play', glyph: '>' },
+    { id: 'world', label: 'World', glyph: '◎' },
+    { id: 'gear', label: 'Gear', glyph: '◇' },
+    { id: 'chat', label: 'Chat', glyph: '#' },
+];
+
+function extractSection(body, label) {
+    const match = body.match(new RegExp(`\\[${label}\\]\\s*([\\s\\S]*?)(?=\\n\\[[A-Z_]+\\]|$)`, 'i'));
+    if (!match) return null;
+    return match[1]
+        .split('\n')
+        .map((line) => line.replace(/^(?:•|-|\*)\s*/, '').trim())
+        .filter(Boolean);
+}
 
 export default function ArkyvAccess() {
     const [currentRoom, setCurrentRoom] = useState(null);
@@ -14,244 +30,140 @@ export default function ArkyvAccess() {
     const [latestRoomMessage, setLatestRoomMessage] = useState(null);
     const [environmentData, setEnvironmentData] = useState({ characters: [], npcs: [], exits: [] });
     const [activeConversation, setActiveConversation] = useState(null);
-    const executeCommandRef = React.useRef(null);
+    const [mobileTab, setMobileTab] = useState('terminal');
+    const executeCommandRef = useRef(null);
 
-    const handleRoomChange = (roomId, character, roomDetails = null) => {
+    const execute = useCallback((command) => executeCommandRef.current?.(command), []);
+
+    const handleRoomChange = useCallback((roomId, character, roomDetails = null) => {
         setCurrentRoom(roomId);
         setActiveCharacter(character);
-
-        setCurrentRoomName((prevName) => {
-            if (!roomId) {
-                return null;
-            }
-
-            if (roomDetails?.name && typeof roomDetails.name === 'string') {
-                return roomDetails.name;
-            }
-
-            return prevName ?? null;
-        });
-
-        setCurrentRegion((prevRegion) => {
-            if (!roomId) {
-                setCurrentRoomName(null);
-                return null;
-            }
-
-            if (!roomDetails) {
-                return prevRegion;
-            }
-
-            const normalize = (value) => {
-                if (typeof value !== 'string') {
-                    return null;
-                }
-                return value.trim().toLowerCase();
-            };
-
-            // Use region_name (the key) for querying region_chats
-            const nextRegion = normalize(roomDetails.region_name || roomDetails.region);
-            if (!nextRegion) {
-                setCurrentRoomName(roomDetails.name ?? null);
-                return prevRegion;
-            }
-
-            const currentNormalized = normalize(prevRegion);
-            if (currentNormalized === nextRegion) {
-                setCurrentRoomName((prevName) => roomDetails.name ?? prevName ?? null);
-                return nextRegion; // Return the normalized key
-            }
-
-            setCurrentRoomName(roomDetails.name ?? null);
-            return nextRegion; // Return the normalized key
-        });
-    };
-
-    const handleRoomMessage = useCallback((message) => {
-        if (!message) {
+        if (!roomId) {
+            setCurrentRoomName(null);
+            setCurrentRegion(null);
+            setEnvironmentData({ characters: [], npcs: [], exits: [] });
             return;
         }
+        if (roomDetails?.name) setCurrentRoomName(roomDetails.name);
+        const region = roomDetails?.region_name || roomDetails?.region;
+        if (typeof region === 'string' && region.trim()) setCurrentRegion(region.trim().toLowerCase());
+    }, []);
 
-        const normalizedRoomId = message.room_id ?? message.originalMessage?.room_id ?? null;
+    const handleRoomMessage = useCallback((message) => {
+        if (!message) return;
         setLatestRoomMessage({
-            roomId: normalizedRoomId,
+            roomId: message.room_id ?? message.originalMessage?.room_id ?? null,
             id: message.id ?? `${Date.now()}`,
             payload: message,
-            ts: Date.now()
+            ts: Date.now(),
         });
 
-        // Parse environment data from system messages
-        if (message.kind === 'system' && message.body) {
-            let body = message.body;
-            
-            // Strip [ENV_DATA] header if present
-            if (body.startsWith('[ENV_DATA]')) {
-                body = body.replace('[ENV_DATA]\n', '').replace('[ENV_DATA]', '');
-            }
-            
-            // Parse WHO/LOOK command output - supports both [SECTION] and ═══ SECTION ═══ formats
-            const charMatch = body.match(/(?:\[CHARACTERS\]|═══ CHARACTERS ═══)\s*([\s\S]*?)(?:\[|═══|$)/);
-            const npcMatch = body.match(/(?:\[NPCs\]|═══ NPCs ═══)\s*([\s\S]*?)(?:\[|═══|$)/);
-            const exitMatch = body.match(/(?:\[EXITS\]|═══ EXITS ═══)\s*([\s\S]*?)(?:\[|═══|$)/);
-            
-            // If this is a WHO/LOOK response (has at least one section), update all sections
-            // This ensures old data from previous rooms doesn't persist
-            if (charMatch || npcMatch || exitMatch) {
-                const updated = {
-                    characters: [],
-                    npcs: [],
-                    exits: []
-                };
-                
-                if (charMatch) {
-                    const charText = charMatch[1];
-                    const chars = charText.match(/• ([^\n]+)/g);
-                    updated.characters = chars ? chars.map(c => c.replace('• ', '').trim()) : [];
-                }
-                
-                if (npcMatch) {
-                    const npcText = npcMatch[1];
-                    const npcs = npcText.match(/• ([^\n]+)/g);
-                    updated.npcs = npcs ? npcs.map(n => n.replace('• ', '').trim()) : [];
-                }
-                
-                if (exitMatch) {
-                    const exitText = exitMatch[1];
-                    const exits = exitText.match(/• ([^\n]+)/g);
-                    updated.exits = exits ? exits.map(e => e.replace('• ', '').trim()) : [];
-                }
-                
-                setEnvironmentData(updated);
-            }
+        if (message.kind !== 'system' || !message.body) return;
+        const body = message.body.replace(/^\[ENV_DATA\]\s*/, '');
+        const characters = extractSection(body, 'CHARACTERS');
+        const npcs = extractSection(body, 'NPCs');
+        const exits = extractSection(body, 'EXITS');
+        if (characters || npcs || exits) {
+            setEnvironmentData({ characters: characters || [], npcs: npcs || [], exits: exits || [] });
         }
     }, []);
+
+    const terminal = (
+        <ArkyvTerminal
+            disabled={false}
+            autoFocusTrigger={mobileTab === 'terminal' ? 1 : 0}
+            onRoomChange={handleRoomChange}
+            onRoomMessage={handleRoomMessage}
+            onExecuteCommand={(command) => { executeCommandRef.current = command; }}
+            onConversationChange={setActiveConversation}
+            className="h-full"
+        />
+    );
+
+    const world = (
+        <ArkyvAudioManager
+            region={currentRegion}
+            roomId={currentRoom}
+            roomName={currentRoomName}
+            environmentData={environmentData}
+            activeConversation={activeConversation}
+            onExecuteCommand={execute}
+            className="h-full"
+        />
+    );
+
+    const gear = <RpgHud actor={activeCharacter} environmentData={environmentData} onExecuteCommand={execute} className="h-full" />;
+
+    const chat = (
+        <RoomChatWindow
+            disabled={false}
+            regionName={currentRegion}
+            activeCharacter={activeCharacter}
+            latestMessage={latestRoomMessage}
+            onExecuteCommand={execute}
+            className="h-full"
+        />
+    );
 
     return (
         <>
             <Head>
-                <title>Arkyv Engine - Open Source Text-Based MUD</title>
-                <meta name="description" content="An open-source multi-user dungeon (MUD) built with Next.js and AI. Explore text-based worlds, interact with NPCs, and collaborate with other players in real-time. Create characters, build narratives, and shape emergent stories." />
-                <meta name="keywords" content="MUD, multi-user dungeon, text-based game, open source, Next.js, real-time multiplayer, interactive fiction, AI NPCs, text adventure" />
-                
-                {/* PWA Manifest and Favicon */}
+                <title>Play | Arkyv Engine</title>
+                <meta name="description" content="Explore and play a real-time text world with inventory, equipment, combat, characters, and regional chat." />
                 <link rel="icon" href="/arkyv_logo.jpg" />
-                <link rel="apple-touch-icon" href="/arkyv_logo.jpg" />
-                <meta name="theme-color" content="#89CFF0" />
-                <meta name="apple-mobile-web-app-title" content="Arkyv Engine" />
-                <meta name="application-name" content="Arkyv Engine" />
-                
-                {/* Open Graph / Facebook */}
-                <meta property="og:type" content="website" />
-                <meta property="og:title" content="Arkyv Engine - Open Source Text-Based MUD" />
-                <meta property="og:description" content="An open-source multi-user dungeon (MUD) built with Next.js and AI. Explore text-based worlds, interact with NPCs, and collaborate with other players in real-time." />
-                <meta property="og:site_name" content="Arkyv Engine" />
-                
-                {/* Twitter */}
-                <meta name="twitter:card" content="summary_large_image" />
-                <meta name="twitter:title" content="Arkyv Engine - Open Source Text-Based MUD" />
-                <meta name="twitter:description" content="An open-source multi-user dungeon (MUD) built with Next.js and AI. Explore text-based worlds, interact with NPCs, and collaborate with other players in real-time." />
-                
-                {/* Author and License */}
-                <meta name="author" content="Arkyv Engine Contributors" />
-                <link rel="license" href="https://opensource.org/licenses/MIT" />
+                <meta name="theme-color" content="#050711" />
             </Head>
-            <div className="min-h-screen bg-black text-white flex flex-col relative">
+            <div className="arkyv-app-shell text-white">
                 <HamburgerIcon />
 
-                <div className="flex-grow flex flex-col px-2 pb-2 pt-2 md:px-4 md:pb-16 md:pt-6">
-                    {/* Main content area */}
-                    <div className="w-full max-w-7xl mx-auto flex flex-col md:grid md:grid-cols-[1fr_360px] gap-3 md:gap-6 h-full">
-                        {/* Terminal - bottom on mobile, left on desktop */}
-                        <div className="order-2 md:order-1 h-[52vh] md:h-[85vh]">
-                            <ArkyvTerminal
-                                disabled={false}
-                                autoFocusTrigger={0}
-                                onRoomChange={handleRoomChange}
-                                onRoomMessage={handleRoomMessage}
-                                onExecuteCommand={(cmd) => { executeCommandRef.current = cmd; }}
-                                onConversationChange={setActiveConversation}
-                                className="h-full"
-                            />
+                <main className="mx-auto flex h-[100dvh] min-h-0 w-full max-w-[1720px] flex-col overflow-hidden p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-3 lg:p-4">
+                    <header className="flex min-h-16 items-center gap-3 px-2 pr-16 lg:hidden">
+                        <img src="/arkyv_logo.jpg" alt="" className="h-10 w-10 rounded-xl border border-cyan-300/20" />
+                        <div className="min-w-0">
+                            <p className="truncate text-[0.6rem] font-semibold uppercase tracking-[0.24em] text-cyan-300/70">{currentRegion || 'Arkyv Engine'}</p>
+                            <h1 className="truncate text-base font-semibold text-slate-100">{currentRoomName || activeCharacter?.name || 'World console'}</h1>
                         </div>
+                    </header>
 
-                        {/* Right Column - top on mobile, right on desktop */}
-                        <div className="order-1 md:order-2 h-auto md:h-[85vh] flex-shrink-0 md:relative">
-                            {/* Logo - Desktop only */}
-                            <div className="hidden md:block absolute top-6 left-6 right-6 z-10 pointer-events-none">
-                                <div className="flex items-center space-x-4">
-                                    <img
-                                        src="/arkyv_logo.jpg"
-                                        alt="Arkyv Logo"
-                                        className="w-20 h-20 drop-shadow-lg"
-                                    />
-                                    <div className="space-y-1">
-                                    <p className="font-terminal text-xs text-gray-400 tracking-[0.35em] uppercase">
-                                        Open-Source Multi-User Dungeon
-                                    </p>
-                                    <h1 className="text-lg font-terminal text-hot-pink">
-                                        Arkyv Engine
-                                    </h1>
-                                    </div>
+                    <div className="hidden min-h-0 flex-1 gap-4 lg:grid lg:grid-cols-[minmax(0,1fr)_400px] xl:grid-cols-[minmax(0,1fr)_440px]">
+                        <section className="min-h-0">{terminal}</section>
+                        <aside className="grid min-h-0 grid-rows-[auto_minmax(170px,0.75fr)_minmax(230px,1.15fr)_minmax(180px,0.85fr)] gap-3">
+                            <div className="flex items-center gap-3 px-2 py-1 pr-16">
+                                <img src="/arkyv_logo.jpg" alt="" className="h-12 w-12 rounded-xl border border-cyan-300/20 shadow-lg shadow-cyan-950" />
+                                <div className="min-w-0">
+                                    <p className="text-[0.58rem] font-semibold uppercase tracking-[0.25em] text-cyan-300/70">Arkyv Engine</p>
+                                    <h1 className="truncate text-base font-semibold text-slate-100">{currentRoomName || 'World console'}</h1>
                                 </div>
                             </div>
-
-                            {/* Mobile Layout - Side by Side */}
-                            <div className="md:hidden flex gap-3 h-[36vh]">
-                                <RoomChatWindow
-                                    disabled={false}
-                                    regionName={currentRegion}
-                                    activeCharacter={activeCharacter}
-                                    latestMessage={latestRoomMessage}
-                                    onExecuteCommand={(cmd) => executeCommandRef.current?.(cmd)}
-                                    className="flex-1"
-                                />
-                                <ArkyvAudioManager
-                                    region={currentRegion}
-                                    roomId={currentRoom}
-                                    roomName={currentRoomName}
-                                    environmentData={environmentData}
-                                    activeConversation={activeConversation}
-                                    onExecuteCommand={(cmd) => executeCommandRef.current?.(cmd)}
-                                    className="w-[44vw] max-w-[240px]"
-                                />
-                            </div>
-                            <RpgHud
-                                actor={activeCharacter}
-                                onExecuteCommand={(cmd) => executeCommandRef.current?.(cmd)}
-                                className="md:hidden mt-3"
-                            />
-
-                            {/* Desktop Layout - Stacked */}
-                            <div className="hidden md:flex md:flex-col h-full gap-3 pt-32">
-                                <ArkyvAudioManager 
-                                    region={currentRegion} 
-                                    roomId={currentRoom} 
-                                    roomName={currentRoomName} 
-                                    environmentData={environmentData} 
-                                    activeConversation={activeConversation}
-                                    onExecuteCommand={(cmd) => executeCommandRef.current?.(cmd)}
-                                    className="flex-shrink-0 h-[25vh]" 
-                                />
-                                <RpgHud
-                                    actor={activeCharacter}
-                                    onExecuteCommand={(cmd) => executeCommandRef.current?.(cmd)}
-                                    className="h-44 flex-shrink-0"
-                                />
-                                <RoomChatWindow
-                                    disabled={false}
-                                    regionName={currentRegion}
-                                    activeCharacter={activeCharacter}
-                                    latestMessage={latestRoomMessage}
-                                    onExecuteCommand={(cmd) => executeCommandRef.current?.(cmd)}
-                                    className="flex-1 min-h-0"
-                                />
-                            </div>
-                        </div>
-
+                            {world}
+                            {gear}
+                            {chat}
+                        </aside>
                     </div>
-                    
-                </div>
 
+                    <div className="flex min-h-0 flex-1 flex-col lg:hidden">
+                        <nav className="arkyv-panel mb-2 grid grid-cols-4 gap-1 p-1" aria-label="Gameplay panels">
+                            {MOBILE_TABS.map((item) => (
+                                <button
+                                    key={item.id}
+                                    type="button"
+                                    onClick={() => setMobileTab(item.id)}
+                                    className={`flex min-h-12 flex-col items-center justify-center rounded-lg px-1 transition ${mobileTab === item.id ? 'bg-cyan-300/10 text-cyan-100' : 'text-slate-500 hover:bg-white/5 hover:text-slate-200'}`}
+                                    aria-current={mobileTab === item.id ? 'page' : undefined}
+                                >
+                                    <span className="text-sm leading-none" aria-hidden="true">{item.glyph}</span>
+                                    <span className="mt-1 text-[0.58rem] font-semibold uppercase tracking-[0.14em]">{item.label}</span>
+                                </button>
+                            ))}
+                        </nav>
+                        <div className="min-h-0 flex-1">
+                            <section className={`${mobileTab === 'terminal' ? 'h-full' : 'hidden'}`}>{terminal}</section>
+                            <section className={`${mobileTab === 'world' ? 'h-full' : 'hidden'}`}>{world}</section>
+                            <section className={`${mobileTab === 'gear' ? 'h-full' : 'hidden'}`}>{gear}</section>
+                            <section className={`${mobileTab === 'chat' ? 'h-full' : 'hidden'}`}>{chat}</section>
+                        </div>
+                    </div>
+                </main>
             </div>
         </>
     );
