@@ -101,6 +101,13 @@ async function main() {
             initial_spawn_policy: 'fixed', fixed_initial_spawn_point_id: 'runtime-birth-cairn',
             respawn_policy: 'nearest', inventory_loss_mode: 'keep', death_mode: 'respawn',
         });
+        // Keep combat assertions deterministic now that authored hit, avoidance,
+        // critical, and block probabilities are part of the runtime model.
+        await update('world_combat_configs', ['world'], {
+            base_hit_chance_percent: 100, base_crit_chance_percent: 0,
+            base_dodge_chance_percent: 0, base_parry_chance_percent: 0,
+            base_block_chance_percent: 0,
+        });
         await insert('characters', [
             { id: heroId, name: 'Runtime Hero', current_room: startingRoom, description: 'Smoke-test hero.' },
             { id: rivalId, name: 'Runtime Rival', current_room: startingRoom, description: 'Smoke-test rival.' },
