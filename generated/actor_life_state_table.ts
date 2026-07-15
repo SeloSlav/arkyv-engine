@@ -21,4 +21,5 @@ export default __t.row({
   respawnAvailableAtMicros: __t.i64().name("respawn_available_at_micros"),
   protectedUntilMicros: __t.i64().name("protected_until_micros"),
   updatedAt: __t.timestamp().name("updated_at"),
+  livesRemaining: __t.u32().name("lives_remaining"),
 });

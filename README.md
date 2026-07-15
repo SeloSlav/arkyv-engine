@@ -14,12 +14,15 @@ This repository uses **SpacetimeDB 2.0.1** for its authoritative backend. The pr
 - Visual region, room, exit, NPC, and RPG systems editor
 - Admin-authored NPC patrol routes, friendly/neutral/hostile disposition, guards, attack-on-sight behavior, combat cadence, and respawning
 - Region-level safe/PvP rules, persistent wanted states, guard enforcement, and configurable fallback recovery rooms
-- Multiple named initial/respawn points with fixed, priority, random, nearest, and same-region-nearest selection
-- Admin-authored death penalties, respawn delay/protection, item/gold/XP loss, resource restoration, and optional hardcore permanent character death
+- Multiple named initial/respawn points with fixed, priority, random, nearest, and same-region-nearest selection, plus origin/faction/death-region eligibility
+- Admin-authored death penalties, finite lives, lootable corpses, ability revival, respawn delay/protection, item/gold/XP loss, resource restoration, and optional hardcore permanent character death
 - Factions with configurable reputation ranges, standing thresholds, combat penalties, quest requirements, and rewards
-- NPC-given quests with explore, acquire-item, defeat-NPC, defeat-faction, and talk-to-NPC objectives plus server-authoritative progress and turn-in
-- Admin-defined levels, XP curve, HP/MP/energy/focus resources, regeneration, abilities, magic, items, equipment slots, and hero stats
-- Authoritative inventory limits, multi-item ring/trinket slots, weapon attack speed, ability costs/cooldowns, combat, defeat, chests, and enemy loot
+- NPC-given quests with prerequisites, timers, failure rules, branches, follow-ups, and explore, acquire, deliver, pay, interact, escort, survive, defeat, and conversation objectives
+- Admin-defined races, classes, backgrounds, levels, XP curves, HP/MP/energy/focus resources, regeneration, abilities, magic, items, equipment slots, and hero stats
+- Composable ability effects for AoE, DoT/HoT, buffs, debuffs, stuns, interrupts, cleanses, teleports, revives, and summons
+- Authoritative inventory limits, multi-item ring/trinket slots, weapon attack speed, durability/repair, ability costs/cooldowns/cast times, hit/crit/dodge/parry/block/resistance, threat, assists, defeat, chests, and enemy loot
+- Authored currencies, NPC vendors, player item/gold transfers, banks, crafting stations, recipes, and ingredients
+- Permissioned administrator roles for world, systems, quests, economy, lifecycle, moderation, and role management
 - Local saved worlds backed by persistent SpacetimeDB identity tokens
 - Multiple characters per saved world
 - Optional RetroDiffusion room scenes, NPC portraits, and inventory item art
@@ -159,6 +162,8 @@ The Rust module in `spacetimedb/src/lib.rs` defines these public replicated tabl
 | `progression_config` | Maximum level, XP curve formula, stat-point awards, and inventory capacity rules |
 | `actor_progression` | Persistent actor level, XP within the current level, and unspent stat points |
 | `ability_definition` | Authored magic/techniques with targeting, costs, pacing, power, scaling, and mitigation |
+| `ability_effect_definition` | Ordered damage, healing, status, movement, revival, summon, and area effects |
+| `actor_status_effect` | Active buffs, debuffs, stuns, and periodic effects |
 | `actor_ability` | Explicit ability grants in addition to automatic level unlocks |
 | `actor_cooldown` | Server-authoritative readiness for basic attacks and abilities |
 | `equipment_slot_definition` | Wearable slot names, order, and capacity, such as two rings or two trinkets |
@@ -168,9 +173,15 @@ The Rust module in `spacetimedb/src/lib.rs` defines these public replicated tabl
 | `quest_definition` | Quest giver, turn-in NPC, prerequisites, repeatability, and XP/gold/reputation rewards |
 | `quest_objective` | Ordered explore, acquire, defeat, and conversation requirements |
 | `quest_item_reward` | Portable object rewards granted at a successful turn-in |
+| `quest_rule` / `quest_choice` | Prerequisites, limits, timers, failure, follow-ups, and player-selected branches |
 | `actor_quest` | Accepted, ready, and completed quest lifecycle per actor |
 | `actor_quest_progress` | Server-observed progress for each accepted objective |
 | `actor_wallet` | Persistent gold balance per actor |
+| `character_option_definition` / `character_option_grant` | Race, class, and background choices with starting stats, items, abilities, gold, and rooms |
+| `currency_definition` / `actor_currency` | Authored currencies and actor balances |
+| `vendor_definition` / `vendor_stock` | NPC shops, prices, stock, buyback, and reputation access |
+| `crafting_recipe` / `crafting_ingredient` | Crafting outputs, stations, levels, costs, and materials |
+| `admin_role_definition` / `admin_role_assignment` | Permission keys and saved-world administrator assignments |
 | `spawn_point` | Named initial-entry and respawn locations with eligibility and priority |
 | `world_lifecycle_config` | World-wide initial spawn, death, loss, recovery, protection, and hardcore rules |
 | `actor_life_state` | Alive/dead state, respawn eligibility, selected point, death count, and protection window |
@@ -184,14 +195,18 @@ The frontend consumes generated bindings in `generated/`. The client data layer 
 
 Administrators can open `/admin` and use **RPG Systems Studio** to create game rules from reusable primitives. The built-in starter kit is optional and contains Health, Mana, Energy, Focus, Strength, Defense, starter abilities, wearable slots, firewood, a wooden box, a fuel-burning campfire, a sword, armor, and a healing potion. It can be installed repeatedly without overwriting edited definitions.
 
-The studio has eleven authoring surfaces:
+The studio includes these authoring surfaces:
 
 - **Object primitives** define presentation and pixel-art imagery, portability, stacking, container capacity, fuel production/acceptance, elapsed-time burn rate, wearable slot, weapon damage, armor, basic-attack cooldown, inventory-slot bonuses, stat scaling, equipment modifiers, and consumable effects.
 - **Hero stats** define numeric ranges, level-one bases, per-level gains, passive regeneration, visibility, and optional Health, Mana, Energy, Focus, Combat Power, and Defense roles. Additional resources and attributes can remain fully custom.
-- **Abilities & magic** define damage, healing, or resource restoration; enemy/self/ally targeting; resource stat and cost; cooldown and cast pacing; power range; stat scaling; affected stat; armor mitigation; required level; automatic learning; and explicit actor grants.
+- **Abilities & magic** defines learning, targeting, cost and cast pacing, followed by an ordered effect composer for direct/periodic damage or healing, resources, buffs/debuffs, stuns, interrupts, cleanses, area scopes, teleports, revives, and summons.
+- **Combat rules** controls hit, critical damage, dodge, parry, block, armor effectiveness, school resistance, PvP scaling, global cooldown, NPC threat, and assist XP.
 - **Factions & reputation** define starting/minimum/maximum reputation, hostile and friendly thresholds, reputation lost for attacks and kills, and direct actor-standing adjustments for moderation.
-- **Quests** define giver and turn-in NPCs, level/reputation prerequisites, repeatability, availability, objective sequence, optional quest-item consumption, and XP, gold, faction-reputation, and item rewards.
-- **Spawn & death** creates any number of named entry or recovery points in authored rooms and configures initial placement, graph-nearest/fixed/priority/random respawn, delays, protection, inventory/equipment consequences, gold/current-level-XP loss, resource restoration, active-quest reset, wanted-state clearing, and hardcore mode. It also shows live character states and permanent death history.
+- **Quests** defines giver and turn-in NPCs, prerequisites, timers, death failure, completion limits, branches, follow-ups, objective sequences, consumption, and XP/gold/reputation/item rewards.
+- **Character creation** defines races, classes, and backgrounds with structured stat, item, ability, gold, and starting-room grants.
+- **Economy** defines currencies, NPC vendors and stock, buyback, reputation gates, recipes, ingredients, level requirements, currency costs, and station tags.
+- **Admin roles** assigns explicit permissions to saved-world profiles. An unassigned founding administrator remains the unrestricted owner.
+- **Spawn & death** creates named entry/recovery points and configures origin/faction/death-region eligibility, graph-nearest/fixed/priority/random respawn, finite lives, lootable corpses, ability revival, delays, protection, losses, restoration, quest/wanted resets, and hardcore mode.
 - **Levels & inventory** defines the level cap, XP needed for level two, percentage threshold growth, stat points per level, base inventory slots, and slots gained per level. A live preview shows the first ten thresholds, and actor levels can be adjusted for testing or moderation.
 - **Equipment slots** define stable wearable locations, display order, and capacity. Ordinary slots default to one object, while the starter Finger and Trinket slots accept two.
 - **Placed objects** instantiate a primitive in a room, actor inventory, equipment slot, or another container. Instance state includes quantity, durability, remaining fuel, active/burning state, and a JSON extension object.
@@ -229,7 +244,18 @@ quests                        show active objectives, nearby offers, turn-in sta
 quest <npc>                   inspect quests offered or received by a nearby NPC
 accept <quest>                accept an available quest from its nearby giver
 turn in <quest>               validate and complete a quest at its turn-in NPC
+choose <option>               commit an authored quest branch
 reputation                    show numeric and named standing with every faction
+origins                       list authored race, class, and background choices
+shop / shop <vendor>          inspect nearby vendor stock and currency balance
+buy <item> [quantity]         purchase server-authored vendor stock
+sell <item>                   sell one carried item to a nearby vendor
+repair <item>                 restore damaged equipment at a nearby vendor
+bank                          inspect banked items
+bank deposit/withdraw <item>  move items between inventory and bank
+give <item> to <player>       transfer an inventory item to a nearby player
+pay <amount> gold to <player> transfer gold to a nearby player
+recipes / craft <recipe>      inspect and execute authored crafting recipes
 take <item>                   move a portable room object into inventory
 drop <item>                   place a carried object in the current room
 examine <object>              inspect state, fuel, or container contents
@@ -249,7 +275,7 @@ combat                        show zone PvP rules and visible enemies
 rest                          restore configured HP/MP/energy/focus pools when safe
 wait                          pass a turn and advance NPC behavior
 flee <direction>              leave combat through an authored exit
-respawn                      return when the configured recovery delay has elapsed
+respawn                       return when the configured recovery delay has elapsed
 ```
 
 All runtime mutations occur in the Rust module. The browser only sends commands and renders replicated state; it does not calculate authoritative damage, fuel, inventory ownership, or stat changes.

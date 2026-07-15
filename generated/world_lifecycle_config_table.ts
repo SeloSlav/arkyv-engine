@@ -30,4 +30,7 @@ export default __t.row({
   clearWantedOnRespawn: __t.bool().name("clear_wanted_on_respawn"),
   createdAt: __t.timestamp().name("created_at"),
   updatedAt: __t.timestamp().name("updated_at"),
+  maximumLives: __t.u32().name("maximum_lives"),
+  createLootableCorpse: __t.bool().name("create_lootable_corpse"),
+  allowAbilityRevive: __t.bool().name("allow_ability_revive"),
 });

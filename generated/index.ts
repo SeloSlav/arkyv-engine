@@ -40,6 +40,9 @@ import DeleteCurrentAccountReducer from "./delete_current_account_reducer";
 import DeleteRowsReducer from "./delete_rows_reducer";
 import InsertRowsReducer from "./insert_rows_reducer";
 import InstallRpgStarterKitReducer from "./install_rpg_starter_kit_reducer";
+import ResolveScheduledCastReducer from "./resolve_scheduled_cast_reducer";
+import ResolveScheduledEffectTickReducer from "./resolve_scheduled_effect_tick_reducer";
+import SelectCharacterOptionReducer from "./select_character_option_reducer";
 import SubmitCommandReducer from "./submit_command_reducer";
 import UpdateRowsReducer from "./update_rows_reducer";
 
@@ -47,36 +50,56 @@ import UpdateRowsReducer from "./update_rows_reducer";
 
 // Import all table schema definitions
 import AbilityDefinitionRow from "./ability_definition_table";
+import AbilityEffectDefinitionRow from "./ability_effect_definition_table";
 import ActorAbilityRow from "./actor_ability_table";
+import ActorCharacterOptionRow from "./actor_character_option_table";
 import ActorCooldownRow from "./actor_cooldown_table";
 import ActorCrimeRow from "./actor_crime_table";
+import ActorCurrencyRow from "./actor_currency_table";
 import ActorDeathRecordRow from "./actor_death_record_table";
 import ActorFactionReputationRow from "./actor_faction_reputation_table";
 import ActorLifeStateRow from "./actor_life_state_table";
 import ActorProgressionRow from "./actor_progression_table";
 import ActorQuestRow from "./actor_quest_table";
+import ActorQuestChoiceRow from "./actor_quest_choice_table";
 import ActorQuestProgressRow from "./actor_quest_progress_table";
 import ActorStatRow from "./actor_stat_table";
+import ActorStatusEffectRow from "./actor_status_effect_table";
 import ActorWalletRow from "./actor_wallet_table";
+import AdminRoleAssignmentRow from "./admin_role_assignment_table";
+import AdminRoleDefinitionRow from "./admin_role_definition_table";
 import CharacterRow from "./character_table";
+import CharacterOptionDefinitionRow from "./character_option_definition_table";
+import CharacterOptionGrantRow from "./character_option_grant_table";
 import CommandRow from "./command_table";
+import CraftingIngredientRow from "./crafting_ingredient_table";
+import CraftingRecipeRow from "./crafting_recipe_table";
+import CurrencyDefinitionRow from "./currency_definition_table";
 import EquipmentSlotDefinitionRow from "./equipment_slot_definition_table";
 import ExitRow from "./exit_table";
 import FactionDefinitionRow from "./faction_definition_table";
 import LootTableEntryRow from "./loot_table_entry_table";
 import NpcRow from "./npc_table";
+import NpcThreatRow from "./npc_threat_table";
 import ObjectDefinitionRow from "./object_definition_table";
 import ProfileRow from "./profile_table";
 import ProgressionConfigRow from "./progression_config_table";
+import QuestChoiceRow from "./quest_choice_table";
 import QuestDefinitionRow from "./quest_definition_table";
 import QuestItemRewardRow from "./quest_item_reward_table";
 import QuestObjectiveRow from "./quest_objective_table";
+import QuestRuleRow from "./quest_rule_table";
 import RegionRow from "./region_table";
 import RegionChatRow from "./region_chat_table";
 import RoomRow from "./room_table";
 import RoomMessageRow from "./room_message_table";
+import ScheduledCastRow from "./scheduled_cast_table";
+import ScheduledEffectTickRow from "./scheduled_effect_tick_table";
 import SpawnPointRow from "./spawn_point_table";
 import StatDefinitionRow from "./stat_definition_table";
+import VendorDefinitionRow from "./vendor_definition_table";
+import VendorStockRow from "./vendor_stock_table";
+import WorldCombatConfigRow from "./world_combat_config_table";
 import WorldLifecycleConfigRow from "./world_lifecycle_config_table";
 import WorldObjectRow from "./world_object_table";
 
@@ -95,6 +118,17 @@ const tablesSchema = __schema({
       { name: 'ability_definition_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, AbilityDefinitionRow),
+  ability_effect_definition: __table({
+    name: 'ability_effect_definition',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'ability_effect_definition_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, AbilityEffectDefinitionRow),
   actor_ability: __table({
     name: 'actor_ability',
     indexes: [
@@ -106,6 +140,17 @@ const tablesSchema = __schema({
       { name: 'actor_ability_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ActorAbilityRow),
+  actor_character_option: __table({
+    name: 'actor_character_option',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_character_option_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ActorCharacterOptionRow),
   actor_cooldown: __table({
     name: 'actor_cooldown',
     indexes: [
@@ -128,6 +173,17 @@ const tablesSchema = __schema({
       { name: 'actor_crime_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ActorCrimeRow),
+  actor_currency: __table({
+    name: 'actor_currency',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_currency_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ActorCurrencyRow),
   actor_death_record: __table({
     name: 'actor_death_record',
     indexes: [
@@ -183,6 +239,17 @@ const tablesSchema = __schema({
       { name: 'actor_quest_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ActorQuestRow),
+  actor_quest_choice: __table({
+    name: 'actor_quest_choice',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_quest_choice_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ActorQuestChoiceRow),
   actor_quest_progress: __table({
     name: 'actor_quest_progress',
     indexes: [
@@ -205,6 +272,17 @@ const tablesSchema = __schema({
       { name: 'actor_stat_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ActorStatRow),
+  actor_status_effect: __table({
+    name: 'actor_status_effect',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_status_effect_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ActorStatusEffectRow),
   actor_wallet: __table({
     name: 'actor_wallet',
     indexes: [
@@ -216,6 +294,28 @@ const tablesSchema = __schema({
       { name: 'actor_wallet_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ActorWalletRow),
+  admin_role_assignment: __table({
+    name: 'admin_role_assignment',
+    indexes: [
+      { name: 'profile_id', algorithm: 'btree', columns: [
+        'profileId',
+      ] },
+    ],
+    constraints: [
+      { name: 'admin_role_assignment_profile_id_key', constraint: 'unique', columns: ['profileId'] },
+    ],
+  }, AdminRoleAssignmentRow),
+  admin_role_definition: __table({
+    name: 'admin_role_definition',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'admin_role_definition_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, AdminRoleDefinitionRow),
   character: __table({
     name: 'character',
     indexes: [
@@ -230,6 +330,28 @@ const tablesSchema = __schema({
       { name: 'character_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, CharacterRow),
+  character_option_definition: __table({
+    name: 'character_option_definition',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'character_option_definition_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, CharacterOptionDefinitionRow),
+  character_option_grant: __table({
+    name: 'character_option_grant',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'character_option_grant_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, CharacterOptionGrantRow),
   command: __table({
     name: 'command',
     indexes: [
@@ -244,6 +366,39 @@ const tablesSchema = __schema({
       { name: 'command_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, CommandRow),
+  crafting_ingredient: __table({
+    name: 'crafting_ingredient',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'crafting_ingredient_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, CraftingIngredientRow),
+  crafting_recipe: __table({
+    name: 'crafting_recipe',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'crafting_recipe_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, CraftingRecipeRow),
+  currency_definition: __table({
+    name: 'currency_definition',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'currency_definition_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, CurrencyDefinitionRow),
   equipment_slot_definition: __table({
     name: 'equipment_slot_definition',
     indexes: [
@@ -299,6 +454,17 @@ const tablesSchema = __schema({
       { name: 'npc_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, NpcRow),
+  npc_threat: __table({
+    name: 'npc_threat',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'npc_threat_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, NpcThreatRow),
   object_definition: __table({
     name: 'object_definition',
     indexes: [
@@ -335,6 +501,17 @@ const tablesSchema = __schema({
       { name: 'progression_config_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ProgressionConfigRow),
+  quest_choice: __table({
+    name: 'quest_choice',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'quest_choice_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, QuestChoiceRow),
   quest_definition: __table({
     name: 'quest_definition',
     indexes: [
@@ -368,6 +545,17 @@ const tablesSchema = __schema({
       { name: 'quest_objective_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, QuestObjectiveRow),
+  quest_rule: __table({
+    name: 'quest_rule',
+    indexes: [
+      { name: 'quest_id', algorithm: 'btree', columns: [
+        'questId',
+      ] },
+    ],
+    constraints: [
+      { name: 'quest_rule_quest_id_key', constraint: 'unique', columns: ['questId'] },
+    ],
+  }, QuestRuleRow),
   region: __table({
     name: 'region',
     indexes: [
@@ -412,6 +600,28 @@ const tablesSchema = __schema({
       { name: 'room_message_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, RoomMessageRow),
+  scheduled_cast: __table({
+    name: 'scheduled_cast',
+    indexes: [
+      { name: 'scheduled_id', algorithm: 'btree', columns: [
+        'scheduledId',
+      ] },
+    ],
+    constraints: [
+      { name: 'scheduled_cast_scheduled_id_key', constraint: 'unique', columns: ['scheduledId'] },
+    ],
+  }, ScheduledCastRow),
+  scheduled_effect_tick: __table({
+    name: 'scheduled_effect_tick',
+    indexes: [
+      { name: 'scheduled_id', algorithm: 'btree', columns: [
+        'scheduledId',
+      ] },
+    ],
+    constraints: [
+      { name: 'scheduled_effect_tick_scheduled_id_key', constraint: 'unique', columns: ['scheduledId'] },
+    ],
+  }, ScheduledEffectTickRow),
   spawn_point: __table({
     name: 'spawn_point',
     indexes: [
@@ -434,6 +644,39 @@ const tablesSchema = __schema({
       { name: 'stat_definition_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, StatDefinitionRow),
+  vendor_definition: __table({
+    name: 'vendor_definition',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'vendor_definition_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, VendorDefinitionRow),
+  vendor_stock: __table({
+    name: 'vendor_stock',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'vendor_stock_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, VendorStockRow),
+  world_combat_config: __table({
+    name: 'world_combat_config',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'world_combat_config_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, WorldCombatConfigRow),
   world_lifecycle_config: __table({
     name: 'world_lifecycle_config',
     indexes: [
@@ -466,6 +709,9 @@ const reducersSchema = __reducers(
   __reducerSchema("delete_rows", DeleteRowsReducer),
   __reducerSchema("insert_rows", InsertRowsReducer),
   __reducerSchema("install_rpg_starter_kit", InstallRpgStarterKitReducer),
+  __reducerSchema("resolve_scheduled_cast", ResolveScheduledCastReducer),
+  __reducerSchema("resolve_scheduled_effect_tick", ResolveScheduledEffectTickReducer),
+  __reducerSchema("select_character_option", SelectCharacterOptionReducer),
   __reducerSchema("submit_command", SubmitCommandReducer),
   __reducerSchema("update_rows", UpdateRowsReducer),
 );

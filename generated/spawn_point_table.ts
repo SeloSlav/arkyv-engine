@@ -21,4 +21,8 @@ export default __t.row({
   priority: __t.i32(),
   createdAt: __t.timestamp().name("created_at"),
   updatedAt: __t.timestamp().name("updated_at"),
+  requiredOptionId: __t.option(__t.string()).name("required_option_id"),
+  requiredFactionId: __t.option(__t.string()).name("required_faction_id"),
+  requiredReputation: __t.i32().name("required_reputation"),
+  deathRegionId: __t.option(__t.string()).name("death_region_id"),
 });

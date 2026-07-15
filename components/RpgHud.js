@@ -58,6 +58,8 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
     const [abilities, setAbilities] = useState([]);
     const [abilityGrants, setAbilityGrants] = useState([]);
     const [cooldowns, setCooldowns] = useState([]);
+    const [scheduledCasts, setScheduledCasts] = useState([]);
+    const [statusEffects, setStatusEffects] = useState([]);
     const [equipmentSlots, setEquipmentSlots] = useState([]);
     const [factions, setFactions] = useState([]);
     const [reputations, setReputations] = useState([]);
@@ -65,6 +67,8 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
     const [questObjectives, setQuestObjectives] = useState([]);
     const [actorQuests, setActorQuests] = useState([]);
     const [questProgress, setQuestProgress] = useState([]);
+    const [questChoices, setQuestChoices] = useState([]);
+    const [actorQuestChoices, setActorQuestChoices] = useState([]);
     const [wallet, setWallet] = useState({ gold: 0 });
     const [lifeState, setLifeState] = useState(null);
     const [lifecycleConfig, setLifecycleConfig] = useState(null);
@@ -76,10 +80,12 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
             setObjects([]);
             setStats([]);
             setNearbyNpcs([]);
+            setScheduledCasts([]);
+            setStatusEffects([]);
             setLifeState(null);
             return;
         }
-        const [definitionsResult, objectsResult, statDefinitionsResult, actorStatsResult, roomsResult, regionsResult, npcsResult, progressionResult, progressionConfigResult, abilitiesResult, grantsResult, cooldownsResult, slotsResult, factionsResult, reputationsResult, questsResult, objectivesResult, actorQuestsResult, questProgressResult, walletResult, lifeStateResult, lifecycleConfigResult] = await Promise.all([
+        const [definitionsResult, objectsResult, statDefinitionsResult, actorStatsResult, roomsResult, regionsResult, npcsResult, progressionResult, progressionConfigResult, abilitiesResult, grantsResult, cooldownsResult, scheduledCastsResult, slotsResult, factionsResult, reputationsResult, questsResult, objectivesResult, actorQuestsResult, questProgressResult, walletResult, lifeStateResult, lifecycleConfigResult, statusEffectsResult, questChoicesResult, actorQuestChoicesResult] = await Promise.all([
             spacetime.from('object_definitions').select('*'),
             spacetime.from('world_objects').select('*').eq('location_id', actor.id),
             spacetime.from('stat_definitions').select('*'),
@@ -92,6 +98,7 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
             spacetime.from('ability_definitions').select('*').order('required_level'),
             spacetime.from('actor_abilities').select('*').eq('actor_id', actor.id),
             spacetime.from('actor_cooldowns').select('*').eq('actor_id', actor.id),
+            spacetime.from('scheduled_casts').select('*').eq('actor_id', actor.id),
             spacetime.from('equipment_slot_definitions').select('*').order('sort_order'),
             spacetime.from('faction_definitions').select('*').order('name'),
             spacetime.from('actor_faction_reputations').select('*').eq('actor_id', actor.id),
@@ -102,8 +109,11 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
             spacetime.from('actor_wallets').select('*').eq('actor_id', actor.id),
             spacetime.from('actor_life_states').select('*').eq('actor_id', actor.id),
             spacetime.from('world_lifecycle_configs').select('*'),
+            spacetime.from('actor_status_effects').select('*').eq('actor_id', actor.id),
+            spacetime.from('quest_choices').select('*').order('sort_order'),
+            spacetime.from('actor_quest_choices').select('*').eq('actor_id', actor.id),
         ]);
-        if ([definitionsResult, objectsResult, statDefinitionsResult, actorStatsResult, roomsResult, regionsResult, npcsResult, progressionResult, progressionConfigResult, abilitiesResult, grantsResult, cooldownsResult, slotsResult, factionsResult, reputationsResult, questsResult, objectivesResult, actorQuestsResult, questProgressResult, walletResult, lifeStateResult, lifecycleConfigResult].some((result) => result.error)) return;
+        if ([definitionsResult, objectsResult, statDefinitionsResult, actorStatsResult, roomsResult, regionsResult, npcsResult, progressionResult, progressionConfigResult, abilitiesResult, grantsResult, cooldownsResult, scheduledCastsResult, slotsResult, factionsResult, reputationsResult, questsResult, objectivesResult, actorQuestsResult, questProgressResult, walletResult, lifeStateResult, lifecycleConfigResult, statusEffectsResult, questChoicesResult, actorQuestChoicesResult].some((result) => result.error)) return;
         const nextDefinitions = new Map((definitionsResult.data || []).map((definition) => [definition.id, definition]));
         const overrides = new Map((actorStatsResult.data || []).map((row) => [row.stat_definition_id, row]));
         const equipped = (objectsResult.data || []).filter((object) => object.location_kind === 'equipped');
@@ -120,7 +130,8 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
             const elapsedSeconds = Math.max(0, Math.floor((Date.now() - updatedAt) / 1000));
             const rawValue = Math.min(rawBase, (row?.current_value ?? definition.default_value) + elapsedSeconds * Math.max(0, Number(definition.regeneration_per_second) || 0));
             const bonus = equipmentBonus(definition.id);
-            return { ...definition, value: rawValue + bonus, rawValue, baseValue: rawBase + bonus, bonus, investedPoints: Number(row?.invested_points) || 0 };
+            const statusBonus = (statusEffectsResult.data || []).filter((status) => status.stat_id === definition.id && Number(status.expires_at_micros) > Date.now() * 1000).reduce((total, status) => total + (Number(status.modifier_value) || 0) * Math.max(1, Number(status.stacks) || 1), 0);
+            return { ...definition, value: rawValue + bonus + statusBonus, rawValue, baseValue: rawBase + bonus, bonus, statusBonus, investedPoints: Number(row?.invested_points) || 0 };
         }));
         const room = (roomsResult.data || []).find((candidate) => candidate.id === actor.current_room);
         const region = (regionsResult.data || []).find((candidate) => candidate.name === room?.region_name);
@@ -131,6 +142,7 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
         setAbilities(abilitiesResult.data || []);
         setAbilityGrants(grantsResult.data || []);
         setCooldowns(cooldownsResult.data || []);
+        setScheduledCasts(scheduledCastsResult.data || []);
         setEquipmentSlots(slotsResult.data || []);
         setFactions(factionsResult.data || []);
         setReputations(reputationsResult.data || []);
@@ -141,6 +153,9 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
         setWallet((walletResult.data || [])[0] || { gold: 0 });
         setLifeState((lifeStateResult.data || [])[0] || null);
         setLifecycleConfig((lifecycleConfigResult.data || [])[0] || null);
+        setStatusEffects((statusEffectsResult.data || []).filter((status) => Number(status.expires_at_micros) > Date.now() * 1000));
+        setQuestChoices(questChoicesResult.data || []);
+        setActorQuestChoices(actorQuestChoicesResult.data || []);
     }, [actor?.current_room, actor?.id, spacetime]);
 
     useEffect(() => {
@@ -161,10 +176,13 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
     const slotCapacity = new Map(equipmentSlots.map((slot) => [slot.id, Number(slot.capacity) || 1]));
     const grantedAbilityIds = new Set(abilityGrants.map((grant) => grant.ability_id));
     const statById = new Map(stats.map((stat) => [stat.id, stat]));
+    const activeCast = scheduledCasts[0] || null;
+    const activeCastAbility = activeCast ? abilities.find((ability) => ability.id === activeCast.ability_id) : null;
     const cooldownRemaining = (abilityId) => {
         const row = cooldowns.find((cooldown) => cooldown.action_id === `ability:${abilityId}`);
         return Math.max(0, Math.ceil(((Number(row?.ready_at_micros) || 0) - Date.now() * 1000) / 1000));
     };
+    const globalCooldownRemaining = Math.max(0, Math.ceil(((Number(cooldowns.find((cooldown) => cooldown.action_id === 'global-cooldown')?.ready_at_micros) || 0) - Date.now() * 1000) / 1000));
     const playerTargets = zone.pvpEnabled ? (environmentData.characters || []).map((name) => ({ name: cleanTargetName(name), kind: 'Player' })) : [];
     const npcTargets = nearbyNpcs
         .filter((npc) => npcDisposition(npc) !== 'friendly')
@@ -179,11 +197,16 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
         if (objective.description) return objective.description;
         if (objective.objective_type === 'explore_room') return `Explore ${objective.target_id}`;
         if (objective.objective_type === 'acquire_item') return `Acquire ${definitions.get(objective.target_id)?.name || objective.target_id}`;
+        if (objective.objective_type === 'deliver_item') return `Deliver ${definitions.get(objective.target_id)?.name || objective.target_id}`;
+        if (objective.objective_type === 'interact_object') return `Interact with ${definitions.get(objective.target_id)?.name || objective.target_id}`;
+        if (objective.objective_type === 'pay_gold') return `Pay ${objective.required_count} gold`;
+        if (objective.objective_type === 'survive') return `Survive ${objective.required_count} seconds`;
+        if (objective.objective_type === 'choice') return 'Make a choice';
         if (objective.objective_type === 'kill_faction') return `Defeat members of ${factionsById.get(objective.target_id)?.name || objective.target_id}`;
         const npc = nearbyNpcs.find((candidate) => candidate.id === objective.target_id);
         return `${objective.objective_type === 'talk_npc' ? 'Speak with' : 'Defeat'} ${npc?.name || objective.target_id}`;
     };
-    const activeQuestCards = actorQuests.filter((row) => row.status !== 'completed').map((row) => ({ row, quest: quests.find((quest) => quest.id === row.quest_id) })).filter((value) => value.quest);
+    const activeQuestCards = actorQuests.filter((row) => ['active', 'ready'].includes(row.status)).map((row) => ({ row, quest: quests.find((quest) => quest.id === row.quest_id) })).filter((value) => value.quest);
     const availableQuests = quests.filter((quest) => {
         if (!npcsById.has(quest.quest_giver_npc_id) || level < Number(quest.required_level || 1)) return false;
         if (quest.required_faction_id) {
@@ -192,7 +215,7 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
             if (standing < Number(quest.required_reputation || 0)) return false;
         }
         const state = actorQuestByQuest.get(quest.id);
-        return !state || (state.status === 'completed' && quest.repeatable);
+        return !state || state.status === 'failed' || (state.status === 'completed' && quest.repeatable);
     });
     const respawnSeconds = Math.max(0, Math.ceil(((Number(lifeState?.respawn_available_at_micros) || 0) - Date.now() * 1000) / 1_000_000));
     const protectionSeconds = Math.max(0, Math.ceil(((Number(lifeState?.protected_until_micros) || 0) - Date.now() * 1000) / 1_000_000));
@@ -319,6 +342,7 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
                                     </div>
                                     <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500" style={{ width: `${progress}%` }} /></div>
                                     {stat.bonus !== 0 && <p className="mt-1.5 text-[0.62rem] text-emerald-300">Equipment {stat.bonus > 0 ? '+' : ''}{stat.bonus}</p>}
+                                    {stat.statusBonus !== 0 && <p className={`mt-1 text-[0.62rem] ${stat.statusBonus > 0 ? 'text-fuchsia-300' : 'text-rose-300'}`}>Effects {stat.statusBonus > 0 ? '+' : ''}{stat.statusBonus}</p>}
                                     {stat.player_allocatable !== false && (
                                         <div className="mt-2 flex items-center justify-between gap-2 border-t border-slate-800/80 pt-2">
                                             <span className="text-[0.6rem] text-slate-500">+{pointsPerRank} for {pointCost} point{pointCost === 1 ? '' : 's'} · {stat.investedPoints} invested</span>
@@ -329,18 +353,20 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
                             );
                         })}
                     </div>
+                    {statusEffects.length > 0 && <div className="rounded-xl border border-fuchsia-400/20 bg-fuchsia-500/[0.04] p-3"><h3 className="text-[0.65rem] font-semibold uppercase tracking-[0.18em] text-fuchsia-200">Active effects</h3><div className="mt-2 flex flex-wrap gap-2">{statusEffects.map((status) => <span key={status.id} className={`rounded-full border px-2.5 py-1 text-[0.62rem] ${['debuff', 'stun', 'damage_over_time'].includes(status.kind) ? 'border-rose-400/30 text-rose-200' : 'border-fuchsia-400/30 text-fuchsia-100'}`}>{status.name || status.kind.replaceAll('_', ' ')}{Number(status.stacks) > 1 ? ` ×${status.stacks}` : ''} · {Math.max(0, Math.ceil((Number(status.expires_at_micros) - Date.now() * 1000) / 1_000_000))}s</span>)}</div></div>}
                     </div>
                 )}
 
                 {actor?.id && !isDead && tab === 'abilities' && (
                     <div className="space-y-3">
                         <div className="rounded-xl border border-fuchsia-400/15 bg-fuchsia-400/[0.04] p-3"><p className="text-xs font-semibold text-slate-100">Abilities & magic</p><p className="mt-1 text-[0.68rem] leading-5 text-slate-500">Costs, cast pacing, scaling, targets, and damage are authored by the world administrator and enforced by the server.</p></div>
+                        {activeCast && <div className="rounded-xl border border-fuchsia-300/35 bg-fuchsia-500/10 p-3"><p className="text-xs font-semibold text-fuchsia-100">Casting {activeCastAbility?.icon} {activeCastAbility?.name || activeCast.ability_id}</p><p className="mt-1 text-[0.65rem] text-fuchsia-200/70">Moving or taking damage interrupts this cast. Its resource cost and cooldown apply only when the cast resolves.</p></div>}
                         {abilities.filter((ability) => ability.enabled).map((ability) => {
                             const learned = (ability.auto_learn && level >= Number(ability.required_level || 1)) || grantedAbilityIds.has(ability.id);
                             const resource = ability.resource_stat_id ? statById.get(ability.resource_stat_id) : null;
-                            const remaining = cooldownRemaining(ability.id);
+                            const remaining = Math.max(cooldownRemaining(ability.id), globalCooldownRemaining);
                             const affordable = !resource || Number(resource.rawValue) >= Number(ability.resource_cost || 0);
-                            const canUse = learned && remaining === 0 && affordable;
+                            const canUse = learned && remaining === 0 && affordable && !activeCast;
                             const usableTargets = ability.target_type === 'enemy' ? targets : ability.target_type === 'ally' ? [{ name: actor.name || 'self', kind: 'Self' }, ...playerTargets] : [{ name: actor.name || 'self', kind: 'Self' }];
                             return <article key={ability.id} className={`rounded-xl border p-3 ${learned ? 'border-slate-800 bg-black/20' : 'border-slate-800/60 bg-slate-950/20 opacity-65'}`}><div className="flex items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-fuchsia-400/20 bg-fuchsia-500/10 text-xl">{ability.icon || '✦'}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-baseline justify-between gap-2"><h3 className="text-sm font-semibold text-slate-100">{ability.name}</h3><span className="text-[0.62rem] uppercase tracking-wider text-slate-500">{ability.school} · {ability.effect_type}</span></div><p className="mt-1 text-[0.68rem] leading-5 text-slate-500">{ability.description}</p><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[0.62rem] text-slate-400"><span>{ability.power_min}–{ability.power_max} power</span><span>{ability.resource_stat_id ? `${ability.resource_cost} ${resource?.name || ability.resource_stat_id}` : 'Free'}</span><span>{Math.max(ability.cooldown_ms || 0, ability.cast_time_ms || 0) / 1000}s pace</span>{ability.scaling_percent > 0 && <span>+{ability.scaling_percent}% {statById.get(ability.scales_with_stat)?.name || ability.scales_with_stat}</span>}</div>{!learned ? <p className="mt-2 text-xs text-amber-300">{ability.auto_learn ? `Unlocks at level ${ability.required_level}` : 'Requires an explicit grant'}</p> : remaining > 0 ? <p className="mt-2 text-xs text-fuchsia-300">Ready in {(remaining / 1000).toFixed(1)}s</p> : !affordable ? <p className="mt-2 text-xs text-rose-300">Not enough {resource?.name || 'resource'}</p> : <div className="mt-2 flex flex-wrap gap-1.5">{usableTargets.length === 0 && <span className="text-xs text-slate-600">No valid targets nearby.</span>}{usableTargets.slice(0, 5).map((target) => <button key={`${ability.id}-${target.kind}-${target.name}`} type="button" disabled={!canUse} onClick={() => run(ability.target_type === 'self' ? `cast ${ability.name}` : `cast ${ability.name} at ${target.name}`)} className="arkyv-chip arkyv-chip--accent">{ability.target_type === 'self' ? 'Cast' : `${ability.effect_type === 'damage' ? 'Use on' : 'Cast on'} ${target.name}`}</button>)}</div>}</div></div></article>;
                         })}
@@ -357,7 +383,9 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
                             {activeQuestCards.map(({ row, quest }) => {
                                 const objectives = questObjectives.filter((objective) => objective.quest_id === quest.id);
                                 const turnInNpc = nearbyNpcs.find((npc) => npc.id === quest.turn_in_npc_id);
-                                return <article key={row.id} className={`rounded-xl border p-3 ${row.status === 'ready' ? 'border-emerald-400/30 bg-emerald-500/[0.05]' : 'border-slate-800 bg-black/20'}`}><div className="flex items-start justify-between gap-3"><div><h4 className="text-sm font-semibold text-slate-100">{quest.title}</h4><p className="mt-1 text-[0.68rem] leading-5 text-slate-500">{quest.description}</p></div><span className={`text-[0.6rem] uppercase tracking-wider ${row.status === 'ready' ? 'text-emerald-300' : 'text-amber-300'}`}>{row.status}</span></div><div className="mt-3 space-y-1.5">{objectives.map((objective) => { const progress = Math.min(Number(objective.required_count) || 1, progressByObjective.get(objective.id) || 0); const done = progress >= Number(objective.required_count || 1); return <div key={objective.id} className="flex items-center justify-between gap-3 text-xs"><span className={done ? 'text-emerald-300' : 'text-slate-400'}>{done ? '✓' : '○'} {objectiveLabel(objective)}</span><span className="text-slate-600">{progress}/{objective.required_count}</span></div>; })}</div>{turnInNpc && <div className="mt-3 flex justify-end"><button type="button" onClick={() => run(row.status === 'ready' ? `turn in ${quest.title}` : `quest ${turnInNpc.alias || turnInNpc.name}`)} className="arkyv-chip arkyv-chip--accent">{row.status === 'ready' ? `Turn in to ${turnInNpc.name}` : `Ask ${turnInNpc.name}`}</button></div>}</article>;
+                                const choices = questChoices.filter((choice) => choice.quest_id === quest.id);
+                                const hasChosen = actorQuestChoices.some((choice) => choice.quest_id === quest.id);
+                                return <article key={row.id} className={`rounded-xl border p-3 ${row.status === 'ready' ? 'border-emerald-400/30 bg-emerald-500/[0.05]' : 'border-slate-800 bg-black/20'}`}><div className="flex items-start justify-between gap-3"><div><h4 className="text-sm font-semibold text-slate-100">{quest.title}</h4><p className="mt-1 text-[0.68rem] leading-5 text-slate-500">{quest.description}</p></div><span className={`text-[0.6rem] uppercase tracking-wider ${row.status === 'ready' ? 'text-emerald-300' : 'text-amber-300'}`}>{row.status}</span></div><div className="mt-3 space-y-1.5">{objectives.map((objective) => { const progress = Math.min(Number(objective.required_count) || 1, progressByObjective.get(objective.id) || 0); const done = progress >= Number(objective.required_count || 1); return <div key={objective.id} className="flex items-center justify-between gap-3 text-xs"><span className={done ? 'text-emerald-300' : 'text-slate-400'}>{done ? '✓' : '○'} {objectiveLabel(objective)}</span><span className="text-slate-600">{progress}/{objective.required_count}</span></div>; })}</div>{choices.length > 0 && !hasChosen && <div className="mt-3 rounded-lg border border-fuchsia-400/20 bg-fuchsia-500/[0.04] p-2.5"><p className="mb-2 text-[0.62rem] uppercase tracking-wider text-fuchsia-200">Choose your path</p><div className="flex flex-wrap gap-1.5">{choices.map((choice) => <button key={choice.id} type="button" onClick={() => run(`choose ${choice.label}`)} title={choice.description} className="arkyv-chip arkyv-chip--accent">{choice.label}</button>)}</div></div>}{turnInNpc && <div className="mt-3 flex justify-end"><button type="button" onClick={() => run(row.status === 'ready' ? `turn in ${quest.title}` : `quest ${turnInNpc.alias || turnInNpc.name}`)} className="arkyv-chip arkyv-chip--accent">{row.status === 'ready' ? `Turn in to ${turnInNpc.name}` : `Ask ${turnInNpc.name}`}</button></div>}</article>;
                             })}
                         </div>
                         <div className="space-y-2"><h3 className="text-[0.65rem] font-semibold uppercase tracking-[0.18em] text-slate-400">Available here</h3>{availableQuests.length === 0 && <p className="rounded-lg border border-dashed border-slate-800 p-4 text-center text-xs text-slate-600">No new quests are offered in this room.</p>}{availableQuests.map((quest) => { const giver = npcsById.get(quest.quest_giver_npc_id); return <div key={quest.id} className="rounded-xl border border-slate-800 bg-black/20 p-3"><h4 className="text-sm font-semibold text-slate-100">{quest.title}</h4><p className="mt-1 text-[0.68rem] leading-5 text-slate-500">{quest.description}</p><div className="mt-2 flex items-center justify-between gap-3 text-[0.62rem] text-slate-500"><span>{quest.xp_reward} XP · {quest.gold_reward} gold</span><button type="button" onClick={() => run(`accept ${quest.title}`)} className="arkyv-chip arkyv-chip--accent">Accept from {giver?.name || 'NPC'}</button></div></div>; })}</div>

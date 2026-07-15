@@ -15,7 +15,8 @@ Available commands:
 • whoami                 - Display the active saved world
 • help or ?              - Show this help message
 • characters             - List your characters
-• create &lt;name&gt;          - Create a new character
+• create &lt;name&gt; [| option…] - Create a character with optional race/class/background ids
+• origins                - List authored race, class, and background options
 • enter &lt;name&gt;        - Enter Arkyv as a character
 • disengage             - Leave your active character (stay logged in)
 • set handle &lt;name&gt;      - Set your display name (profile mode only)
@@ -1376,17 +1377,27 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
         return null;
     }, [appendLine, appendLines, getRegistry, loadRecentMessages, loadRoomDetails, subscribeToRoom, spacetime, unsubscribeFromRoom, onRoomChange, onRoomMessage, setProfile, roomCache, session]);
 
-    const createCharacter = useCallback(async (name) => {
+    const createCharacter = useCallback(async (descriptor) => {
         if (!session) {
             appendLine(createErrorLine('Login required.'));
             return;
         }
 
-        const trimmedName = name.trim();
+        const [namePart, ...optionParts] = descriptor.split('|').map((value) => value.trim()).filter(Boolean);
+        const trimmedName = (namePart || '').trim();
         if (trimmedName.length < 3) {
             appendLine(createErrorLine('Character name must be at least 3 characters.'));
             return;
         }
+
+        const { data: authoredOptions, error: optionsError } = await spacetime.from('character_option_definitions').select('*').eq('active', true).order('sort_order');
+        if (optionsError) { appendLine(createErrorLine(`Failed to load character options: ${formatError(optionsError)}`)); return; }
+        const selections = optionParts.map((part) => {
+            const query = part.includes('=') ? part.split('=').slice(1).join('=').trim() : part;
+            return (authoredOptions || []).find((option) => option.id.toLowerCase() === query.toLowerCase() || option.name.toLowerCase() === query.toLowerCase());
+        });
+        if (selections.some((selection) => !selection)) { appendLine(createErrorLine('One or more race/class/background options were not found. Use their stable ids.')); return; }
+        if (new Set(selections.map((selection) => selection.option_kind)).size !== selections.length) { appendLine(createErrorLine('Choose at most one race, one class, and one background.')); return; }
 
         // Default starting room for new characters
         const STARTING_ROOM_ID = 'a1b2c3d4-5678-90ab-cdef-123456789abc';
@@ -1412,6 +1423,11 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
             return;
         }
 
+        for (const selection of selections) {
+            const { error: selectionError } = await spacetime.selectCharacterOption(data.id, selection.id);
+            if (selectionError) { appendLine(createErrorLine(`Character created, but ${selection.name} could not be applied: ${formatError(selectionError)}`)); }
+        }
+
         // Add new character to state immediately for autocomplete
         setCharacters(prev => [...prev, {
             id: data.id,
@@ -1424,7 +1440,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
 
         appendLines([
             createSystemLine(`Character created: ${data.name}`),
-            createOracleLine(`Enter the Arkyv with \`enter ${data.name}\`.`)
+            createOracleLine(`${selections.length ? `Origins: ${selections.map((selection) => `${selection.icon || '◇'} ${selection.name}`).join(', ')}. ` : ''}Enter the Arkyv with \`enter ${data.name}\`.`)
         ]);
 
         await refreshCharacters();

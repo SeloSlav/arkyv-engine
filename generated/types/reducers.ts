@@ -13,6 +13,9 @@ import DeleteCurrentAccountReducer from "../delete_current_account_reducer";
 import DeleteRowsReducer from "../delete_rows_reducer";
 import InsertRowsReducer from "../insert_rows_reducer";
 import InstallRpgStarterKitReducer from "../install_rpg_starter_kit_reducer";
+import ResolveScheduledCastReducer from "../resolve_scheduled_cast_reducer";
+import ResolveScheduledEffectTickReducer from "../resolve_scheduled_effect_tick_reducer";
+import SelectCharacterOptionReducer from "../select_character_option_reducer";
 import SubmitCommandReducer from "../submit_command_reducer";
 import UpdateRowsReducer from "../update_rows_reducer";
 
@@ -23,6 +26,9 @@ export type DeleteCurrentAccountParams = __Infer<typeof DeleteCurrentAccountRedu
 export type DeleteRowsParams = __Infer<typeof DeleteRowsReducer>;
 export type InsertRowsParams = __Infer<typeof InsertRowsReducer>;
 export type InstallRpgStarterKitParams = __Infer<typeof InstallRpgStarterKitReducer>;
+export type ResolveScheduledCastParams = __Infer<typeof ResolveScheduledCastReducer>;
+export type ResolveScheduledEffectTickParams = __Infer<typeof ResolveScheduledEffectTickReducer>;
+export type SelectCharacterOptionParams = __Infer<typeof SelectCharacterOptionReducer>;
 export type SubmitCommandParams = __Infer<typeof SubmitCommandReducer>;
 export type UpdateRowsParams = __Infer<typeof UpdateRowsReducer>;
 

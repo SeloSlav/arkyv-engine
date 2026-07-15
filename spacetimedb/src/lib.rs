@@ -278,10 +278,10 @@ pub struct ActorStat {
     pub stat_definition_id: String,
     pub base_value: i32,
     pub current_value: i32,
+    pub updated_at: Timestamp,
     /// Total progression points deliberately invested by the player.
     #[default(0)]
     pub invested_points: u32,
-    pub updated_at: Timestamp,
 }
 
 /// An independently rolled drop authored for an enemy NPC. Chests use regular
@@ -376,6 +376,68 @@ pub struct AbilityDefinition {
     pub updated_at: Timestamp,
 }
 
+/// Ordered, composable effects let one ability damage, heal, apply a status,
+/// interrupt, move, revive, or summon without embedding behavior in JSON.
+#[spacetimedb::table(accessor = ability_effect_definition, public)]
+#[derive(Clone)]
+pub struct AbilityEffectDefinition {
+    #[primary_key]
+    pub id: String,
+    pub ability_id: String,
+    pub effect_kind: String,
+    pub target_scope: String,
+    pub stat_id: Option<String>,
+    pub power_min: i32,
+    pub power_max: i32,
+    pub scales_with_stat: Option<String>,
+    pub scaling_percent: i32,
+    pub mitigation_type: String,
+    pub chance_percent: u32,
+    pub duration_ms: u32,
+    pub tick_interval_ms: u32,
+    pub modifier_value: i32,
+    pub max_stacks: u32,
+    pub status_name: String,
+    pub destination_room_id: Option<String>,
+    pub summon_npc_id: Option<String>,
+    pub sort_order: u32,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = actor_status_effect, public)]
+#[derive(Clone)]
+pub struct ActorStatusEffect {
+    #[primary_key]
+    pub id: String,
+    pub actor_id: String,
+    pub source_actor_id: String,
+    pub ability_id: String,
+    pub effect_id: String,
+    pub name: String,
+    pub kind: String,
+    pub stat_id: Option<String>,
+    pub modifier_value: i32,
+    pub stacks: u32,
+    pub expires_at_micros: i64,
+    pub updated_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = scheduled_effect_tick, scheduled(resolve_scheduled_effect_tick))]
+#[derive(Clone)]
+pub struct ScheduledEffectTick {
+    #[primary_key]
+    #[auto_inc]
+    pub scheduled_id: u64,
+    pub scheduled_at: ScheduleAt,
+    pub source_actor_id: String,
+    pub source_actor_name: String,
+    pub target_actor_id: String,
+    pub ability_id: String,
+    pub effect_id: String,
+    pub remaining_ticks: u32,
+}
+
 /// Explicit grants supplement abilities learned automatically by level.
 #[spacetimedb::table(accessor = actor_ability, public)]
 #[derive(Clone)]
@@ -414,6 +476,43 @@ pub struct ScheduledCast {
     pub room_id: String,
     pub ability_id: String,
     pub target_query: Option<String>,
+}
+
+/// World-wide combat probabilities and scaling. Stat definitions whose roles
+/// are accuracy, crit, dodge, parry, block, or resistance:<school> add to the
+/// corresponding authored baseline at runtime.
+#[spacetimedb::table(accessor = world_combat_config, public)]
+#[derive(Clone)]
+pub struct WorldCombatConfig {
+    #[primary_key]
+    pub id: String,
+    pub base_hit_chance_percent: u32,
+    pub base_crit_chance_percent: u32,
+    pub crit_damage_percent: u32,
+    pub base_dodge_chance_percent: u32,
+    pub base_parry_chance_percent: u32,
+    pub base_block_chance_percent: u32,
+    pub block_damage_reduction_percent: u32,
+    pub armor_effectiveness_percent: u32,
+    pub pvp_damage_percent: u32,
+    pub global_cooldown_ms: u32,
+    pub assist_xp_percent: u32,
+    pub threat_enabled: bool,
+    pub threat_decay_seconds: u32,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = npc_threat, public)]
+#[derive(Clone)]
+pub struct NpcThreat {
+    #[primary_key]
+    pub id: String,
+    pub npc_id: String,
+    pub actor_id: String,
+    pub threat: u32,
+    pub damage_contributed: u32,
+    pub updated_at_micros: i64,
 }
 
 /// An admin-authored political or social group. Reputation thresholds are
@@ -549,6 +648,206 @@ pub struct ActorWallet {
     pub updated_at: Timestamp,
 }
 
+/// Optional authored rules extend a quest with prerequisites, timers, failure,
+/// completion caps, and a follow-up without bloating the core quest row.
+#[spacetimedb::table(accessor = quest_rule, public)]
+#[derive(Clone)]
+pub struct QuestRule {
+    #[primary_key]
+    pub quest_id: String,
+    pub prerequisite_quest_id: Option<String>,
+    pub prerequisite_completions: u32,
+    pub time_limit_seconds: u32,
+    pub failure_on_death: bool,
+    pub next_quest_id: Option<String>,
+    pub maximum_completions: u32,
+    pub updated_at: Timestamp,
+}
+
+/// Player-facing branch presented by the `choose` command during a quest.
+#[spacetimedb::table(accessor = quest_choice, public)]
+#[derive(Clone)]
+pub struct QuestChoice {
+    #[primary_key]
+    pub id: String,
+    pub quest_id: String,
+    pub label: String,
+    pub description: String,
+    pub next_quest_id: Option<String>,
+    pub gold_reward: i32,
+    pub reputation_faction_id: Option<String>,
+    pub reputation_reward: i32,
+    pub sort_order: u32,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = actor_quest_choice, public)]
+#[derive(Clone)]
+pub struct ActorQuestChoice {
+    #[primary_key]
+    pub id: String,
+    pub actor_id: String,
+    pub quest_id: String,
+    pub choice_id: String,
+    pub chosen_at: Timestamp,
+}
+
+/// Reusable race, class, and background definitions for character creation.
+#[spacetimedb::table(accessor = character_option_definition, public)]
+#[derive(Clone)]
+pub struct CharacterOptionDefinition {
+    #[primary_key]
+    pub id: String,
+    pub option_kind: String,
+    pub name: String,
+    pub description: String,
+    pub icon: String,
+    pub starting_room_id: Option<String>,
+    pub starting_gold: i32,
+    pub active: bool,
+    pub sort_order: u32,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+/// A structured stat, item, or ability granted by a character option.
+#[spacetimedb::table(accessor = character_option_grant, public)]
+#[derive(Clone)]
+pub struct CharacterOptionGrant {
+    #[primary_key]
+    pub id: String,
+    pub option_id: String,
+    pub grant_kind: String,
+    pub reference_id: String,
+    pub amount: i32,
+    pub equipped_slot: Option<String>,
+    pub sort_order: u32,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = actor_character_option, public)]
+#[derive(Clone)]
+pub struct ActorCharacterOption {
+    #[primary_key]
+    pub id: String,
+    pub actor_id: String,
+    pub option_id: String,
+    pub option_kind: String,
+    pub selected_at: Timestamp,
+}
+
+/// Admin roles use explicit permission keys. Existing administrators without
+/// an assignment remain owners with full access for backwards compatibility.
+#[spacetimedb::table(accessor = admin_role_definition, public)]
+#[derive(Clone)]
+pub struct AdminRoleDefinition {
+    #[primary_key]
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub permissions: String,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = admin_role_assignment, public)]
+#[derive(Clone)]
+pub struct AdminRoleAssignment {
+    #[primary_key]
+    pub profile_id: String,
+    pub role_id: String,
+    pub assigned_at: Timestamp,
+}
+
+/// Multiple currencies, vendor inventories, recipes, and banked items form the
+/// authored economy layer. The legacy gold wallet remains the default coin.
+#[spacetimedb::table(accessor = currency_definition, public)]
+#[derive(Clone)]
+pub struct CurrencyDefinition {
+    #[primary_key]
+    pub id: String,
+    pub name: String,
+    pub icon: String,
+    pub maximum_balance: i64,
+    pub tradeable: bool,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = actor_currency, public)]
+#[derive(Clone)]
+pub struct ActorCurrency {
+    #[primary_key]
+    pub id: String,
+    pub actor_id: String,
+    pub currency_id: String,
+    pub balance: i64,
+    pub updated_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = vendor_definition, public)]
+#[derive(Clone)]
+pub struct VendorDefinition {
+    #[primary_key]
+    pub id: String,
+    pub npc_id: String,
+    pub name: String,
+    pub currency_id: String,
+    pub buys_from_players: bool,
+    pub sell_price_percent: u32,
+    pub required_faction_id: Option<String>,
+    pub required_reputation: i32,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = vendor_stock, public)]
+#[derive(Clone)]
+pub struct VendorStock {
+    #[primary_key]
+    pub id: String,
+    pub vendor_id: String,
+    pub definition_id: String,
+    pub price: i64,
+    pub stock: i32,
+    pub maximum_per_purchase: u32,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = crafting_recipe, public)]
+#[derive(Clone)]
+pub struct CraftingRecipe {
+    #[primary_key]
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub output_definition_id: String,
+    pub output_quantity: u32,
+    pub station_tag: Option<String>,
+    pub required_level: u32,
+    pub currency_id: Option<String>,
+    pub currency_cost: i64,
+    pub active: bool,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = crafting_ingredient, public)]
+#[derive(Clone)]
+pub struct CraftingIngredient {
+    #[primary_key]
+    pub id: String,
+    pub recipe_id: String,
+    pub definition_id: String,
+    pub quantity: u32,
+    pub consumed: bool,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
 /// An authored point where new or defeated characters may enter the world.
 /// Multiple points may target the same room with different roles and priority.
 #[spacetimedb::table(accessor = spawn_point, public)]
@@ -565,6 +864,14 @@ pub struct SpawnPoint {
     pub priority: i32,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
+    #[default(None::<String>)]
+    pub required_option_id: Option<String>,
+    #[default(None::<String>)]
+    pub required_faction_id: Option<String>,
+    #[default(0)]
+    pub required_reputation: i32,
+    #[default(None::<String>)]
+    pub death_region_id: Option<String>,
 }
 
 /// Singleton policy for character creation, defeat consequences, and recovery.
@@ -591,6 +898,12 @@ pub struct WorldLifecycleConfig {
     pub clear_wanted_on_respawn: bool,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
+    #[default(0)]
+    pub maximum_lives: u32,
+    #[default(false)]
+    pub create_lootable_corpse: bool,
+    #[default(true)]
+    pub allow_ability_revive: bool,
 }
 
 /// Runtime state separates being defeated from being eligible to re-enter.
@@ -608,6 +921,8 @@ pub struct ActorLifeState {
     pub respawn_available_at_micros: i64,
     pub protected_until_micros: i64,
     pub updated_at: Timestamp,
+    #[default(0)]
+    pub lives_remaining: u32,
 }
 
 /// Immutable audit trail retained even when hardcore mode deletes a character.
@@ -642,10 +957,33 @@ fn require_profile(ctx: &ReducerContext) -> Result<Profile, String> {
 }
 
 fn require_admin(ctx: &ReducerContext) -> Result<(), String> {
-    if require_profile(ctx)?.is_admin {
+    let profile = require_profile(ctx)?;
+    if profile.is_admin || ctx.db.admin_role_assignment().profile_id().find(&profile.id).is_some() {
         Ok(())
     } else {
         Err("Administrator access is required.".to_string())
+    }
+}
+
+fn require_permission(ctx: &ReducerContext, permission: &str) -> Result<(), String> {
+    let profile = require_profile(ctx)?;
+    let Some(assignment) = ctx.db.admin_role_assignment().profile_id().find(&profile.id) else {
+        return if profile.is_admin { Ok(()) } else { Err("Administrator access is required.".to_string()) };
+    };
+    let role = ctx.db.admin_role_definition().id().find(&assignment.role_id).ok_or_else(|| "The assigned admin role no longer exists.".to_string())?;
+    let permissions = serde_json::from_str::<Vec<String>>(&role.permissions).unwrap_or_default();
+    if permissions.iter().any(|value| value == "*" || value == permission) { Ok(()) } else { Err(format!("Your admin role does not grant `{permission}`.")) }
+}
+
+fn table_permission(table_name: &str) -> &'static str {
+    match table_name {
+        "profiles" | "characters" | "actor_stats" | "actor_progressions" | "actor_faction_reputations" | "actor_wallets" | "actor_cooldowns" | "actor_crimes" | "actor_quests" | "actor_quest_progress" | "actor_death_records" => "players.moderate",
+        "admin_role_definitions" | "admin_role_assignments" => "roles.manage",
+        "currency_definitions" | "vendor_definitions" | "vendor_stocks" | "crafting_recipes" | "crafting_ingredients" => "economy.manage",
+        "quest_definitions" | "quest_objectives" | "quest_item_rewards" | "quest_rules" | "quest_choices" => "quests.manage",
+        "world_lifecycle_configs" | "spawn_points" => "lifecycle.manage",
+        "stat_definitions" | "progression_configs" | "equipment_slot_definitions" | "ability_definitions" | "ability_effect_definitions" | "world_combat_configs" | "character_option_definitions" | "character_option_grants" => "systems.manage",
+        _ => "world.manage",
     }
 }
 
@@ -693,6 +1031,10 @@ fn optional_string(value: &Value, key: &str) -> Option<String> {
 
 fn i32_value(value: &Value, key: &str, fallback: i32) -> i32 {
     value.get(key).and_then(Value::as_i64).map(|value| value as i32).unwrap_or(fallback)
+}
+
+fn i64_value(value: &Value, key: &str, fallback: i64) -> i64 {
+    value.get(key).and_then(Value::as_i64).unwrap_or(fallback)
 }
 
 fn u32_value(value: &Value, key: &str, fallback: u32) -> u32 {
@@ -909,6 +1251,17 @@ fn seed_rpg_definitions(ctx: &ReducerContext) {
         });
     }
 
+    if ctx.db.world_combat_config().id().find(&"world".to_string()).is_none() {
+        ctx.db.world_combat_config().insert(WorldCombatConfig {
+            id: "world".to_string(), base_hit_chance_percent: 90, base_crit_chance_percent: 5,
+            crit_damage_percent: 150, base_dodge_chance_percent: 3, base_parry_chance_percent: 3,
+            base_block_chance_percent: 3, block_damage_reduction_percent: 40,
+            armor_effectiveness_percent: 100, pvp_damage_percent: 100, global_cooldown_ms: 1000,
+            assist_xp_percent: 50, threat_enabled: true, threat_decay_seconds: 30,
+            created_at: ctx.timestamp, updated_at: ctx.timestamp,
+        });
+    }
+
     let slots = [
         ("main-hand", "Main hand", 1, 10), ("off-hand", "Off hand", 1, 20),
         ("head", "Head", 1, 30), ("neck", "Neck", 1, 40),
@@ -995,6 +1348,7 @@ fn seed_lifecycle_definitions(ctx: &ReducerContext) {
             allows_respawn: true,
             active: true,
             priority: 100,
+            required_option_id: None, required_faction_id: None, required_reputation: 0, death_region_id: None,
             created_at: ctx.timestamp,
             updated_at: ctx.timestamp,
         });
@@ -1017,6 +1371,7 @@ fn seed_lifecycle_definitions(ctx: &ReducerContext) {
         spawn_protection_seconds: 0,
         reset_quests_on_death: false,
         clear_wanted_on_respawn: false,
+        maximum_lives: 0, create_lootable_corpse: false, allow_ability_revive: true,
         created_at: ctx.timestamp,
         updated_at: ctx.timestamp,
     });
@@ -1153,6 +1508,7 @@ pub fn install_rpg_starter_kit(ctx: &ReducerContext) -> Result<(), String> {
 pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: String) -> Result<(), String> {
     ensure_profile(ctx);
     let rows = parse_rows(&payload_json)?;
+    if !matches!(table_name.as_str(), "profiles" | "characters") { require_permission(ctx, table_permission(&table_name))?; }
 
     match table_name.as_str() {
         "profiles" => {
@@ -1292,6 +1648,30 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                 });
             }
         }
+        "world_combat_configs" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = string(&row, "id", "world");
+                if ctx.db.world_combat_config().id().find(&id).is_some() { return Err("A combat configuration with that id already exists.".to_string()); }
+                ctx.db.world_combat_config().insert(WorldCombatConfig {
+                    id,
+                    base_hit_chance_percent: u32_value(&row, "base_hit_chance_percent", 90).min(100),
+                    base_crit_chance_percent: u32_value(&row, "base_crit_chance_percent", 5).min(100),
+                    crit_damage_percent: u32_value(&row, "crit_damage_percent", 150).max(100),
+                    base_dodge_chance_percent: u32_value(&row, "base_dodge_chance_percent", 3).min(100),
+                    base_parry_chance_percent: u32_value(&row, "base_parry_chance_percent", 3).min(100),
+                    base_block_chance_percent: u32_value(&row, "base_block_chance_percent", 3).min(100),
+                    block_damage_reduction_percent: u32_value(&row, "block_damage_reduction_percent", 40).min(100),
+                    armor_effectiveness_percent: u32_value(&row, "armor_effectiveness_percent", 100),
+                    pvp_damage_percent: u32_value(&row, "pvp_damage_percent", 100),
+                    global_cooldown_ms: u32_value(&row, "global_cooldown_ms", 1000),
+                    assist_xp_percent: u32_value(&row, "assist_xp_percent", 50).min(100),
+                    threat_enabled: bool_value(&row, "threat_enabled", true),
+                    threat_decay_seconds: u32_value(&row, "threat_decay_seconds", 30),
+                    created_at: ctx.timestamp, updated_at: ctx.timestamp,
+                });
+            }
+        }
         "equipment_slot_definitions" => {
             require_admin(ctx)?;
             for row in rows {
@@ -1358,6 +1738,39 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                     enabled: bool_value(&row, "enabled", true),
                     created_at: ctx.timestamp,
                     updated_at: ctx.timestamp,
+                });
+            }
+        }
+        "ability_effect_definitions" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = string(&row, "id", "");
+                let ability_id = string(&row, "ability_id", "");
+                let effect_kind = string(&row, "effect_kind", "damage").to_lowercase();
+                let target_scope = string(&row, "target_scope", "primary").to_lowercase();
+                if id.is_empty() || ctx.db.ability_effect_definition().id().find(&id).is_some() { return Err("Ability effect id is missing or already exists.".to_string()); }
+                if ctx.db.ability_definition().id().find(&ability_id).is_none() { return Err("Ability effect requires an existing ability.".to_string()); }
+                if !matches!(effect_kind.as_str(), "damage" | "heal" | "restore" | "damage_over_time" | "heal_over_time" | "buff" | "debuff" | "stun" | "interrupt" | "cleanse" | "teleport" | "revive" | "summon") { return Err("Unsupported ability effect kind.".to_string()); }
+                if !matches!(target_scope.as_str(), "primary" | "self" | "all_enemies" | "all_allies" | "room") { return Err("Unsupported ability effect target scope.".to_string()); }
+                let stat_id = optional_string(&row, "stat_id").filter(|value| !value.trim().is_empty());
+                let scales_with_stat = optional_string(&row, "scales_with_stat").filter(|value| !value.trim().is_empty());
+                for stat in [stat_id.as_ref(), scales_with_stat.as_ref()].into_iter().flatten() {
+                    if ctx.db.stat_definition().id().find(stat).is_none() { return Err(format!("Ability effect references missing stat: {stat}")); }
+                }
+                let destination_room_id = optional_string(&row, "destination_room_id").filter(|value| !value.trim().is_empty());
+                if destination_room_id.as_ref().map(|id| ctx.db.room().id().find(id).is_none()).unwrap_or(false) { return Err("Teleport destination room does not exist.".to_string()); }
+                let summon_npc_id = optional_string(&row, "summon_npc_id").filter(|value| !value.trim().is_empty());
+                if summon_npc_id.as_ref().map(|id| ctx.db.npc().id().find(id).is_none()).unwrap_or(false) { return Err("Summoned NPC does not exist.".to_string()); }
+                let power_min = i32_value(&row, "power_min", 0);
+                ctx.db.ability_effect_definition().insert(AbilityEffectDefinition {
+                    id, ability_id, effect_kind, target_scope, stat_id, power_min,
+                    power_max: i32_value(&row, "power_max", power_min).max(power_min), scales_with_stat,
+                    scaling_percent: i32_value(&row, "scaling_percent", 0).max(0),
+                    mitigation_type: string(&row, "mitigation_type", "none"), chance_percent: u32_value(&row, "chance_percent", 100).min(100),
+                    duration_ms: u32_value(&row, "duration_ms", 0), tick_interval_ms: u32_value(&row, "tick_interval_ms", 1000).max(1),
+                    modifier_value: i32_value(&row, "modifier_value", 0), max_stacks: u32_value(&row, "max_stacks", 1).max(1),
+                    status_name: string(&row, "status_name", "Status"), destination_room_id, summon_npc_id,
+                    sort_order: u32_value(&row, "sort_order", 100), created_at: ctx.timestamp, updated_at: ctx.timestamp,
                 });
             }
         }
@@ -1479,10 +1892,11 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                 if ctx.db.quest_definition().id().find(&quest_id).is_none() { return Err("Quest does not exist.".to_string()); }
                 let target_exists = match objective_type.as_str() {
                     "explore_room" => ctx.db.room().id().find(&target_id).is_some(),
-                    "acquire_item" => ctx.db.object_definition().id().find(&target_id).is_some(),
-                    "kill_npc" | "talk_npc" => ctx.db.npc().id().find(&target_id).is_some(),
+                    "acquire_item" | "deliver_item" | "interact_object" => ctx.db.object_definition().id().find(&target_id).is_some(),
+                    "kill_npc" | "talk_npc" | "escort_npc" => ctx.db.npc().id().find(&target_id).is_some(),
                     "kill_faction" => ctx.db.faction_definition().id().find(&target_id).is_some(),
-                    _ => return Err("Objective type must be explore_room, acquire_item, kill_npc, kill_faction, or talk_npc.".to_string()),
+                    "pay_gold" | "choice" | "survive" => true,
+                    _ => return Err("Unsupported quest objective type.".to_string()),
                 };
                 if !target_exists { return Err("Quest objective target does not exist.".to_string()); }
                 ctx.db.quest_objective().insert(QuestObjective {
@@ -1522,6 +1936,115 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                 ctx.db.actor_wallet().insert(ActorWallet { id: actor_id.clone(), actor_id, gold: i32_value(&row, "gold", 0).max(0), updated_at: ctx.timestamp });
             }
         }
+        "quest_rules" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let quest_id = string(&row, "quest_id", "");
+                if ctx.db.quest_definition().id().find(&quest_id).is_none() || ctx.db.quest_rule().quest_id().find(&quest_id).is_some() { return Err("Quest rule requires an existing quest without a rule.".to_string()); }
+                let prerequisite_quest_id = optional_string(&row, "prerequisite_quest_id").filter(|value| !value.trim().is_empty());
+                let next_quest_id = optional_string(&row, "next_quest_id").filter(|value| !value.trim().is_empty());
+                for reference in [prerequisite_quest_id.as_ref(), next_quest_id.as_ref()].into_iter().flatten() {
+                    if ctx.db.quest_definition().id().find(reference).is_none() { return Err(format!("Quest rule references missing quest: {reference}")); }
+                }
+                ctx.db.quest_rule().insert(QuestRule { quest_id, prerequisite_quest_id, prerequisite_completions: u32_value(&row, "prerequisite_completions", 1), time_limit_seconds: u32_value(&row, "time_limit_seconds", 0), failure_on_death: bool_value(&row, "failure_on_death", false), next_quest_id, maximum_completions: u32_value(&row, "maximum_completions", 0), updated_at: ctx.timestamp });
+            }
+        }
+        "quest_choices" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = string(&row, "id", ""); let quest_id = string(&row, "quest_id", "");
+                if id.is_empty() || ctx.db.quest_choice().id().find(&id).is_some() || ctx.db.quest_definition().id().find(&quest_id).is_none() { return Err("Quest choice requires a unique id and existing quest.".to_string()); }
+                let next_quest_id = optional_string(&row, "next_quest_id").filter(|value| !value.trim().is_empty());
+                let reputation_faction_id = optional_string(&row, "reputation_faction_id").filter(|value| !value.trim().is_empty());
+                if next_quest_id.as_ref().map(|value| ctx.db.quest_definition().id().find(value).is_none()).unwrap_or(false) { return Err("Choice follow-up quest does not exist.".to_string()); }
+                if reputation_faction_id.as_ref().map(|value| ctx.db.faction_definition().id().find(value).is_none()).unwrap_or(false) { return Err("Choice reputation faction does not exist.".to_string()); }
+                ctx.db.quest_choice().insert(QuestChoice { id, quest_id, label: string(&row, "label", "Choice"), description: string(&row, "description", ""), next_quest_id, gold_reward: i32_value(&row, "gold_reward", 0), reputation_faction_id, reputation_reward: i32_value(&row, "reputation_reward", 0), sort_order: u32_value(&row, "sort_order", 100), created_at: ctx.timestamp, updated_at: ctx.timestamp });
+            }
+        }
+        "character_option_definitions" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = normalized_key(&string(&row, "id", &string(&row, "name", ""))); let option_kind = string(&row, "option_kind", "class").to_lowercase();
+                if id.is_empty() || ctx.db.character_option_definition().id().find(&id).is_some() { return Err("Character option id is missing or already exists.".to_string()); }
+                if !matches!(option_kind.as_str(), "race" | "class" | "background") { return Err("Character option kind must be race, class, or background.".to_string()); }
+                let starting_room_id = optional_string(&row, "starting_room_id").filter(|value| !value.trim().is_empty());
+                if starting_room_id.as_ref().map(|value| ctx.db.room().id().find(value).is_none()).unwrap_or(false) { return Err("Character option starting room does not exist.".to_string()); }
+                ctx.db.character_option_definition().insert(CharacterOptionDefinition { id, option_kind, name: string(&row, "name", "Untitled option"), description: string(&row, "description", ""), icon: string(&row, "icon", "◇"), starting_room_id, starting_gold: i32_value(&row, "starting_gold", 0).max(0), active: bool_value(&row, "active", true), sort_order: u32_value(&row, "sort_order", 100), created_at: ctx.timestamp, updated_at: ctx.timestamp });
+            }
+        }
+        "character_option_grants" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = string(&row, "id", ""); let option_id = string(&row, "option_id", ""); let grant_kind = string(&row, "grant_kind", "stat").to_lowercase(); let reference_id = string(&row, "reference_id", "");
+                if id.is_empty() || ctx.db.character_option_grant().id().find(&id).is_some() || ctx.db.character_option_definition().id().find(&option_id).is_none() { return Err("Character option grant requires a unique id and existing option.".to_string()); }
+                let exists = match grant_kind.as_str() { "stat" => ctx.db.stat_definition().id().find(&reference_id).is_some(), "item" => ctx.db.object_definition().id().find(&reference_id).is_some(), "ability" => ctx.db.ability_definition().id().find(&reference_id).is_some(), _ => false };
+                if !exists { return Err("Character option grant kind/reference is invalid.".to_string()); }
+                ctx.db.character_option_grant().insert(CharacterOptionGrant { id, option_id, grant_kind, reference_id, amount: i32_value(&row, "amount", 1), equipped_slot: optional_string(&row, "equipped_slot").filter(|value| !value.trim().is_empty()), sort_order: u32_value(&row, "sort_order", 100), created_at: ctx.timestamp, updated_at: ctx.timestamp });
+            }
+        }
+        "admin_role_definitions" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = normalized_key(&string(&row, "id", &string(&row, "name", "")));
+                if id.is_empty() || ctx.db.admin_role_definition().id().find(&id).is_some() { return Err("Admin role id is missing or already exists.".to_string()); }
+                ctx.db.admin_role_definition().insert(AdminRoleDefinition { id, name: string(&row, "name", "Untitled role"), description: string(&row, "description", ""), permissions: json_string(row.get("permissions"), "[]"), created_at: ctx.timestamp, updated_at: ctx.timestamp });
+            }
+        }
+        "admin_role_assignments" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let profile_id = string(&row, "profile_id", ""); let role_id = string(&row, "role_id", "");
+                let Some(profile) = ctx.db.profile().id().find(&profile_id) else { return Err("Role assignment requires an existing profile.".to_string()) };
+                if profile.is_admin { return Err("An unrestricted world owner cannot be converted into a delegated role. Assign roles only to non-admin profiles.".to_string()); }
+                if ctx.db.admin_role_definition().id().find(&role_id).is_none() || ctx.db.admin_role_assignment().profile_id().find(&profile_id).is_some() { return Err("Role assignment requires an existing role and no current assignment.".to_string()); }
+                ctx.db.admin_role_assignment().insert(AdminRoleAssignment { profile_id: profile_id.clone(), role_id, assigned_at: ctx.timestamp });
+                ctx.db.profile().id().update(Profile { is_admin: true, ..profile });
+            }
+        }
+        "currency_definitions" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = normalized_key(&string(&row, "id", &string(&row, "name", "")));
+                if id.is_empty() || ctx.db.currency_definition().id().find(&id).is_some() { return Err("Currency id is missing or already exists.".to_string()); }
+                ctx.db.currency_definition().insert(CurrencyDefinition { id, name: string(&row, "name", "Currency"), icon: string(&row, "icon", "¤"), maximum_balance: i64_value(&row, "maximum_balance", i64::MAX).max(0), tradeable: bool_value(&row, "tradeable", true), created_at: ctx.timestamp, updated_at: ctx.timestamp });
+            }
+        }
+        "vendor_definitions" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = normalized_key(&string(&row, "id", &string(&row, "name", ""))); let npc_id = string(&row, "npc_id", ""); let currency_id = string(&row, "currency_id", "gold");
+                if id.is_empty() || ctx.db.vendor_definition().id().find(&id).is_some() || ctx.db.npc().id().find(&npc_id).is_none() || (currency_id != "gold" && ctx.db.currency_definition().id().find(&currency_id).is_none()) { return Err("Vendor requires a unique id, NPC, and valid currency.".to_string()); }
+                let required_faction_id = optional_string(&row, "required_faction_id").filter(|value| !value.trim().is_empty());
+                if required_faction_id.as_ref().map(|value| ctx.db.faction_definition().id().find(value).is_none()).unwrap_or(false) { return Err("Vendor faction does not exist.".to_string()); }
+                ctx.db.vendor_definition().insert(VendorDefinition { id, npc_id, name: string(&row, "name", "Vendor"), currency_id, buys_from_players: bool_value(&row, "buys_from_players", true), sell_price_percent: u32_value(&row, "sell_price_percent", 50), required_faction_id, required_reputation: i32_value(&row, "required_reputation", 0), created_at: ctx.timestamp, updated_at: ctx.timestamp });
+            }
+        }
+        "vendor_stocks" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = string(&row, "id", ""); let vendor_id = string(&row, "vendor_id", ""); let definition_id = string(&row, "definition_id", "");
+                if id.is_empty() || ctx.db.vendor_stock().id().find(&id).is_some() || ctx.db.vendor_definition().id().find(&vendor_id).is_none() || ctx.db.object_definition().id().find(&definition_id).is_none() { return Err("Vendor stock requires a unique id, vendor, and object.".to_string()); }
+                ctx.db.vendor_stock().insert(VendorStock { id, vendor_id, definition_id, price: i64_value(&row, "price", 0).max(0), stock: i32_value(&row, "stock", -1).max(-1), maximum_per_purchase: u32_value(&row, "maximum_per_purchase", 99).max(1), created_at: ctx.timestamp, updated_at: ctx.timestamp });
+            }
+        }
+        "crafting_recipes" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = normalized_key(&string(&row, "id", &string(&row, "name", ""))); let output_definition_id = string(&row, "output_definition_id", "");
+                if id.is_empty() || ctx.db.crafting_recipe().id().find(&id).is_some() || ctx.db.object_definition().id().find(&output_definition_id).is_none() { return Err("Recipe requires a unique id and output object.".to_string()); }
+                let currency_id = optional_string(&row, "currency_id").filter(|value| !value.trim().is_empty());
+                if currency_id.as_ref().map(|value| value != "gold" && ctx.db.currency_definition().id().find(value).is_none()).unwrap_or(false) { return Err("Recipe currency does not exist.".to_string()); }
+                ctx.db.crafting_recipe().insert(CraftingRecipe { id, name: string(&row, "name", "Recipe"), description: string(&row, "description", ""), output_definition_id, output_quantity: u32_value(&row, "output_quantity", 1).max(1), station_tag: optional_string(&row, "station_tag").filter(|value| !value.trim().is_empty()), required_level: u32_value(&row, "required_level", 1).max(1), currency_id, currency_cost: i64_value(&row, "currency_cost", 0).max(0), active: bool_value(&row, "active", true), created_at: ctx.timestamp, updated_at: ctx.timestamp });
+            }
+        }
+        "crafting_ingredients" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = string(&row, "id", ""); let recipe_id = string(&row, "recipe_id", ""); let definition_id = string(&row, "definition_id", "");
+                if id.is_empty() || ctx.db.crafting_ingredient().id().find(&id).is_some() || ctx.db.crafting_recipe().id().find(&recipe_id).is_none() || ctx.db.object_definition().id().find(&definition_id).is_none() { return Err("Ingredient requires a unique id, recipe, and object.".to_string()); }
+                ctx.db.crafting_ingredient().insert(CraftingIngredient { id, recipe_id, definition_id, quantity: u32_value(&row, "quantity", 1).max(1), consumed: bool_value(&row, "consumed", true), created_at: ctx.timestamp, updated_at: ctx.timestamp });
+            }
+        }
         "spawn_points" => {
             require_admin(ctx)?;
             for row in rows {
@@ -1529,6 +2052,12 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                 let room_id = string(&row, "room_id", "");
                 if id.is_empty() || ctx.db.spawn_point().id().find(&id).is_some() { return Err("Spawn point id is missing or already exists.".to_string()); }
                 if ctx.db.room().id().find(&room_id).is_none() { return Err("Spawn point room does not exist.".to_string()); }
+                let required_option_id = optional_string(&row, "required_option_id").filter(|value| !value.trim().is_empty());
+                let required_faction_id = optional_string(&row, "required_faction_id").filter(|value| !value.trim().is_empty());
+                let death_region_id = optional_string(&row, "death_region_id").filter(|value| !value.trim().is_empty());
+                if required_option_id.as_ref().map(|value| ctx.db.character_option_definition().id().find(value).is_none()).unwrap_or(false) { return Err("Spawn option requirement does not exist.".to_string()); }
+                if required_faction_id.as_ref().map(|value| ctx.db.faction_definition().id().find(value).is_none()).unwrap_or(false) { return Err("Spawn faction requirement does not exist.".to_string()); }
+                if death_region_id.as_ref().map(|value| ctx.db.region().name().find(value).is_none()).unwrap_or(false) { return Err("Spawn death-region override does not exist.".to_string()); }
                 ctx.db.spawn_point().insert(SpawnPoint {
                     id,
                     name: string(&row, "name", "Untitled spawn point"),
@@ -1538,6 +2067,7 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                     allows_respawn: bool_value(&row, "allows_respawn", true),
                     active: bool_value(&row, "active", true),
                     priority: i32_value(&row, "priority", 0),
+                    required_option_id, required_faction_id, required_reputation: i32_value(&row, "required_reputation", 0), death_region_id,
                     created_at: ctx.timestamp,
                     updated_at: ctx.timestamp,
                 });
@@ -1576,6 +2106,9 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                     spawn_protection_seconds: u32_value(&row, "spawn_protection_seconds", 0),
                     reset_quests_on_death: bool_value(&row, "reset_quests_on_death", false),
                     clear_wanted_on_respawn: bool_value(&row, "clear_wanted_on_respawn", false),
+                    maximum_lives: u32_value(&row, "maximum_lives", 0),
+                    create_lootable_corpse: bool_value(&row, "create_lootable_corpse", false),
+                    allow_ability_revive: bool_value(&row, "allow_ability_revive", true),
                     created_at: ctx.timestamp,
                     updated_at: ctx.timestamp,
                 });
@@ -1760,11 +2293,13 @@ pub fn update_rows(
 ) -> Result<(), String> {
     ensure_profile(ctx);
     let ids = parse_ids(&ids_json)?;
+    if table_name != "profiles" { require_permission(ctx, table_permission(&table_name))?; }
     let payload: Value = serde_json::from_str(&payload_json).map_err(|error| error.to_string())?;
 
     match table_name.as_str() {
         "profiles" => {
             for id in ids {
+                if ctx.db.character_option_grant().iter().any(|grant| grant.grant_kind == "stat" && grant.reference_id == id) { return Err("This stat is granted by a character option.".to_string()); }
                 let Some(existing) = ctx.db.profile().id().find(&id) else { continue };
                 if existing.owner != ctx.sender() {
                     return Err("Profiles can only be updated by their owner.".to_string());
@@ -1851,6 +2386,7 @@ pub fn update_rows(
         "object_definitions" => {
             require_admin(ctx)?;
             for id in ids {
+                if ctx.db.vendor_stock().iter().any(|stock| stock.definition_id == id) || ctx.db.crafting_recipe().iter().any(|recipe| recipe.output_definition_id == id) || ctx.db.crafting_ingredient().iter().any(|ingredient| ingredient.definition_id == id) || ctx.db.character_option_grant().iter().any(|grant| grant.grant_kind == "item" && grant.reference_id == id) { return Err("This item is used by an option, vendor, or recipe.".to_string()); }
                 let Some(existing) = ctx.db.object_definition().id().find(&id) else { continue };
                 ctx.db.object_definition().id().update(ObjectDefinition {
                     name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(),
@@ -1940,6 +2476,29 @@ pub fn update_rows(
                 }
             }
         }
+        "world_combat_configs" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.world_combat_config().id().find(&id) else { continue };
+                ctx.db.world_combat_config().id().update(WorldCombatConfig {
+                    base_hit_chance_percent: payload.get("base_hit_chance_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.base_hit_chance_percent).min(100),
+                    base_crit_chance_percent: payload.get("base_crit_chance_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.base_crit_chance_percent).min(100),
+                    crit_damage_percent: payload.get("crit_damage_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.crit_damage_percent).max(100),
+                    base_dodge_chance_percent: payload.get("base_dodge_chance_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.base_dodge_chance_percent).min(100),
+                    base_parry_chance_percent: payload.get("base_parry_chance_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.base_parry_chance_percent).min(100),
+                    base_block_chance_percent: payload.get("base_block_chance_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.base_block_chance_percent).min(100),
+                    block_damage_reduction_percent: payload.get("block_damage_reduction_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.block_damage_reduction_percent).min(100),
+                    armor_effectiveness_percent: payload.get("armor_effectiveness_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.armor_effectiveness_percent),
+                    pvp_damage_percent: payload.get("pvp_damage_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.pvp_damage_percent),
+                    global_cooldown_ms: payload.get("global_cooldown_ms").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.global_cooldown_ms),
+                    assist_xp_percent: payload.get("assist_xp_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.assist_xp_percent).min(100),
+                    threat_enabled: payload.get("threat_enabled").and_then(Value::as_bool).unwrap_or(existing.threat_enabled),
+                    threat_decay_seconds: payload.get("threat_decay_seconds").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.threat_decay_seconds),
+                    updated_at: ctx.timestamp,
+                    ..existing
+                });
+            }
+        }
         "equipment_slot_definitions" => {
             require_admin(ctx)?;
             for id in ids {
@@ -1956,6 +2515,7 @@ pub fn update_rows(
         "ability_definitions" => {
             require_admin(ctx)?;
             for id in ids {
+                if ctx.db.character_option_grant().iter().any(|grant| grant.grant_kind == "ability" && grant.reference_id == id) { return Err("This ability is granted by a character option.".to_string()); }
                 let Some(existing) = ctx.db.ability_definition().id().find(&id) else { continue };
                 let effect_type = payload.get("effect_type").and_then(Value::as_str).unwrap_or(&existing.effect_type).to_lowercase();
                 let target_type = payload.get("target_type").and_then(Value::as_str).unwrap_or(&existing.target_type).to_lowercase();
@@ -1997,6 +2557,37 @@ pub fn update_rows(
                     enabled: payload.get("enabled").and_then(Value::as_bool).unwrap_or(existing.enabled),
                     updated_at: ctx.timestamp,
                     ..existing
+                });
+            }
+        }
+        "ability_effect_definitions" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.ability_effect_definition().id().find(&id) else { continue };
+                let effect_kind = payload.get("effect_kind").and_then(Value::as_str).unwrap_or(&existing.effect_kind).to_lowercase();
+                let target_scope = payload.get("target_scope").and_then(Value::as_str).unwrap_or(&existing.target_scope).to_lowercase();
+                if !matches!(effect_kind.as_str(), "damage" | "heal" | "restore" | "damage_over_time" | "heal_over_time" | "buff" | "debuff" | "stun" | "interrupt" | "cleanse" | "teleport" | "revive" | "summon") || !matches!(target_scope.as_str(), "primary" | "self" | "all_enemies" | "all_allies" | "room") { return Err("Ability effect kind or scope is invalid.".to_string()); }
+                let stat_id = payload.get("stat_id").map(|_| optional_string(&payload, "stat_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.stat_id.clone());
+                let scales_with_stat = payload.get("scales_with_stat").map(|_| optional_string(&payload, "scales_with_stat").filter(|value| !value.trim().is_empty())).unwrap_or(existing.scales_with_stat.clone());
+                for stat in [stat_id.as_ref(), scales_with_stat.as_ref()].into_iter().flatten() { if ctx.db.stat_definition().id().find(stat).is_none() { return Err(format!("Ability effect references missing stat: {stat}")); } }
+                let destination_room_id = payload.get("destination_room_id").map(|_| optional_string(&payload, "destination_room_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.destination_room_id.clone());
+                let summon_npc_id = payload.get("summon_npc_id").map(|_| optional_string(&payload, "summon_npc_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.summon_npc_id.clone());
+                if destination_room_id.as_ref().map(|room| ctx.db.room().id().find(room).is_none()).unwrap_or(false) || summon_npc_id.as_ref().map(|npc| ctx.db.npc().id().find(npc).is_none()).unwrap_or(false) { return Err("Ability effect destination or summon target does not exist.".to_string()); }
+                let power_min = payload.get("power_min").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.power_min);
+                ctx.db.ability_effect_definition().id().update(AbilityEffectDefinition {
+                    effect_kind, target_scope, stat_id, power_min,
+                    power_max: payload.get("power_max").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.power_max).max(power_min),
+                    scales_with_stat, scaling_percent: payload.get("scaling_percent").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.scaling_percent).max(0),
+                    mitigation_type: payload.get("mitigation_type").and_then(Value::as_str).unwrap_or(&existing.mitigation_type).to_string(),
+                    chance_percent: payload.get("chance_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.chance_percent).min(100),
+                    duration_ms: payload.get("duration_ms").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.duration_ms),
+                    tick_interval_ms: payload.get("tick_interval_ms").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.tick_interval_ms).max(1),
+                    modifier_value: payload.get("modifier_value").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.modifier_value),
+                    max_stacks: payload.get("max_stacks").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.max_stacks).max(1),
+                    status_name: payload.get("status_name").and_then(Value::as_str).unwrap_or(&existing.status_name).to_string(),
+                    destination_room_id, summon_npc_id,
+                    sort_order: payload.get("sort_order").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.sort_order),
+                    updated_at: ctx.timestamp, ..existing
                 });
             }
         }
@@ -2044,6 +2635,7 @@ pub fn update_rows(
         "rooms" => {
             require_admin(ctx)?;
             for id in ids {
+                if ctx.db.character_option_definition().iter().any(|option| option.starting_room_id.as_deref() == Some(id.as_str())) { return Err("This room is a character option starting room.".to_string()); }
                 let Some(existing) = ctx.db.room().id().find(&id) else { continue };
                 ctx.db.room().id().update(Room {
                     name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(),
@@ -2059,6 +2651,7 @@ pub fn update_rows(
         "npcs" => {
             require_admin(ctx)?;
             for id in ids {
+                if ctx.db.vendor_definition().iter().any(|vendor| vendor.npc_id == id) { return Err("This NPC operates a vendor. Delete the vendor first.".to_string()); }
                 let Some(existing) = ctx.db.npc().id().find(&id) else { continue };
                 let faction = payload.get("faction").map(|_| optional_string(&payload, "faction").filter(|value| !value.trim().is_empty())).unwrap_or(existing.faction.clone());
                 if payload.get("faction").is_some() && faction != existing.faction && faction.as_ref().map(|faction_id| ctx.db.faction_definition().id().find(faction_id).is_none()).unwrap_or(false) {
@@ -2138,6 +2731,10 @@ pub fn update_rows(
         "quest_definitions" => {
             require_admin(ctx)?;
             for id in ids {
+                if ctx.db.quest_rule().iter().any(|rule| rule.quest_id != id && (rule.prerequisite_quest_id.as_deref() == Some(id.as_str()) || rule.next_quest_id.as_deref() == Some(id.as_str())))
+                    || ctx.db.quest_choice().iter().any(|choice| choice.next_quest_id.as_deref() == Some(id.as_str())) {
+                    return Err("This quest is referenced as a prerequisite or branch destination. Reassign that reference first.".to_string());
+                }
                 let Some(existing) = ctx.db.quest_definition().id().find(&id) else { continue };
                 let quest_giver_npc_id = payload.get("quest_giver_npc_id").and_then(Value::as_str).unwrap_or(&existing.quest_giver_npc_id).to_string();
                 let turn_in_npc_id = payload.get("turn_in_npc_id").and_then(Value::as_str).unwrap_or(&existing.turn_in_npc_id).to_string();
@@ -2176,10 +2773,11 @@ pub fn update_rows(
                 let target_id = payload.get("target_id").and_then(Value::as_str).unwrap_or(&existing.target_id).to_string();
                 let target_exists = match objective_type.as_str() {
                     "explore_room" => ctx.db.room().id().find(&target_id).is_some(),
-                    "acquire_item" => ctx.db.object_definition().id().find(&target_id).is_some(),
-                    "kill_npc" | "talk_npc" => ctx.db.npc().id().find(&target_id).is_some(),
+                    "acquire_item" | "deliver_item" | "interact_object" => ctx.db.object_definition().id().find(&target_id).is_some(),
+                    "kill_npc" | "talk_npc" | "escort_npc" => ctx.db.npc().id().find(&target_id).is_some(),
                     "kill_faction" => ctx.db.faction_definition().id().find(&target_id).is_some(),
-                    _ => return Err("Objective type must be explore_room, acquire_item, kill_npc, kill_faction, or talk_npc.".to_string()),
+                    "pay_gold" | "choice" | "survive" => true,
+                    _ => return Err("Unsupported quest objective type.".to_string()),
                 };
                 if !target_exists { return Err("Quest objective target does not exist.".to_string()); }
                 ctx.db.quest_objective().id().update(QuestObjective {
@@ -2219,6 +2817,73 @@ pub fn update_rows(
                 });
             }
         }
+        "quest_rules" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.quest_rule().quest_id().find(&id) else { continue };
+                let prerequisite_quest_id = payload.get("prerequisite_quest_id").map(|_| optional_string(&payload, "prerequisite_quest_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.prerequisite_quest_id.clone());
+                let next_quest_id = payload.get("next_quest_id").map(|_| optional_string(&payload, "next_quest_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.next_quest_id.clone());
+                for reference in [prerequisite_quest_id.as_ref(), next_quest_id.as_ref()].into_iter().flatten() { if ctx.db.quest_definition().id().find(reference).is_none() { return Err(format!("Quest rule references missing quest: {reference}")); } }
+                ctx.db.quest_rule().quest_id().update(QuestRule { prerequisite_quest_id, prerequisite_completions: payload.get("prerequisite_completions").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.prerequisite_completions), time_limit_seconds: payload.get("time_limit_seconds").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.time_limit_seconds), failure_on_death: payload.get("failure_on_death").and_then(Value::as_bool).unwrap_or(existing.failure_on_death), next_quest_id, maximum_completions: payload.get("maximum_completions").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.maximum_completions), updated_at: ctx.timestamp, ..existing });
+            }
+        }
+        "quest_choices" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.quest_choice().id().find(&id) else { continue };
+                let next_quest_id = payload.get("next_quest_id").map(|_| optional_string(&payload, "next_quest_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.next_quest_id.clone());
+                let reputation_faction_id = payload.get("reputation_faction_id").map(|_| optional_string(&payload, "reputation_faction_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.reputation_faction_id.clone());
+                ctx.db.quest_choice().id().update(QuestChoice { label: payload.get("label").and_then(Value::as_str).unwrap_or(&existing.label).to_string(), description: payload.get("description").and_then(Value::as_str).unwrap_or(&existing.description).to_string(), next_quest_id, gold_reward: payload.get("gold_reward").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.gold_reward), reputation_faction_id, reputation_reward: payload.get("reputation_reward").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.reputation_reward), sort_order: payload.get("sort_order").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.sort_order), updated_at: ctx.timestamp, ..existing });
+            }
+        }
+        "character_option_definitions" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.character_option_definition().id().find(&id) else { continue };
+                let option_kind = payload.get("option_kind").and_then(Value::as_str).unwrap_or(&existing.option_kind).to_lowercase();
+                if !matches!(option_kind.as_str(), "race" | "class" | "background") { return Err("Character option kind must be race, class, or background.".to_string()); }
+                let starting_room_id = payload.get("starting_room_id").map(|_| optional_string(&payload, "starting_room_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.starting_room_id.clone());
+                ctx.db.character_option_definition().id().update(CharacterOptionDefinition { option_kind, name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(), description: payload.get("description").and_then(Value::as_str).unwrap_or(&existing.description).to_string(), icon: payload.get("icon").and_then(Value::as_str).unwrap_or(&existing.icon).to_string(), starting_room_id, starting_gold: payload.get("starting_gold").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.starting_gold).max(0), active: payload.get("active").and_then(Value::as_bool).unwrap_or(existing.active), sort_order: payload.get("sort_order").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.sort_order), updated_at: ctx.timestamp, ..existing });
+            }
+        }
+        "character_option_grants" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.character_option_grant().id().find(&id) else { continue };
+                let grant_kind = payload.get("grant_kind").and_then(Value::as_str).unwrap_or(&existing.grant_kind).to_lowercase(); let reference_id = payload.get("reference_id").and_then(Value::as_str).unwrap_or(&existing.reference_id).to_string();
+                let exists = match grant_kind.as_str() { "stat" => ctx.db.stat_definition().id().find(&reference_id).is_some(), "item" => ctx.db.object_definition().id().find(&reference_id).is_some(), "ability" => ctx.db.ability_definition().id().find(&reference_id).is_some(), _ => false };
+                if !exists { return Err("Character option grant kind/reference is invalid.".to_string()); }
+                ctx.db.character_option_grant().id().update(CharacterOptionGrant { grant_kind, reference_id, amount: payload.get("amount").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.amount), equipped_slot: payload.get("equipped_slot").map(|_| optional_string(&payload, "equipped_slot").filter(|value| !value.trim().is_empty())).unwrap_or(existing.equipped_slot.clone()), sort_order: payload.get("sort_order").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.sort_order), updated_at: ctx.timestamp, ..existing });
+            }
+        }
+        "admin_role_definitions" => {
+            require_admin(ctx)?;
+            for id in ids { if let Some(existing) = ctx.db.admin_role_definition().id().find(&id) { ctx.db.admin_role_definition().id().update(AdminRoleDefinition { name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(), description: payload.get("description").and_then(Value::as_str).unwrap_or(&existing.description).to_string(), permissions: payload.get("permissions").map(|value| json_string(Some(value), "[]")).unwrap_or(existing.permissions.clone()), updated_at: ctx.timestamp, ..existing }); } }
+        }
+        "admin_role_assignments" => {
+            require_admin(ctx)?;
+            for id in ids { if let Some(existing) = ctx.db.admin_role_assignment().profile_id().find(&id) { let role_id = payload.get("role_id").and_then(Value::as_str).unwrap_or(&existing.role_id).to_string(); if ctx.db.admin_role_definition().id().find(&role_id).is_none() { return Err("Admin role does not exist.".to_string()); } ctx.db.admin_role_assignment().profile_id().update(AdminRoleAssignment { role_id, assigned_at: ctx.timestamp, ..existing }); } }
+        }
+        "currency_definitions" => {
+            require_admin(ctx)?;
+            for id in ids { if let Some(existing) = ctx.db.currency_definition().id().find(&id) { ctx.db.currency_definition().id().update(CurrencyDefinition { name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(), icon: payload.get("icon").and_then(Value::as_str).unwrap_or(&existing.icon).to_string(), maximum_balance: payload.get("maximum_balance").and_then(Value::as_i64).unwrap_or(existing.maximum_balance).max(0), tradeable: payload.get("tradeable").and_then(Value::as_bool).unwrap_or(existing.tradeable), updated_at: ctx.timestamp, ..existing }); } }
+        }
+        "vendor_definitions" => {
+            require_admin(ctx)?;
+            for id in ids { if let Some(existing) = ctx.db.vendor_definition().id().find(&id) { ctx.db.vendor_definition().id().update(VendorDefinition { name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(), buys_from_players: payload.get("buys_from_players").and_then(Value::as_bool).unwrap_or(existing.buys_from_players), sell_price_percent: payload.get("sell_price_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.sell_price_percent), required_faction_id: payload.get("required_faction_id").map(|_| optional_string(&payload, "required_faction_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.required_faction_id.clone()), required_reputation: payload.get("required_reputation").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.required_reputation), updated_at: ctx.timestamp, ..existing }); } }
+        }
+        "vendor_stocks" => {
+            require_admin(ctx)?;
+            for id in ids { if let Some(existing) = ctx.db.vendor_stock().id().find(&id) { ctx.db.vendor_stock().id().update(VendorStock { price: payload.get("price").and_then(Value::as_i64).unwrap_or(existing.price).max(0), stock: payload.get("stock").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.stock).max(-1), maximum_per_purchase: payload.get("maximum_per_purchase").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.maximum_per_purchase).max(1), updated_at: ctx.timestamp, ..existing }); } }
+        }
+        "crafting_recipes" => {
+            require_admin(ctx)?;
+            for id in ids { if let Some(existing) = ctx.db.crafting_recipe().id().find(&id) { ctx.db.crafting_recipe().id().update(CraftingRecipe { name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(), description: payload.get("description").and_then(Value::as_str).unwrap_or(&existing.description).to_string(), output_quantity: payload.get("output_quantity").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.output_quantity).max(1), station_tag: payload.get("station_tag").map(|_| optional_string(&payload, "station_tag").filter(|value| !value.trim().is_empty())).unwrap_or(existing.station_tag.clone()), required_level: payload.get("required_level").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.required_level).max(1), currency_id: payload.get("currency_id").map(|_| optional_string(&payload, "currency_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.currency_id.clone()), currency_cost: payload.get("currency_cost").and_then(Value::as_i64).unwrap_or(existing.currency_cost).max(0), active: payload.get("active").and_then(Value::as_bool).unwrap_or(existing.active), updated_at: ctx.timestamp, ..existing }); } }
+        }
+        "crafting_ingredients" => {
+            require_admin(ctx)?;
+            for id in ids { if let Some(existing) = ctx.db.crafting_ingredient().id().find(&id) { ctx.db.crafting_ingredient().id().update(CraftingIngredient { quantity: payload.get("quantity").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.quantity).max(1), consumed: payload.get("consumed").and_then(Value::as_bool).unwrap_or(existing.consumed), updated_at: ctx.timestamp, ..existing }); } }
+        }
         "spawn_points" => {
             require_admin(ctx)?;
             for id in ids {
@@ -2233,6 +2898,10 @@ pub fn update_rows(
                     allows_respawn: payload.get("allows_respawn").and_then(Value::as_bool).unwrap_or(existing.allows_respawn),
                     active: payload.get("active").and_then(Value::as_bool).unwrap_or(existing.active),
                     priority: payload.get("priority").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.priority),
+                    required_option_id: payload.get("required_option_id").map(|_| optional_string(&payload, "required_option_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.required_option_id.clone()),
+                    required_faction_id: payload.get("required_faction_id").map(|_| optional_string(&payload, "required_faction_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.required_faction_id.clone()),
+                    required_reputation: payload.get("required_reputation").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.required_reputation),
+                    death_region_id: payload.get("death_region_id").map(|_| optional_string(&payload, "death_region_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.death_region_id.clone()),
                     updated_at: ctx.timestamp,
                     ..existing
                 });
@@ -2269,6 +2938,9 @@ pub fn update_rows(
                     spawn_protection_seconds: payload.get("spawn_protection_seconds").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.spawn_protection_seconds),
                     reset_quests_on_death: payload.get("reset_quests_on_death").and_then(Value::as_bool).unwrap_or(existing.reset_quests_on_death),
                     clear_wanted_on_respawn: payload.get("clear_wanted_on_respawn").and_then(Value::as_bool).unwrap_or(existing.clear_wanted_on_respawn),
+                    maximum_lives: payload.get("maximum_lives").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.maximum_lives),
+                    create_lootable_corpse: payload.get("create_lootable_corpse").and_then(Value::as_bool).unwrap_or(existing.create_lootable_corpse),
+                    allow_ability_revive: payload.get("allow_ability_revive").and_then(Value::as_bool).unwrap_or(existing.allow_ability_revive),
                     updated_at: ctx.timestamp,
                     ..existing
                 });
@@ -2290,9 +2962,17 @@ fn delete_world_object_tree(ctx: &ReducerContext, id: &String) {
     ctx.db.world_object().id().delete(id);
 }
 
+fn delete_ability_effect(ctx: &ReducerContext, id: &String) {
+    let status_ids = ctx.db.actor_status_effect().iter().filter(|row| row.effect_id == *id).map(|row| row.id).collect::<Vec<_>>();
+    for status_id in status_ids { ctx.db.actor_status_effect().id().delete(&status_id); }
+    let tick_ids = ctx.db.scheduled_effect_tick().iter().filter(|row| row.effect_id == *id).map(|row| row.scheduled_id).collect::<Vec<_>>();
+    for tick_id in tick_ids { ctx.db.scheduled_effect_tick().scheduled_id().delete(tick_id); }
+    ctx.db.ability_effect_definition().id().delete(id);
+}
+
 fn delete_actor_rpg_state(ctx: &ReducerContext, actor_id: &String) {
     let object_ids = ctx.db.world_object().iter()
-        .filter(|object| matches!(object.location_kind.as_str(), "inventory" | "equipped") && object.location_id == *actor_id)
+        .filter(|object| matches!(object.location_kind.as_str(), "inventory" | "equipped" | "bank") && object.location_id == *actor_id)
         .map(|object| object.id)
         .collect::<Vec<_>>();
     for object_id in object_ids {
@@ -2311,6 +2991,12 @@ fn delete_actor_rpg_state(ctx: &ReducerContext, actor_id: &String) {
     for cooldown_id in cooldown_ids { ctx.db.actor_cooldown().id().delete(&cooldown_id); }
     let cast_ids = ctx.db.scheduled_cast().iter().filter(|row| row.actor_id == *actor_id).map(|row| row.scheduled_id).collect::<Vec<_>>();
     for cast_id in cast_ids { ctx.db.scheduled_cast().scheduled_id().delete(cast_id); }
+    let threat_ids = ctx.db.npc_threat().iter().filter(|row| row.actor_id == *actor_id || row.npc_id == *actor_id).map(|row| row.id).collect::<Vec<_>>();
+    for threat_id in threat_ids { ctx.db.npc_threat().id().delete(&threat_id); }
+    let status_ids = ctx.db.actor_status_effect().iter().filter(|row| row.actor_id == *actor_id || row.source_actor_id == *actor_id).map(|row| row.id).collect::<Vec<_>>();
+    for status_id in status_ids { ctx.db.actor_status_effect().id().delete(&status_id); }
+    let tick_ids = ctx.db.scheduled_effect_tick().iter().filter(|row| row.target_actor_id == *actor_id || row.source_actor_id == *actor_id).map(|row| row.scheduled_id).collect::<Vec<_>>();
+    for tick_id in tick_ids { ctx.db.scheduled_effect_tick().scheduled_id().delete(tick_id); }
     let reputation_ids = ctx.db.actor_faction_reputation().iter().filter(|row| row.actor_id == *actor_id).map(|row| row.id).collect::<Vec<_>>();
     for reputation_id in reputation_ids { ctx.db.actor_faction_reputation().id().delete(&reputation_id); }
     let crime_ids = ctx.db.actor_crime().iter().filter(|row| row.actor_id == *actor_id).map(|row| row.id).collect::<Vec<_>>();
@@ -2319,6 +3005,12 @@ fn delete_actor_rpg_state(ctx: &ReducerContext, actor_id: &String) {
     for quest_id in quest_ids { ctx.db.actor_quest().id().delete(&quest_id); }
     let progress_ids = ctx.db.actor_quest_progress().iter().filter(|row| row.actor_id == *actor_id).map(|row| row.id).collect::<Vec<_>>();
     for progress_id in progress_ids { ctx.db.actor_quest_progress().id().delete(&progress_id); }
+    let choice_ids = ctx.db.actor_quest_choice().iter().filter(|row| row.actor_id == *actor_id).map(|row| row.id).collect::<Vec<_>>();
+    for choice_id in choice_ids { ctx.db.actor_quest_choice().id().delete(&choice_id); }
+    let option_ids = ctx.db.actor_character_option().iter().filter(|row| row.actor_id == *actor_id).map(|row| row.id).collect::<Vec<_>>();
+    for option_id in option_ids { ctx.db.actor_character_option().id().delete(&option_id); }
+    let currency_ids = ctx.db.actor_currency().iter().filter(|row| row.actor_id == *actor_id).map(|row| row.id).collect::<Vec<_>>();
+    for currency_id in currency_ids { ctx.db.actor_currency().id().delete(&currency_id); }
     ctx.db.actor_wallet().id().delete(actor_id);
     ctx.db.actor_life_state().id().delete(actor_id);
     ctx.db.actor_progression().id().delete(actor_id);
@@ -2328,6 +3020,7 @@ fn delete_actor_rpg_state(ctx: &ReducerContext, actor_id: &String) {
 pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -> Result<(), String> {
     ensure_profile(ctx);
     let ids = parse_ids(&ids_json)?;
+    if !matches!(table_name.as_str(), "profiles" | "characters") { require_permission(ctx, table_permission(&table_name))?; }
     match table_name.as_str() {
         "characters" => {
             for id in ids {
@@ -2407,6 +3100,10 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
             require_admin(ctx)?;
             for id in ids { ctx.db.progression_config().id().delete(&id); }
         }
+        "world_combat_configs" => {
+            require_admin(ctx)?;
+            for id in ids { ctx.db.world_combat_config().id().delete(&id); }
+        }
         "equipment_slot_definitions" => {
             require_admin(ctx)?;
             for id in ids { ctx.db.equipment_slot_definition().id().delete(&id); }
@@ -2414,6 +3111,8 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
         "ability_definitions" => {
             require_admin(ctx)?;
             for id in ids {
+                let effect_ids = ctx.db.ability_effect_definition().iter().filter(|effect| effect.ability_id == id).map(|effect| effect.id).collect::<Vec<_>>();
+                for effect_id in effect_ids { delete_ability_effect(ctx, &effect_id); }
                 let grants = ctx.db.actor_ability().iter().filter(|grant| grant.ability_id == id).map(|grant| grant.id).collect::<Vec<_>>();
                 for grant in grants { ctx.db.actor_ability().id().delete(&grant); }
                 let action_id = format!("ability:{id}");
@@ -2421,6 +3120,10 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
                 for cooldown in cooldowns { ctx.db.actor_cooldown().id().delete(&cooldown); }
                 ctx.db.ability_definition().id().delete(&id);
             }
+        }
+        "ability_effect_definitions" => {
+            require_admin(ctx)?;
+            for id in ids { delete_ability_effect(ctx, &id); }
         }
         "actor_abilities" => {
             require_admin(ctx)?;
@@ -2512,6 +3215,13 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
                 for reward_id in reward_ids { ctx.db.quest_item_reward().id().delete(&reward_id); }
                 let actor_quest_ids = ctx.db.actor_quest().iter().filter(|row| row.quest_id == id).map(|row| row.id).collect::<Vec<_>>();
                 for actor_quest_id in actor_quest_ids { ctx.db.actor_quest().id().delete(&actor_quest_id); }
+                ctx.db.quest_rule().quest_id().delete(&id);
+                let choice_ids = ctx.db.quest_choice().iter().filter(|row| row.quest_id == id).map(|row| row.id).collect::<Vec<_>>();
+                for choice_id in choice_ids {
+                    let selected = ctx.db.actor_quest_choice().iter().filter(|row| row.choice_id == choice_id).map(|row| row.id).collect::<Vec<_>>();
+                    for selection in selected { ctx.db.actor_quest_choice().id().delete(&selection); }
+                    ctx.db.quest_choice().id().delete(&choice_id);
+                }
                 ctx.db.quest_definition().id().delete(&id);
             }
         }
@@ -2531,6 +3241,60 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
             require_admin(ctx)?;
             for id in ids { ctx.db.actor_wallet().id().delete(&id); }
         }
+        "quest_rules" => {
+            require_admin(ctx)?;
+            for id in ids { ctx.db.quest_rule().quest_id().delete(&id); }
+        }
+        "quest_choices" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let selected = ctx.db.actor_quest_choice().iter().filter(|row| row.choice_id == id).map(|row| row.id).collect::<Vec<_>>();
+                for selection in selected { ctx.db.actor_quest_choice().id().delete(&selection); }
+                ctx.db.quest_choice().id().delete(&id);
+            }
+        }
+        "character_option_definitions" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let grants = ctx.db.character_option_grant().iter().filter(|row| row.option_id == id).map(|row| row.id).collect::<Vec<_>>();
+                for grant in grants { ctx.db.character_option_grant().id().delete(&grant); }
+                let selections = ctx.db.actor_character_option().iter().filter(|row| row.option_id == id).map(|row| row.id).collect::<Vec<_>>();
+                for selection in selections { ctx.db.actor_character_option().id().delete(&selection); }
+                ctx.db.character_option_definition().id().delete(&id);
+            }
+        }
+        "character_option_grants" => { require_admin(ctx)?; for id in ids { ctx.db.character_option_grant().id().delete(&id); } }
+        "admin_role_definitions" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let assignments = ctx.db.admin_role_assignment().iter().filter(|row| row.role_id == id).map(|row| row.profile_id).collect::<Vec<_>>();
+                for assignment in assignments {
+                    ctx.db.admin_role_assignment().profile_id().delete(&assignment);
+                    if let Some(profile) = ctx.db.profile().id().find(&assignment) { ctx.db.profile().id().update(Profile { is_admin: false, ..profile }); }
+                }
+                ctx.db.admin_role_definition().id().delete(&id);
+            }
+        }
+        "admin_role_assignments" => { require_admin(ctx)?; for id in ids { ctx.db.admin_role_assignment().profile_id().delete(&id); if let Some(profile) = ctx.db.profile().id().find(&id) { ctx.db.profile().id().update(Profile { is_admin: false, ..profile }); } } }
+        "currency_definitions" => {
+            require_admin(ctx)?;
+            for id in ids {
+                if ctx.db.vendor_definition().iter().any(|row| row.currency_id == id) || ctx.db.crafting_recipe().iter().any(|row| row.currency_id.as_deref() == Some(id.as_str())) { return Err("Currency is used by a vendor or recipe.".to_string()); }
+                let balances = ctx.db.actor_currency().iter().filter(|row| row.currency_id == id).map(|row| row.id).collect::<Vec<_>>();
+                for balance in balances { ctx.db.actor_currency().id().delete(&balance); }
+                ctx.db.currency_definition().id().delete(&id);
+            }
+        }
+        "vendor_definitions" => {
+            require_admin(ctx)?;
+            for id in ids { let stocks = ctx.db.vendor_stock().iter().filter(|row| row.vendor_id == id).map(|row| row.id).collect::<Vec<_>>(); for stock in stocks { ctx.db.vendor_stock().id().delete(&stock); } ctx.db.vendor_definition().id().delete(&id); }
+        }
+        "vendor_stocks" => { require_admin(ctx)?; for id in ids { ctx.db.vendor_stock().id().delete(&id); } }
+        "crafting_recipes" => {
+            require_admin(ctx)?;
+            for id in ids { let ingredients = ctx.db.crafting_ingredient().iter().filter(|row| row.recipe_id == id).map(|row| row.id).collect::<Vec<_>>(); for ingredient in ingredients { ctx.db.crafting_ingredient().id().delete(&ingredient); } ctx.db.crafting_recipe().id().delete(&id); }
+        }
+        "crafting_ingredients" => { require_admin(ctx)?; for id in ids { ctx.db.crafting_ingredient().id().delete(&id); } }
         "actor_cooldowns" => {
             require_admin(ctx)?;
             for id in ids { ctx.db.actor_cooldown().id().delete(&id); }
@@ -2601,7 +3365,7 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
 #[reducer]
 pub fn admin_actor_action(ctx: &ReducerContext, actor_id: String, action: String, payload_json: String) -> Result<(), String> {
     ensure_profile(ctx);
-    require_admin(ctx)?;
+    require_permission(ctx, "players.moderate")?;
     if !actor_exists(ctx, &actor_id) { return Err("Actor does not exist.".to_string()); }
     let payload: Value = serde_json::from_str(&payload_json).map_err(|error| format!("Invalid moderation payload: {error}"))?;
     match action.as_str() {
@@ -2620,6 +3384,8 @@ pub fn admin_actor_action(ctx: &ReducerContext, actor_id: String, action: String
         "clear_cooldowns" => {
             let ids = ctx.db.actor_cooldown().iter().filter(|row| row.actor_id == actor_id).map(|row| row.id).collect::<Vec<_>>();
             for id in ids { ctx.db.actor_cooldown().id().delete(&id); }
+            let cast_ids = ctx.db.scheduled_cast().iter().filter(|row| row.actor_id == actor_id).map(|row| row.scheduled_id).collect::<Vec<_>>();
+            for id in cast_ids { ctx.db.scheduled_cast().scheduled_id().delete(id); }
         }
         "move" => {
             let room_id = payload.get("room_id").and_then(Value::as_str).ok_or_else(|| "Choose a destination room.".to_string())?;
@@ -2682,6 +3448,56 @@ pub fn admin_actor_action(ctx: &ReducerContext, actor_id: String, action: String
         _ => return Err(format!("Unsupported moderation action: {action}")),
     }
     Ok(())
+}
+
+fn apply_character_option(ctx: &ReducerContext, actor_id: &str, option: &CharacterOptionDefinition) -> Result<(), String> {
+    let selection_id = format!("{actor_id}::{}", option.option_kind);
+    if ctx.db.actor_character_option().id().find(&selection_id).is_some() { return Err(format!("A {} has already been selected.", option.option_kind)); }
+    let mut grants = ctx.db.character_option_grant().iter().filter(|grant| grant.option_id == option.id).collect::<Vec<_>>();
+    grants.sort_by_key(|grant| grant.sort_order);
+    for grant in grants {
+        match grant.grant_kind.as_str() {
+            "stat" => {
+                let Some(definition) = ctx.db.stat_definition().id().find(&grant.reference_id) else { continue };
+                let mut stat = actor_stat_row(ctx, actor_id, &definition);
+                let exists = ctx.db.actor_stat().id().find(&stat.id).is_some();
+                stat.base_value = stat.base_value.saturating_add(grant.amount).clamp(definition.minimum, definition.maximum);
+                stat.current_value = stat.current_value.saturating_add(grant.amount).clamp(definition.minimum, stat.base_value);
+                stat.updated_at = ctx.timestamp;
+                if exists { ctx.db.actor_stat().id().update(stat); } else { ctx.db.actor_stat().insert(stat); }
+            }
+            "ability" => {
+                let id = format!("{actor_id}::{}", grant.reference_id);
+                if ctx.db.actor_ability().id().find(&id).is_none() { ctx.db.actor_ability().insert(ActorAbility { id, actor_id: actor_id.to_string(), ability_id: grant.reference_id, granted_at: ctx.timestamp }); }
+            }
+            "item" => {
+                if ctx.db.object_definition().id().find(&grant.reference_id).is_none() { continue; }
+                let timestamp = ctx.timestamp.to_micros_since_unix_epoch();
+                ctx.db.world_object().insert(WorldObject { id: format!("origin-{}-{}-{timestamp}", actor_id, grant.id), definition_id: grant.reference_id, location_kind: if grant.equipped_slot.is_some() { "equipped".to_string() } else { "inventory".to_string() }, location_id: actor_id.to_string(), quantity: u32::try_from(grant.amount.max(1)).unwrap_or(1), equipped_slot: grant.equipped_slot, durability: 100, fuel_remaining: 0, is_active: false, state_json: format!(r#"{{"character_option":"{}"}}"#, option.id), created_at: ctx.timestamp, updated_at: ctx.timestamp });
+            }
+            _ => {}
+        }
+    }
+    if option.starting_gold > 0 {
+        let mut wallet = ensure_wallet(ctx, actor_id);
+        wallet.gold = wallet.gold.saturating_add(option.starting_gold);
+        wallet.updated_at = ctx.timestamp;
+        ctx.db.actor_wallet().id().update(wallet);
+    }
+    ctx.db.actor_character_option().insert(ActorCharacterOption { id: selection_id, actor_id: actor_id.to_string(), option_id: option.id.clone(), option_kind: option.option_kind.clone(), selected_at: ctx.timestamp });
+    if let Some(room_id) = option.starting_room_id.as_ref().cloned().or_else(|| choose_initial_spawn(ctx, actor_id).map(|point| point.room_id)) { move_actor_to_room(ctx, actor_id, &room_id)?; }
+    Ok(())
+}
+
+#[reducer]
+pub fn select_character_option(ctx: &ReducerContext, actor_id: String, option_id: String) -> Result<(), String> {
+    ensure_profile(ctx);
+    let owned = ctx.db.character().id().find(&actor_id).map(|character| character.owner == ctx.sender()).unwrap_or(false);
+    if !owned && !profile_for(ctx, ctx.sender()).map(|profile| profile.is_admin).unwrap_or(false) { return Err("You may only configure your own character.".to_string()); }
+    let option = ctx.db.character_option_definition().id().find(&option_id).filter(|option| option.active).ok_or_else(|| "Character option does not exist or is disabled.".to_string())?;
+    let progression = ensure_actor_progression(ctx, &actor_id);
+    if progression.level > 1 || progression.experience > 0 { return Err("Character options are locked after progression begins.".to_string()); }
+    apply_character_option(ctx, &actor_id, &option)
 }
 
 #[reducer]
@@ -2783,6 +3599,19 @@ fn world_progression_config(ctx: &ReducerContext) -> ProgressionConfig {
         })
 }
 
+fn world_combat_config(ctx: &ReducerContext) -> WorldCombatConfig {
+    ctx.db.world_combat_config().id().find(&"world".to_string())
+        .or_else(|| ctx.db.world_combat_config().iter().next())
+        .unwrap_or(WorldCombatConfig {
+            id: "world".to_string(), base_hit_chance_percent: 90, base_crit_chance_percent: 5,
+            crit_damage_percent: 150, base_dodge_chance_percent: 3, base_parry_chance_percent: 3,
+            base_block_chance_percent: 3, block_damage_reduction_percent: 40,
+            armor_effectiveness_percent: 100, pvp_damage_percent: 100, global_cooldown_ms: 1000,
+            assist_xp_percent: 50, threat_enabled: true, threat_decay_seconds: 30,
+            created_at: ctx.timestamp, updated_at: ctx.timestamp,
+        })
+}
+
 fn ensure_actor_progression(ctx: &ReducerContext, actor_id: &str) -> ActorProgression {
     let actor_key = actor_id.to_string();
     let progression = ctx.db.actor_progression().id().find(&actor_key).unwrap_or_else(|| {
@@ -2829,6 +3658,7 @@ fn world_lifecycle_config(ctx: &ReducerContext) -> WorldLifecycleConfig {
             spawn_protection_seconds: 0,
             reset_quests_on_death: false,
             clear_wanted_on_respawn: false,
+            maximum_lives: 0, create_lootable_corpse: false, allow_ability_revive: true,
             created_at: ctx.timestamp,
             updated_at: ctx.timestamp,
         })
@@ -2840,16 +3670,19 @@ fn ensure_actor_life_state(ctx: &ReducerContext, actor_id: &str) -> ActorLifeSta
     let state = ActorLifeState {
         id: id.clone(), actor_id: id, state: "alive".to_string(), death_room_id: None,
         pending_spawn_point_id: None, death_count: 0, died_at: None,
-        respawn_available_at_micros: 0, protected_until_micros: 0, updated_at: ctx.timestamp,
+        respawn_available_at_micros: 0, protected_until_micros: 0, lives_remaining: world_lifecycle_config(ctx).maximum_lives, updated_at: ctx.timestamp,
     };
     ctx.db.actor_life_state().insert(state.clone());
     state
 }
 
-fn active_spawn_points(ctx: &ReducerContext, initial: bool) -> Vec<SpawnPoint> {
+fn active_spawn_points(ctx: &ReducerContext, actor_id: &str, initial: bool, death_region_id: Option<&str>) -> Vec<SpawnPoint> {
     ctx.db.spawn_point().iter()
         .filter(|point| point.active && if initial { point.allows_initial_spawn } else { point.allows_respawn })
         .filter(|point| ctx.db.room().id().find(&point.room_id).is_some())
+        .filter(|point| point.required_option_id.as_ref().map(|option_id| ctx.db.actor_character_option().iter().any(|selection| selection.actor_id == actor_id && selection.option_id == *option_id)).unwrap_or(true))
+        .filter(|point| point.required_faction_id.as_ref().map(|faction_id| actor_reputation(ctx, actor_id, faction_id) >= point.required_reputation).unwrap_or(true))
+        .filter(|point| point.death_region_id.as_deref().map(|required| Some(required) == death_region_id).unwrap_or(true))
         .collect::<Vec<_>>()
 }
 
@@ -2860,7 +3693,7 @@ fn highest_priority_spawn(mut points: Vec<SpawnPoint>) -> Option<SpawnPoint> {
 
 fn choose_initial_spawn(ctx: &ReducerContext, actor_id: &str) -> Option<SpawnPoint> {
     let config = world_lifecycle_config(ctx);
-    let points = active_spawn_points(ctx, true);
+    let points = active_spawn_points(ctx, actor_id, true, None);
     if points.is_empty() { return None; }
     match config.initial_spawn_policy.as_str() {
         "fixed" => config.fixed_initial_spawn_point_id.as_ref().and_then(|id| points.iter().find(|point| &point.id == id).cloned()).or_else(|| highest_priority_spawn(points)),
@@ -2905,7 +3738,8 @@ fn nearest_spawn(ctx: &ReducerContext, origin_room: &str, mut points: Vec<SpawnP
 
 fn choose_respawn_point(ctx: &ReducerContext, actor_id: &str, origin_room: &str) -> Option<SpawnPoint> {
     let config = world_lifecycle_config(ctx);
-    let mut points = active_spawn_points(ctx, false);
+    let origin_region = ctx.db.room().id().find(&origin_room.to_string()).and_then(|room| room.region_name);
+    let mut points = active_spawn_points(ctx, actor_id, false, origin_region.as_deref());
     if points.is_empty() { return None; }
     match config.respawn_policy.as_str() {
         "fixed" => config.fixed_respawn_point_id.as_ref().and_then(|id| points.iter().find(|point| &point.id == id).cloned()).or_else(|| highest_priority_spawn(points)),
@@ -2915,7 +3749,6 @@ fn choose_respawn_point(ctx: &ReducerContext, actor_id: &str, origin_room: &str)
         }
         "highest_priority" => highest_priority_spawn(points),
         "region_nearest" => {
-            let origin_region = ctx.db.room().id().find(&origin_room.to_string()).and_then(|room| room.region_name);
             let regional = origin_region.as_ref().map(|region_id| points.iter().filter(|point| ctx.db.room().id().find(&point.room_id).and_then(|room| room.region_name).as_deref() == Some(region_id.as_str())).cloned().collect::<Vec<_>>()).unwrap_or_default();
             if regional.is_empty() { nearest_spawn(ctx, origin_room, points) } else { nearest_spawn(ctx, origin_room, regional) }
         }
@@ -2982,7 +3815,12 @@ fn equipment_stat_bonus(ctx: &ReducerContext, actor_id: &str, stat_id: &str) -> 
 
 fn actor_stat_value(ctx: &ReducerContext, actor_id: &str, definition: &StatDefinition) -> i32 {
     let row = actor_stat_row(ctx, actor_id, definition);
-    row.current_value.saturating_add(equipment_stat_bonus(ctx, actor_id, &definition.id))
+    let now = ctx.timestamp.to_micros_since_unix_epoch();
+    let status_bonus = ctx.db.actor_status_effect().iter()
+        .filter(|status| status.actor_id == actor_id && status.stat_id.as_deref() == Some(definition.id.as_str()) && status.expires_at_micros > now)
+        .map(|status| status.modifier_value.saturating_mul(i32::try_from(status.stacks).unwrap_or(i32::MAX)))
+        .sum::<i32>();
+    row.current_value.saturating_add(equipment_stat_bonus(ctx, actor_id, &definition.id)).saturating_add(status_bonus)
 }
 
 fn set_actor_stat_current(ctx: &ReducerContext, actor_id: &str, definition: &StatDefinition, value: i32) {
@@ -3235,6 +4073,18 @@ fn list_stats(ctx: &ReducerContext, room_id: &str, actor_id: &str) {
     rpg_message(ctx, room_id, actor_id, "system", format!("[LEVEL {} · {}]\n\n[HERO STATS]\n{}{}", progression.level, xp, lines.join("\n"), training_hint));
 }
 
+fn list_status_effects(ctx: &ReducerContext, room_id: &str, actor_id: &str) {
+    let now = ctx.timestamp.to_micros_since_unix_epoch();
+    let mut statuses = ctx.db.actor_status_effect().iter().filter(|status| status.actor_id == actor_id && status.expires_at_micros > now).collect::<Vec<_>>();
+    statuses.sort_by(|left, right| left.expires_at_micros.cmp(&right.expires_at_micros));
+    let lines = statuses.into_iter().map(|status| {
+        let seconds = status.expires_at_micros.saturating_sub(now).saturating_add(999_999) / 1_000_000;
+        let modifier = status.stat_id.as_ref().map(|stat| format!(" · {stat} {:+}", status.modifier_value.saturating_mul(status.stacks as i32))).unwrap_or_default();
+        format!("• {} ×{} · {}s{}", status.name, status.stacks, seconds, modifier)
+    }).collect::<Vec<_>>();
+    rpg_message(ctx, room_id, actor_id, "system", if lines.is_empty() { "[STATUS EFFECTS]\n• None".to_string() } else { format!("[STATUS EFFECTS]\n{}", lines.join("\n")) });
+}
+
 fn describe_object(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &str) {
     let found = find_object_at(ctx, "room", room_id, query)
         .or_else(|| find_carried_object(ctx, actor_id, query));
@@ -3273,6 +4123,11 @@ fn target_actor_in_room(ctx: &ReducerContext, room_id: &str, actor_id: &str, que
         .or_else(|| ctx.db.character().iter()
             .find(|character| character.id != actor_id && character.current_room.as_deref() == Some(room_id) && character.name.eq_ignore_ascii_case(query))
             .map(|character| (character.id, character.name, false)))
+        .or_else(|| ctx.db.profile().iter()
+            .find(|profile| profile.id != actor_id
+                && profile.current_room.as_deref() == Some(room_id)
+                && profile.name.as_deref().or(profile.handle.as_deref()).map(|name| name.eq_ignore_ascii_case(query)).unwrap_or(false))
+            .map(|profile| (profile.id, profile.name.or(profile.handle).unwrap_or_else(|| "Traveler".to_string()), false)))
 }
 
 fn npc_disposition(npc: &Npc) -> &str {
@@ -3296,6 +4151,24 @@ fn actor_current_room(ctx: &ReducerContext, actor_id: &str) -> Option<String> {
     ctx.db.character().id().find(&actor_id).and_then(|actor| actor.current_room)
         .or_else(|| ctx.db.profile().id().find(&actor_id).and_then(|actor| actor.current_room))
         .or_else(|| ctx.db.npc().id().find(&actor_id).and_then(|actor| actor.current_room))
+}
+
+fn actor_display_name(ctx: &ReducerContext, actor_id: &str) -> Option<String> {
+    let key = actor_id.to_string();
+    ctx.db.character().id().find(&key).map(|actor| actor.name)
+        .or_else(|| ctx.db.profile().id().find(&key).map(|actor| actor.name.or(actor.handle).unwrap_or_else(|| "Traveler".to_string())))
+        .or_else(|| ctx.db.npc().id().find(&key).map(|actor| actor.name))
+}
+
+fn highest_threat_target(ctx: &ReducerContext, npc_id: &str, room_id: &str) -> Option<(String, String)> {
+    let config = world_combat_config(ctx);
+    if !config.threat_enabled { return None; }
+    let cutoff = ctx.timestamp.to_micros_since_unix_epoch().saturating_sub(i64::from(config.threat_decay_seconds) * 1_000_000);
+    ctx.db.npc_threat().iter()
+        .filter(|row| row.npc_id == npc_id && row.updated_at_micros >= cutoff)
+        .filter(|row| actor_current_room(ctx, &row.actor_id).as_deref() == Some(room_id) && !actor_is_dead(ctx, &row.actor_id))
+        .max_by_key(|row| row.threat)
+        .and_then(|row| actor_display_name(ctx, &row.actor_id).map(|name| (row.actor_id, name)))
 }
 
 fn move_actor_to_room(ctx: &ReducerContext, actor_id: &str, room_id: &str) -> Result<(), String> {
@@ -3375,6 +4248,117 @@ fn ensure_wallet(ctx: &ReducerContext, actor_id: &str) -> ActorWallet {
     wallet
 }
 
+fn currency_balance(ctx: &ReducerContext, actor_id: &str, currency_id: &str) -> i64 {
+    if currency_id == "gold" { return i64::from(ensure_wallet(ctx, actor_id).gold); }
+    ctx.db.actor_currency().id().find(&format!("{actor_id}::{currency_id}")).map(|row| row.balance).unwrap_or(0)
+}
+
+fn change_currency(ctx: &ReducerContext, actor_id: &str, currency_id: &str, delta: i64) -> Result<i64, String> {
+    if currency_id == "gold" {
+        let mut wallet = ensure_wallet(ctx, actor_id);
+        let next = i64::from(wallet.gold).saturating_add(delta);
+        if next < 0 { return Err("Not enough gold.".to_string()); }
+        wallet.gold = i32::try_from(next).unwrap_or(i32::MAX); wallet.updated_at = ctx.timestamp; ctx.db.actor_wallet().id().update(wallet.clone()); return Ok(i64::from(wallet.gold));
+    }
+    let definition = ctx.db.currency_definition().id().find(&currency_id.to_string()).ok_or_else(|| "Currency does not exist.".to_string())?;
+    let id = format!("{actor_id}::{currency_id}"); let existing = ctx.db.actor_currency().id().find(&id); let current = existing.as_ref().map(|row| row.balance).unwrap_or(0); let next = current.saturating_add(delta);
+    if next < 0 { return Err(format!("Not enough {}.", definition.name)); }
+    let row = ActorCurrency { id: id.clone(), actor_id: actor_id.to_string(), currency_id: currency_id.to_string(), balance: next.min(definition.maximum_balance), updated_at: ctx.timestamp };
+    if existing.is_some() { ctx.db.actor_currency().id().update(row.clone()); } else { ctx.db.actor_currency().insert(row.clone()); }
+    Ok(row.balance)
+}
+
+fn grant_inventory_item(ctx: &ReducerContext, actor_id: &str, definition_id: &str, quantity: u32, source: &str) -> Result<String, String> {
+    let definition = ctx.db.object_definition().id().find(&definition_id.to_string()).ok_or_else(|| "Object definition does not exist.".to_string())?;
+    if definition.stackable {
+        if let Some(existing) = ctx.db.world_object().iter().find(|object| object.location_kind == "inventory" && object.location_id == actor_id && object.definition_id == definition_id) {
+            ctx.db.world_object().id().update(WorldObject { quantity: existing.quantity.saturating_add(quantity), updated_at: ctx.timestamp, ..existing });
+            return Ok(format!("{} x{quantity}", definition.name));
+        }
+    }
+    if !inventory_has_space(ctx, actor_id, 1) { return Err("Your inventory is full.".to_string()); }
+    let timestamp = ctx.timestamp.to_micros_since_unix_epoch();
+    ctx.db.world_object().insert(WorldObject { id: format!("{source}-{actor_id}-{definition_id}-{timestamp}"), definition_id: definition_id.to_string(), location_kind: "inventory".to_string(), location_id: actor_id.to_string(), quantity: quantity.max(1), equipped_slot: None, durability: 100, fuel_remaining: 0, is_active: false, state_json: format!(r#"{{"source":"{source}"}}"#), created_at: ctx.timestamp, updated_at: ctx.timestamp });
+    Ok(format!("{} x{quantity}", definition.name))
+}
+
+fn vendor_matches(ctx: &ReducerContext, room_id: &str, query: &str) -> Option<VendorDefinition> {
+    let query = query.trim();
+    ctx.db.vendor_definition().iter().find(|vendor| ctx.db.npc().id().find(&vendor.npc_id).map(|npc| npc.current_room.as_deref() == Some(room_id) && (query.is_empty() || vendor.name.eq_ignore_ascii_case(query) || npc.name.eq_ignore_ascii_case(query) || npc.alias.as_deref().map(|alias| alias.eq_ignore_ascii_case(query)).unwrap_or(false))).unwrap_or(false))
+}
+
+fn list_shop(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &str) {
+    let Some(vendor) = vendor_matches(ctx, room_id, query) else { rpg_message(ctx, room_id, actor_id, "error", "There is no matching vendor here.".to_string()); return };
+    if vendor.required_faction_id.as_ref().map(|faction| actor_reputation(ctx, actor_id, faction) < vendor.required_reputation).unwrap_or(false) { rpg_message(ctx, room_id, actor_id, "error", "This vendor refuses to trade at your current reputation.".to_string()); return; }
+    let mut stocks = ctx.db.vendor_stock().iter().filter(|stock| stock.vendor_id == vendor.id).collect::<Vec<_>>(); stocks.sort_by(|left, right| left.price.cmp(&right.price));
+    let currency_name = if vendor.currency_id == "gold" { "gold".to_string() } else { ctx.db.currency_definition().id().find(&vendor.currency_id).map(|row| row.name).unwrap_or(vendor.currency_id.clone()) };
+    let lines = stocks.into_iter().filter_map(|stock| ctx.db.object_definition().id().find(&stock.definition_id).map(|item| format!("• {} {} — {} {}{}", item.icon, item.name, stock.price, currency_name, if stock.stock < 0 { "".to_string() } else { format!(" · {} left", stock.stock) }))).collect::<Vec<_>>();
+    rpg_message(ctx, room_id, actor_id, "system", format!("[{}]\nBalance: {} {}\n{}\n\nUse `buy <item>` or `sell <item>`.", vendor.name, currency_balance(ctx, actor_id, &vendor.currency_id), currency_name, if lines.is_empty() { "• Sold out".to_string() } else { lines.join("\n") }));
+}
+
+fn buy_from_vendor(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &str) {
+    let (item_part, vendor_query) = query.split_once(" from ").unwrap_or((query, ""));
+    let (item_query, quantity) = item_part.rsplit_once(' ').and_then(|(name, value)| value.parse::<u32>().ok().map(|quantity| (name, quantity.max(1)))).unwrap_or((item_part, 1));
+    let Some(vendor) = vendor_matches(ctx, room_id, vendor_query) else { rpg_message(ctx, room_id, actor_id, "error", "There is no matching vendor here.".to_string()); return };
+    let Some(mut stock) = ctx.db.vendor_stock().iter().find(|stock| stock.vendor_id == vendor.id && ctx.db.object_definition().id().find(&stock.definition_id).map(|item| item.id.eq_ignore_ascii_case(item_query.trim()) || item.name.eq_ignore_ascii_case(item_query.trim()) || item.name.to_lowercase().starts_with(&item_query.trim().to_lowercase())).unwrap_or(false)) else { rpg_message(ctx, room_id, actor_id, "error", "That vendor does not sell this item.".to_string()); return };
+    let quantity = quantity.min(stock.maximum_per_purchase.max(1));
+    if stock.stock >= 0 && stock.stock < i32::try_from(quantity).unwrap_or(i32::MAX) { rpg_message(ctx, room_id, actor_id, "error", "The vendor does not have that many in stock.".to_string()); return; }
+    let cost = stock.price.saturating_mul(i64::from(quantity));
+    if currency_balance(ctx, actor_id, &vendor.currency_id) < cost { rpg_message(ctx, room_id, actor_id, "error", "You cannot afford that purchase.".to_string()); return; }
+    if let Err(error) = grant_inventory_item(ctx, actor_id, &stock.definition_id, quantity, "purchase") { rpg_message(ctx, room_id, actor_id, "error", error); return; }
+    let _ = change_currency(ctx, actor_id, &vendor.currency_id, -cost);
+    if stock.stock >= 0 { stock.stock = stock.stock.saturating_sub(i32::try_from(quantity).unwrap_or(i32::MAX)); stock.updated_at = ctx.timestamp; ctx.db.vendor_stock().id().update(stock.clone()); }
+    let name = ctx.db.object_definition().id().find(&stock.definition_id).map(|item| item.name).unwrap_or(stock.definition_id);
+    refresh_actor_acquire_quests(ctx, actor_id); rpg_message(ctx, room_id, actor_id, "system", format!("You buy {name} x{quantity} for {cost} {}.", vendor.currency_id));
+}
+
+fn sell_to_vendor(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &str) {
+    let (item_query, vendor_query) = query.split_once(" to ").unwrap_or((query, ""));
+    let Some(vendor) = vendor_matches(ctx, room_id, vendor_query).filter(|vendor| vendor.buys_from_players) else { rpg_message(ctx, room_id, actor_id, "error", "There is no vendor here buying items.".to_string()); return };
+    let Some((object, definition)) = find_carried_object(ctx, actor_id, item_query.trim()).filter(|(object, _)| object.location_kind == "inventory") else { rpg_message(ctx, room_id, actor_id, "error", "You are not carrying that item loose in your inventory.".to_string()); return };
+    let base = ctx.db.vendor_stock().iter().find(|stock| stock.vendor_id == vendor.id && stock.definition_id == definition.id).map(|stock| stock.price).unwrap_or(0);
+    if base <= 0 { rpg_message(ctx, room_id, actor_id, "error", "The vendor is not interested in that item.".to_string()); return; }
+    let value = base.saturating_mul(i64::from(vendor.sell_price_percent)).saturating_div(100).max(1);
+    consume_object_quantity(ctx, object, 1); let _ = change_currency(ctx, actor_id, &vendor.currency_id, value); refresh_actor_acquire_quests(ctx, actor_id);
+    rpg_message(ctx, room_id, actor_id, "system", format!("You sell {} for {value} {}.", definition.name, vendor.currency_id));
+}
+
+fn repair_at_vendor(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &str) {
+    let Some(vendor) = vendor_matches(ctx, room_id, "") else { rpg_message(ctx, room_id, actor_id, "error", "A vendor must be present to repair equipment.".to_string()); return };
+    let Some((object, definition)) = find_carried_object(ctx, actor_id, query).filter(|(object, definition)| object.durability < 100 && (definition.weapon_damage > 0 || definition.armor_value > 0 || definition.equipment_slot.is_some())) else { rpg_message(ctx, room_id, actor_id, "error", "That item is not damaged equipment you carry or wear.".to_string()); return };
+    let base_price = ctx.db.vendor_stock().iter().find(|stock| stock.vendor_id == vendor.id && stock.definition_id == definition.id).map(|stock| stock.price).unwrap_or(10).max(1);
+    let missing = i64::from(100i32.saturating_sub(object.durability).max(1));
+    let cost = base_price.saturating_mul(missing).saturating_add(99).saturating_div(100).max(1);
+    if change_currency(ctx, actor_id, &vendor.currency_id, -cost).is_err() { rpg_message(ctx, room_id, actor_id, "error", format!("Repairing {} costs {cost} {}, which you cannot afford.", definition.name, vendor.currency_id)); return; }
+    ctx.db.world_object().id().update(WorldObject { durability: 100, updated_at: ctx.timestamp, ..object });
+    rpg_message(ctx, room_id, actor_id, "system", format!("{} repairs {} for {cost} {}.", vendor.name, definition.name, vendor.currency_id));
+}
+
+fn recipe_station_available(ctx: &ReducerContext, room_id: &str, recipe: &CraftingRecipe) -> bool {
+    let Some(required) = recipe.station_tag.as_ref() else { return true };
+    ctx.db.world_object().iter().filter(|object| object.location_kind == "room" && object.location_id == room_id).filter_map(|object| object_definition_for(ctx, &object)).any(|definition| serde_json::from_str::<Vec<String>>(&definition.tags).unwrap_or_default().iter().any(|tag| tag.eq_ignore_ascii_case(required)))
+}
+
+fn list_recipes(ctx: &ReducerContext, room_id: &str, actor_id: &str) {
+    let level = ensure_actor_progression(ctx, actor_id).level;
+    let mut recipes = ctx.db.crafting_recipe().iter().filter(|recipe| recipe.active).collect::<Vec<_>>(); recipes.sort_by(|left, right| left.name.cmp(&right.name));
+    let lines = recipes.into_iter().map(|recipe| { let output = ctx.db.object_definition().id().find(&recipe.output_definition_id).map(|item| item.name).unwrap_or(recipe.output_definition_id.clone()); let station = if recipe_station_available(ctx, room_id, &recipe) { "ready" } else { "station missing" }; format!("• {} → {} x{} · level {} · {station}", recipe.name, output, recipe.output_quantity, recipe.required_level) }).collect::<Vec<_>>();
+    rpg_message(ctx, room_id, actor_id, "system", format!("[CRAFTING · LEVEL {level}]\n{}\n\nUse `craft <recipe>`.", if lines.is_empty() { "• No recipes authored".to_string() } else { lines.join("\n") }));
+}
+
+fn craft_recipe(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &str) {
+    let Some(recipe) = ctx.db.crafting_recipe().iter().find(|recipe| recipe.active && (recipe.id.eq_ignore_ascii_case(query) || recipe.name.eq_ignore_ascii_case(query) || recipe.name.to_lowercase().starts_with(&query.to_lowercase()))) else { rpg_message(ctx, room_id, actor_id, "error", "No active recipe matches that name.".to_string()); return };
+    if ensure_actor_progression(ctx, actor_id).level < recipe.required_level { rpg_message(ctx, room_id, actor_id, "error", format!("{} requires level {}.", recipe.name, recipe.required_level)); return; }
+    if !recipe_station_available(ctx, room_id, &recipe) { rpg_message(ctx, room_id, actor_id, "error", format!("{} requires a nearby {} station.", recipe.name, recipe.station_tag.unwrap_or_default())); return; }
+    let ingredients = ctx.db.crafting_ingredient().iter().filter(|ingredient| ingredient.recipe_id == recipe.id).collect::<Vec<_>>();
+    if ingredients.iter().any(|ingredient| actor_item_quantity(ctx, actor_id, &ingredient.definition_id) < ingredient.quantity) { rpg_message(ctx, room_id, actor_id, "error", "You do not have all required ingredients.".to_string()); return; }
+    if let Some(currency) = recipe.currency_id.as_ref() { if currency_balance(ctx, actor_id, currency) < recipe.currency_cost { rpg_message(ctx, room_id, actor_id, "error", "You cannot afford the crafting cost.".to_string()); return; } }
+    if let Err(error) = grant_inventory_item(ctx, actor_id, &recipe.output_definition_id, recipe.output_quantity, "crafted") { rpg_message(ctx, room_id, actor_id, "error", error); return; }
+    for ingredient in ingredients.into_iter().filter(|ingredient| ingredient.consumed) { consume_actor_items(ctx, actor_id, &ingredient.definition_id, ingredient.quantity); }
+    if let Some(currency) = recipe.currency_id.as_ref() { let _ = change_currency(ctx, actor_id, currency, -recipe.currency_cost); }
+    refresh_actor_acquire_quests(ctx, actor_id); rpg_message(ctx, room_id, actor_id, "system", format!("You craft {}.", recipe.name));
+}
+
 fn object_belongs_to_actor(ctx: &ReducerContext, object: &WorldObject, actor_id: &str) -> bool {
     let mut current = object.clone();
     let mut visited = Vec::new();
@@ -3415,24 +4399,36 @@ fn quest_objective_label(ctx: &ReducerContext, objective: &QuestObjective) -> St
     if !objective.description.trim().is_empty() { return objective.description.clone(); }
     let target = match objective.objective_type.as_str() {
         "explore_room" => ctx.db.room().id().find(&objective.target_id).map(|row| row.name),
-        "acquire_item" => ctx.db.object_definition().id().find(&objective.target_id).map(|row| row.name),
-        "kill_npc" | "talk_npc" => ctx.db.npc().id().find(&objective.target_id).map(|row| row.name),
+        "acquire_item" | "deliver_item" | "interact_object" => ctx.db.object_definition().id().find(&objective.target_id).map(|row| row.name),
+        "kill_npc" | "talk_npc" | "escort_npc" => ctx.db.npc().id().find(&objective.target_id).map(|row| row.name),
         "kill_faction" => ctx.db.faction_definition().id().find(&objective.target_id).map(|row| row.name),
         _ => None,
     }.unwrap_or_else(|| objective.target_id.clone());
     match objective.objective_type.as_str() {
         "explore_room" => format!("Explore {target}"),
         "acquire_item" => format!("Acquire {target}"),
+        "deliver_item" => format!("Deliver {target}"),
+        "interact_object" => format!("Interact with {target}"),
         "kill_npc" => format!("Defeat {target}"),
         "kill_faction" => format!("Defeat members of {target}"),
         "talk_npc" => format!("Speak with {target}"),
+        "escort_npc" => format!("Escort {target}"),
+        "pay_gold" => format!("Pay {} gold", objective.required_count),
+        "choice" => "Make a quest choice".to_string(),
+        "survive" => format!("Survive for {} seconds", objective.required_count),
         _ => target,
     }
 }
 
 fn objective_progress(ctx: &ReducerContext, actor_id: &str, objective: &QuestObjective) -> u32 {
-    if objective.objective_type == "acquire_item" {
+    if matches!(objective.objective_type.as_str(), "acquire_item" | "deliver_item") {
         return actor_item_quantity(ctx, actor_id, &objective.target_id).min(objective.required_count);
+    }
+    if objective.objective_type == "pay_gold" { return u32::try_from(ensure_wallet(ctx, actor_id).gold.max(0)).unwrap_or(u32::MAX).min(objective.required_count); }
+    if objective.objective_type == "choice" { return u32::from(ctx.db.actor_quest_choice().id().find(&format!("{actor_id}::{}", objective.quest_id)).is_some()).min(objective.required_count); }
+    if objective.objective_type == "survive" {
+        let elapsed = ctx.db.actor_quest().id().find(&actor_quest_id(actor_id, &objective.quest_id)).map(|quest| ctx.timestamp.to_micros_since_unix_epoch().saturating_sub(quest.accepted_at.to_micros_since_unix_epoch()) / 1_000_000).unwrap_or(0);
+        return u32::try_from(elapsed.max(0)).unwrap_or(u32::MAX).min(objective.required_count);
     }
     ctx.db.actor_quest_progress().id().find(&quest_progress_id(actor_id, &objective.id)).map(|row| row.progress).unwrap_or(0).min(objective.required_count)
 }
@@ -3449,7 +4445,13 @@ fn set_objective_progress(ctx: &ReducerContext, actor_id: &str, objective: &Ques
 fn refresh_actor_quest(ctx: &ReducerContext, actor_id: &str, quest_id: &str) -> Option<ActorQuest> {
     let id = actor_quest_id(actor_id, quest_id);
     let mut actor_quest = ctx.db.actor_quest().id().find(&id)?;
-    if actor_quest.status == "completed" { return Some(actor_quest); }
+    if matches!(actor_quest.status.as_str(), "completed" | "failed") { return Some(actor_quest); }
+    if let Some(rule) = ctx.db.quest_rule().quest_id().find(&quest_id.to_string()) {
+        let elapsed = ctx.timestamp.to_micros_since_unix_epoch().saturating_sub(actor_quest.accepted_at.to_micros_since_unix_epoch());
+        if rule.time_limit_seconds > 0 && elapsed > i64::from(rule.time_limit_seconds) * 1_000_000 {
+            actor_quest.status = "failed".to_string(); actor_quest.updated_at = ctx.timestamp; ctx.db.actor_quest().id().update(actor_quest.clone()); return Some(actor_quest);
+        }
+    }
     let objectives = ctx.db.quest_objective().iter().filter(|objective| objective.quest_id == quest_id).collect::<Vec<_>>();
     let mut complete = true;
     for objective in objectives {
@@ -3498,6 +4500,14 @@ fn quest_requirement_error(ctx: &ReducerContext, actor_id: &str, quest: &QuestDe
         let reputation = actor_reputation(ctx, actor_id, faction_id);
         if reputation < quest.required_reputation { return Some(format!("Requires {:+} reputation with {}.", quest.required_reputation, ctx.db.faction_definition().id().find(faction_id).map(|row| row.name).unwrap_or_else(|| faction_id.clone()))); }
     }
+    if let Some(rule) = ctx.db.quest_rule().quest_id().find(&quest.id) {
+        if let Some(prerequisite) = rule.prerequisite_quest_id.as_ref() {
+            let completions = ctx.db.actor_quest().id().find(&actor_quest_id(actor_id, prerequisite)).map(|row| row.completion_count).unwrap_or(0);
+            if completions < rule.prerequisite_completions.max(1) { return Some(format!("Requires completing {} first.", ctx.db.quest_definition().id().find(prerequisite).map(|row| row.title).unwrap_or_else(|| prerequisite.clone()))); }
+        }
+        let completions = ctx.db.actor_quest().id().find(&actor_quest_id(actor_id, &quest.id)).map(|row| row.completion_count).unwrap_or(0);
+        if rule.maximum_completions > 0 && completions >= rule.maximum_completions { return Some("Completion limit reached.".to_string()); }
+    }
     None
 }
 
@@ -3513,11 +4523,11 @@ fn accept_quest(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &str
     }
     let id = actor_quest_id(actor_id, &quest.id);
     let existing = ctx.db.actor_quest().id().find(&id);
-    if existing.as_ref().map(|row| row.status != "completed").unwrap_or(false) {
+    if existing.as_ref().map(|row| !matches!(row.status.as_str(), "completed" | "failed")).unwrap_or(false) {
         rpg_message(ctx, room_id, actor_id, "error", format!("{} is already in your quest log.", quest.title));
         return;
     }
-    if existing.is_some() && !quest.repeatable {
+    if existing.as_ref().map(|row| row.status == "completed").unwrap_or(false) && !quest.repeatable {
         rpg_message(ctx, room_id, actor_id, "error", format!("You have already completed {}.", quest.title));
         return;
     }
@@ -3582,7 +4592,7 @@ fn turn_in_quest(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &st
         rpg_message(ctx, room_id, actor_id, "error", format!("You need {needed_stacks} free inventory stack(s) to receive the quest rewards."));
         return;
     }
-    let objectives = ctx.db.quest_objective().iter().filter(|objective| objective.quest_id == quest.id && objective.objective_type == "acquire_item" && objective.consume_on_turn_in).collect::<Vec<_>>();
+    let objectives = ctx.db.quest_objective().iter().filter(|objective| objective.quest_id == quest.id && matches!(objective.objective_type.as_str(), "acquire_item" | "deliver_item") && objective.consume_on_turn_in).collect::<Vec<_>>();
     let mut required_items = BTreeMap::<String, u32>::new();
     for objective in objectives {
         required_items.entry(objective.target_id).and_modify(|quantity| *quantity = (*quantity).max(objective.required_count)).or_insert(objective.required_count);
@@ -3596,6 +4606,9 @@ fn turn_in_quest(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &st
         consume_actor_items(ctx, actor_id, &definition_id, quantity);
     }
     let mut wallet = ensure_wallet(ctx, actor_id);
+    let gold_payment = ctx.db.quest_objective().iter().filter(|objective| objective.quest_id == quest.id && objective.objective_type == "pay_gold" && objective.consume_on_turn_in).map(|objective| objective.required_count).max().unwrap_or(0);
+    if wallet.gold < i32::try_from(gold_payment).unwrap_or(i32::MAX) { rpg_message(ctx, room_id, actor_id, "error", "You no longer have the gold required for this quest.".to_string()); refresh_actor_quest(ctx, actor_id, &quest.id); return; }
+    wallet.gold = wallet.gold.saturating_sub(i32::try_from(gold_payment).unwrap_or(i32::MAX));
     wallet.gold = wallet.gold.saturating_add(quest.gold_reward).max(0);
     wallet.updated_at = ctx.timestamp;
     ctx.db.actor_wallet().id().update(wallet.clone());
@@ -3616,13 +4629,28 @@ fn turn_in_quest(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &st
     if let Some(message) = xp_message { reward_lines.push(message); }
     if let Some(message) = reputation_message { reward_lines.push(message); }
     if !item_names.is_empty() { reward_lines.push(format!("Items: {}", item_names.join(", "))); }
+    if let Some(rule) = ctx.db.quest_rule().quest_id().find(&quest.id) { if let Some(next_id) = rule.next_quest_id { if let Some(next) = ctx.db.quest_definition().id().find(&next_id) { reward_lines.push(format!("Follow-up unlocked: {}", next.title)); } } }
     rpg_message(ctx, room_id, actor_id, "system", format!("[QUEST COMPLETE] {}\n{} accepts your report.\n{}", quest.title, turn_in_npc.name, reward_lines.join("\n")));
+}
+
+fn choose_quest_branch(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &str) {
+    let active_ids = ctx.db.actor_quest().iter().filter(|row| row.actor_id == actor_id && row.status == "active").map(|row| row.quest_id).collect::<Vec<_>>();
+    let Some(choice) = ctx.db.quest_choice().iter().find(|choice| active_ids.contains(&choice.quest_id) && (choice.id.eq_ignore_ascii_case(query) || choice.label.eq_ignore_ascii_case(query) || choice.label.to_lowercase().starts_with(&query.to_lowercase()))) else { rpg_message(ctx, room_id, actor_id, "error", format!("No active quest offers the choice \"{}\".", query.trim())); return };
+    let id = format!("{actor_id}::{}", choice.quest_id);
+    if ctx.db.actor_quest_choice().id().find(&id).is_some() { rpg_message(ctx, room_id, actor_id, "error", "You have already made this quest choice.".to_string()); return; }
+    ctx.db.actor_quest_choice().insert(ActorQuestChoice { id, actor_id: actor_id.to_string(), quest_id: choice.quest_id.clone(), choice_id: choice.id.clone(), chosen_at: ctx.timestamp });
+    if choice.gold_reward != 0 { let mut wallet = ensure_wallet(ctx, actor_id); wallet.gold = wallet.gold.saturating_add(choice.gold_reward).max(0); wallet.updated_at = ctx.timestamp; ctx.db.actor_wallet().id().update(wallet); }
+    if let Some(faction) = choice.reputation_faction_id.as_ref() { change_reputation(ctx, actor_id, faction, choice.reputation_reward); }
+    advance_quest_event(ctx, actor_id, "choice", &choice.id, 1);
+    refresh_actor_quest(ctx, actor_id, &choice.quest_id);
+    let follow_up = choice.next_quest_id.as_ref().and_then(|id| ctx.db.quest_definition().id().find(id)).map(|quest| format!(" Follow-up unlocked: {}.", quest.title)).unwrap_or_default();
+    rpg_message(ctx, room_id, actor_id, "system", format!("[CHOICE MADE] {} — {}{}", choice.label, choice.description, follow_up));
 }
 
 fn list_quests(ctx: &ReducerContext, room_id: &str, actor_id: &str) {
     refresh_actor_acquire_quests(ctx, actor_id);
     let wallet = ensure_wallet(ctx, actor_id);
-    let active = ctx.db.actor_quest().iter().filter(|row| row.actor_id == actor_id && row.status != "completed").collect::<Vec<_>>();
+    let active = ctx.db.actor_quest().iter().filter(|row| row.actor_id == actor_id && matches!(row.status.as_str(), "active" | "ready")).collect::<Vec<_>>();
     let mut sections = Vec::new();
     for actor_quest in active {
         let Some(quest) = ctx.db.quest_definition().id().find(&actor_quest.quest_id) else { continue };
@@ -3630,12 +4658,15 @@ fn list_quests(ctx: &ReducerContext, room_id: &str, actor_id: &str) {
         objectives.sort_by_key(|objective| objective.sort_order);
         let lines = objectives.into_iter().map(|objective| format!("{} {}/{}", quest_objective_label(ctx, &objective), objective_progress(ctx, actor_id, &objective), objective.required_count)).collect::<Vec<_>>();
         sections.push(format!("[{} - {}]\n{}\nTurn in to: {}", quest.title, actor_quest.status.to_uppercase(), if lines.is_empty() { "No objectives".to_string() } else { lines.join("\n") }, ctx.db.npc().id().find(&quest.turn_in_npc_id).map(|npc| npc.name).unwrap_or_else(|| quest.turn_in_npc_id.clone())));
+        let mut choices = ctx.db.quest_choice().iter().filter(|choice| choice.quest_id == quest.id).collect::<Vec<_>>();
+        choices.sort_by_key(|choice| choice.sort_order);
+        if !choices.is_empty() && ctx.db.actor_quest_choice().id().find(&format!("{actor_id}::{}", quest.id)).is_none() { sections.push(format!("[CHOICE - {}]\n{}\nUse `choose <option>`.", quest.title, choices.into_iter().map(|choice| format!("• {} — {}", choice.label, choice.description)).collect::<Vec<_>>().join("\n"))); }
     }
     let nearby_npcs = ctx.db.npc().iter().filter(|npc| npc.current_room.as_deref() == Some(room_id)).map(|npc| npc.id).collect::<Vec<_>>();
     let offers = ctx.db.quest_definition().iter().filter(|quest| {
         if !quest.active || !nearby_npcs.contains(&quest.quest_giver_npc_id) || quest_requirement_error(ctx, actor_id, quest).is_some() { return false; }
         let state = ctx.db.actor_quest().id().find(&actor_quest_id(actor_id, &quest.id));
-        state.is_none() || (state.map(|row| row.status == "completed").unwrap_or(false) && quest.repeatable)
+        state.is_none() || state.as_ref().map(|row| row.status == "failed").unwrap_or(false) || (state.map(|row| row.status == "completed").unwrap_or(false) && quest.repeatable)
     }).map(|quest| format!("- {} from {}", quest.title, ctx.db.npc().id().find(&quest.quest_giver_npc_id).map(|npc| npc.name).unwrap_or_else(|| quest.quest_giver_npc_id.clone()))).collect::<Vec<_>>();
     if !offers.is_empty() { sections.push(format!("[AVAILABLE HERE]\n{}\nUse `accept <quest>`.", offers.join("\n"))); }
     if sections.is_empty() { sections.push("No active quests or nearby offers.".to_string()); }
@@ -3713,6 +4744,11 @@ fn penalize_npc_attack(ctx: &ReducerContext, room_id: &str, actor_id: &str, acto
 
 fn handle_room_entry(ctx: &ReducerContext, room_id: &str, actor_id: &str, actor_name: &str, character_id: Option<String>, is_profile: bool) {
     advance_quest_event(ctx, actor_id, "explore_room", room_id, 1);
+    let escorted = ctx.db.quest_objective().iter().filter(|objective| objective.objective_type == "escort_npc")
+        .filter(|objective| ctx.db.actor_quest().id().find(&actor_quest_id(actor_id, &objective.quest_id)).map(|quest| quest.status == "active").unwrap_or(false))
+        .filter(|objective| ctx.db.npc().id().find(&objective.target_id).map(|npc| npc.current_room.as_deref() == Some(room_id)).unwrap_or(false))
+        .map(|objective| objective.target_id).collect::<Vec<_>>();
+    for npc_id in escorted { advance_quest_event(ctx, actor_id, "escort_npc", &npc_id, 1); }
     let npcs = ctx.db.npc().iter().filter(|npc| npc.current_room.as_deref() == Some(room_id) && npc.defeated_at.is_none()).collect::<Vec<_>>();
     for npc in npcs {
         if npc.is_guard {
@@ -3729,7 +4765,55 @@ fn actor_health_max(ctx: &ReducerContext, actor_id: &str, definition: &StatDefin
     actor_stat_row(ctx, actor_id, definition).base_value.clamp(definition.minimum, definition.maximum)
 }
 
-fn combat_damage(ctx: &ReducerContext, attacker_id: &str, target_id: &str) -> (i32, String) {
+fn actor_role_value(ctx: &ReducerContext, actor_id: &str, role: &str) -> i32 {
+    stat_definition_by_role(ctx, role).map(|definition| actor_stat_value(ctx, actor_id, &definition)).unwrap_or(0)
+}
+
+fn actor_is_player(ctx: &ReducerContext, actor_id: &str) -> bool {
+    let key = actor_id.to_string();
+    ctx.db.character().id().find(&key).is_some() || ctx.db.profile().id().find(&key).is_some()
+}
+
+fn resolve_combat_damage(ctx: &ReducerContext, attacker_id: &str, target_id: &str, base_damage: i32, school: &str, armor_applies: bool) -> (i32, String) {
+    let config = world_combat_config(ctx);
+    let seed = format!("{attacker_id}:{target_id}:{school}:{}", ctx.timestamp.to_micros_since_unix_epoch());
+    let hit = i64::from(config.base_hit_chance_percent)
+        .saturating_add(i64::from(actor_role_value(ctx, attacker_id, "accuracy")))
+        .saturating_sub(i64::from(config.base_dodge_chance_percent))
+        .saturating_sub(i64::from(actor_role_value(ctx, target_id, "dodge"))).clamp(5, 100) as u32;
+    if deterministic_roll(&format!("{seed}:hit")) % 100 >= hit { return (0, "dodge".to_string()); }
+    let parry = config.base_parry_chance_percent.saturating_add(u32::try_from(actor_role_value(ctx, target_id, "parry").max(0)).unwrap_or(0)).min(100);
+    if deterministic_roll(&format!("{seed}:parry")) % 100 < parry { return (0, "parry".to_string()); }
+
+    let crit = config.base_crit_chance_percent.saturating_add(u32::try_from(actor_role_value(ctx, attacker_id, "crit").max(0)).unwrap_or(0)).min(100);
+    let critical = deterministic_roll(&format!("{seed}:crit")) % 100 < crit;
+    let mut damage = base_damage.max(1);
+    if critical { damage = i64::from(damage).saturating_mul(i64::from(config.crit_damage_percent)).saturating_div(100).max(1) as i32; }
+
+    if armor_applies {
+        let innate_defense = actor_role_value(ctx, target_id, "defense").max(0);
+        let armor = ctx.db.world_object().iter()
+            .filter(|object| object.location_kind == "equipped" && object.location_id == target_id && object.durability > 0)
+            .filter_map(|object| object_definition_for(ctx, &object))
+            .map(|definition| definition.armor_value.max(0)).sum::<i32>();
+        let effective_armor = i64::from(innate_defense.saturating_add(armor)).saturating_mul(i64::from(config.armor_effectiveness_percent)).saturating_div(100);
+        damage = i64::from(damage).saturating_mul(100).saturating_div(100i64.saturating_add(effective_armor).max(1)).max(1) as i32;
+    }
+
+    let resistance_role = format!("resistance:{}", school.to_lowercase());
+    let resistance = actor_role_value(ctx, target_id, &resistance_role).clamp(0, 90);
+    damage = damage.saturating_mul(100i32.saturating_sub(resistance)).saturating_div(100).max(1);
+    if actor_is_player(ctx, attacker_id) && actor_is_player(ctx, target_id) {
+        damage = i64::from(damage).saturating_mul(i64::from(config.pvp_damage_percent)).saturating_div(100).max(1) as i32;
+    }
+
+    let block = config.base_block_chance_percent.saturating_add(u32::try_from(actor_role_value(ctx, target_id, "block").max(0)).unwrap_or(0)).min(100);
+    let blocked = deterministic_roll(&format!("{seed}:block")) % 100 < block;
+    if blocked { damage = damage.saturating_mul(100u32.saturating_sub(config.block_damage_reduction_percent) as i32).saturating_div(100).max(1); }
+    (damage, if blocked { "block" } else if critical { "critical" } else { "hit" }.to_string())
+}
+
+fn combat_damage(ctx: &ReducerContext, attacker_id: &str, target_id: &str) -> (i32, String, String) {
     let equipped_weapon = ctx.db.world_object().iter()
         .filter(|object| object.location_kind == "equipped" && object.location_id == attacker_id && object.durability > 0)
         .filter_map(|object| object_definition_for(ctx, &object))
@@ -3742,18 +4826,8 @@ fn combat_damage(ctx: &ReducerContext, attacker_id: &str, target_id: &str) -> (i
     } else if let Some(power) = stat_definition_by_role(ctx, "power") {
         attack = attack.saturating_add(actor_stat_value(ctx, attacker_id, &power));
     }
-    let innate_defense = stat_definition_by_role(ctx, "defense")
-        .map(|definition| actor_stat_value(ctx, target_id, &definition))
-        .unwrap_or(0);
-    let armor = ctx.db.world_object().iter()
-        .filter(|object| object.location_kind == "equipped" && object.location_id == target_id && object.durability > 0)
-        .filter_map(|object| object_definition_for(ctx, &object))
-        .map(|definition| definition.armor_value)
-        .sum::<i32>();
-    (
-        attack.saturating_sub(innate_defense.saturating_add(armor)).max(1),
-        equipped_weapon.map(|weapon| weapon.name).unwrap_or_else(|| "bare hands".to_string()),
-    )
+    let (damage, outcome) = resolve_combat_damage(ctx, attacker_id, target_id, attack, "physical", true);
+    (damage, equipped_weapon.map(|weapon| weapon.name).unwrap_or_else(|| "bare hands".to_string()), outcome)
 }
 
 fn basic_attack_cooldown_ms(ctx: &ReducerContext, actor_id: &str) -> u32 {
@@ -3789,6 +4863,44 @@ fn wear_equipped_armor(ctx: &ReducerContext, actor_id: &str, room_id: &str) {
             rpg_message(ctx, room_id, actor_id, "error", format!("Your {} breaks and no longer provides armor or bonuses.", definition.name));
         }
     }
+}
+
+fn record_npc_threat(ctx: &ReducerContext, npc_id: &str, actor_id: &str, damage: i32) {
+    if damage <= 0 { return; }
+    let config = world_combat_config(ctx);
+    if !config.threat_enabled { return; }
+    let id = format!("{npc_id}::{actor_id}");
+    let amount = u32::try_from(damage).unwrap_or(u32::MAX);
+    if let Some(row) = ctx.db.npc_threat().id().find(&id) {
+        ctx.db.npc_threat().id().update(NpcThreat {
+            threat: row.threat.saturating_add(amount), damage_contributed: row.damage_contributed.saturating_add(amount),
+            updated_at_micros: ctx.timestamp.to_micros_since_unix_epoch(), ..row
+        });
+    } else {
+        ctx.db.npc_threat().insert(NpcThreat {
+            id, npc_id: npc_id.to_string(), actor_id: actor_id.to_string(), threat: amount,
+            damage_contributed: amount, updated_at_micros: ctx.timestamp.to_micros_since_unix_epoch(),
+        });
+    }
+}
+
+fn award_npc_experience(ctx: &ReducerContext, npc: &Npc, killer_id: &str, room_id: &str) {
+    let config = world_combat_config(ctx);
+    let cutoff = ctx.timestamp.to_micros_since_unix_epoch().saturating_sub(i64::from(config.threat_decay_seconds) * 1_000_000);
+    let threat_rows = ctx.db.npc_threat().iter().filter(|row| row.npc_id == npc.id).collect::<Vec<_>>();
+    let mut recipients = threat_rows.iter()
+        .filter(|row| row.updated_at_micros >= cutoff && actor_current_room(ctx, &row.actor_id).as_deref() == Some(room_id))
+        .map(|row| row.actor_id.clone()).collect::<Vec<_>>();
+    if !recipients.iter().any(|id| id == killer_id) { recipients.push(killer_id.to_string()); }
+    recipients.sort();
+    recipients.dedup();
+    for actor_id in recipients {
+        let amount = if actor_id == killer_id { npc.xp_reward }
+            else { u64::from(npc.xp_reward).saturating_mul(u64::from(config.assist_xp_percent)).saturating_div(100) as u32 };
+        let message = award_experience(ctx, &actor_id, amount);
+        rpg_message(ctx, room_id, &actor_id, "system", if actor_id == killer_id { message } else { format!("Assist reward: {message}") });
+    }
+    for row in threat_rows { ctx.db.npc_threat().id().delete(&row.id); }
 }
 
 fn deterministic_roll(seed: &str) -> u32 {
@@ -3849,6 +4961,147 @@ fn ability_power(ctx: &ReducerContext, actor_id: &str, ability: &AbilityDefiniti
     rolled.saturating_add(scaling).max(0)
 }
 
+fn ability_effect_power(ctx: &ReducerContext, actor_id: &str, effect: &AbilityEffectDefinition) -> i32 {
+    let range = effect.power_max.saturating_sub(effect.power_min).saturating_add(1).max(1) as u32;
+    let rolled = effect.power_min.saturating_add((deterministic_roll(&format!("{actor_id}:{}:{}", effect.id, ctx.timestamp.to_micros_since_unix_epoch())) % range) as i32);
+    let scaling = effect.scales_with_stat.as_ref().and_then(|id| ctx.db.stat_definition().id().find(id))
+        .map(|definition| actor_stat_value(ctx, actor_id, &definition).saturating_mul(effect.scaling_percent) / 100).unwrap_or(0);
+    rolled.saturating_add(scaling)
+}
+
+fn effect_targets(
+    ctx: &ReducerContext,
+    room_id: &str,
+    actor_id: &str,
+    actor_name: &str,
+    primary: &(String, String, bool),
+    scope: &str,
+) -> Vec<(String, String, bool)> {
+    if scope == "primary" { return vec![primary.clone()]; }
+    if scope == "self" { return vec![(actor_id.to_string(), actor_name.to_string(), false)]; }
+    let pvp = region_for_room(ctx, room_id).map(|region| region.pvp_enabled).unwrap_or(false);
+    let mut targets = Vec::new();
+    if matches!(scope, "all_allies" | "room") { targets.push((actor_id.to_string(), actor_name.to_string(), false)); }
+    if matches!(scope, "all_enemies" | "all_allies" | "room") {
+        for npc in ctx.db.npc().iter().filter(|npc| npc.current_room.as_deref() == Some(room_id) && npc.defeated_at.is_none()) {
+            let enemy = npc_disposition(&npc) != "friendly";
+            if scope == "room" || (scope == "all_enemies" && enemy) || (scope == "all_allies" && !enemy) { targets.push((npc.id, npc.name, true)); }
+        }
+        for character in ctx.db.character().iter().filter(|row| row.current_room.as_deref() == Some(room_id) && row.id != actor_id) {
+            if scope == "room" || scope == "all_allies" || (scope == "all_enemies" && pvp) { targets.push((character.id, character.name, false)); }
+        }
+        for profile in ctx.db.profile().iter().filter(|row| row.current_room.as_deref() == Some(room_id) && row.id != actor_id) {
+            if scope == "room" || scope == "all_allies" || (scope == "all_enemies" && pvp) { targets.push((profile.id.clone(), profile.name.or(profile.handle).unwrap_or_else(|| "Traveler".to_string()), false)); }
+        }
+    }
+    targets.sort_by(|left, right| left.0.cmp(&right.0));
+    targets.dedup_by(|left, right| left.0 == right.0);
+    targets
+}
+
+fn apply_status_effect(ctx: &ReducerContext, source_actor_id: &str, target_actor_id: &str, ability_id: &str, effect: &AbilityEffectDefinition) {
+    let id = format!("{target_actor_id}::{}", effect.id);
+    let existing = ctx.db.actor_status_effect().id().find(&id);
+    let stacks = existing.as_ref().map(|row| row.stacks.saturating_add(1)).unwrap_or(1).min(effect.max_stacks.max(1));
+    let expires_at_micros = ctx.timestamp.to_micros_since_unix_epoch().saturating_add(i64::from(effect.duration_ms.max(1)) * 1_000);
+    let row = ActorStatusEffect {
+        id: id.clone(), actor_id: target_actor_id.to_string(), source_actor_id: source_actor_id.to_string(), ability_id: ability_id.to_string(), effect_id: effect.id.clone(),
+        name: effect.status_name.clone(), kind: effect.effect_kind.clone(), stat_id: effect.stat_id.clone(), modifier_value: effect.modifier_value,
+        stacks, expires_at_micros, updated_at: ctx.timestamp,
+    };
+    if existing.is_some() { ctx.db.actor_status_effect().id().update(row); } else { ctx.db.actor_status_effect().insert(row); }
+}
+
+fn revive_actor_in_place(ctx: &ReducerContext, actor_id: &str, room_id: &str) {
+    let config = world_lifecycle_config(ctx);
+    if !config.allow_ability_revive { return; }
+    if let Some(npc) = ctx.db.npc().id().find(&actor_id.to_string()) {
+        ctx.db.npc().id().update(Npc { current_room: Some(room_id.to_string()), defeated_at: None, ..npc });
+    } else {
+        let _ = move_actor_to_room(ctx, actor_id, room_id);
+        let state = ensure_actor_life_state(ctx, actor_id);
+        ctx.db.actor_life_state().id().update(ActorLifeState { state: "alive".to_string(), death_room_id: None, pending_spawn_point_id: None, respawn_available_at_micros: 0, updated_at: ctx.timestamp, ..state });
+    }
+    restore_actor_after_respawn(ctx, actor_id, &config);
+}
+
+fn apply_effect_to_target(
+    ctx: &ReducerContext,
+    room_id: &str,
+    source_actor_id: &str,
+    source_actor_name: &str,
+    ability: &AbilityDefinition,
+    effect: &AbilityEffectDefinition,
+    target: &(String, String, bool),
+) {
+    let (target_id, target_name, target_is_npc) = target;
+    match effect.effect_kind.as_str() {
+        "damage" => {
+            if target_id != source_actor_id && !*target_is_npc && !region_for_room(ctx, room_id).map(|region| region.pvp_enabled).unwrap_or(false) { return; }
+            if *target_is_npc && ctx.db.npc().id().find(target_id).map(|npc| npc_disposition(&npc) == "friendly").unwrap_or(false) { return; }
+            let stat = effect.stat_id.as_ref().and_then(|id| ctx.db.stat_definition().id().find(id)).or_else(|| stat_definition_by_role(ctx, "health"));
+            let Some(stat) = stat else { return };
+            let current = actor_stat_row(ctx, target_id, &stat);
+            if current.current_value <= stat.minimum { return; }
+            let base = ability_effect_power(ctx, source_actor_id, effect).max(0);
+            let (damage, outcome) = resolve_combat_damage(ctx, source_actor_id, target_id, base, &ability.school, effect.mitigation_type == "armor");
+            let next = current.current_value.saturating_sub(damage).max(stat.minimum);
+            if damage > 0 {
+                interrupt_actor_casts(ctx, target_id, room_id, "by taking damage");
+                if effect.mitigation_type == "armor" { wear_equipped_armor(ctx, target_id, room_id); }
+                if *target_is_npc { record_npc_threat(ctx, target_id, source_actor_id, damage); }
+            }
+            set_actor_stat_current(ctx, target_id, &stat, next);
+            add_message(ctx, Some(room_id.to_string()), Some(source_actor_id.to_string()), Some(source_actor_name.to_string()), None, "combat", format!("{source_actor_name}'s {} hits {target_name} for {damage} damage ({outcome}).", ability.name), None, None);
+            if next <= stat.minimum && damage > 0 {
+                if let Some(npc) = ctx.db.npc().id().find(target_id) {
+                    penalize_npc_attack(ctx, room_id, source_actor_id, source_actor_name, &npc, true);
+                    advance_quest_event(ctx, source_actor_id, "kill_npc", &npc.id, 1);
+                    if let Some(faction_id) = npc.faction.as_ref() { advance_quest_event(ctx, source_actor_id, "kill_faction", faction_id, 1); }
+                    award_npc_experience(ctx, &npc, source_actor_id, room_id);
+                    let drops = defeat_npc(ctx, npc, room_id);
+                    if !drops.is_empty() { rpg_message(ctx, room_id, source_actor_id, "system", format!("{target_name} drops {}.", drops.join(", "))); }
+                } else { defeat_player(ctx, target_id, room_id, target_name, Some(source_actor_name)); }
+            }
+        }
+        "heal" | "restore" => {
+            let stat = effect.stat_id.as_ref().and_then(|id| ctx.db.stat_definition().id().find(id)).or_else(|| stat_definition_by_role(ctx, "health"));
+            let Some(stat) = stat else { return };
+            let current = actor_stat_row(ctx, target_id, &stat);
+            let power = ability_effect_power(ctx, source_actor_id, effect).max(0);
+            set_actor_stat_current(ctx, target_id, &stat, current.current_value.saturating_add(power).min(current.base_value));
+        }
+        "buff" | "debuff" | "stun" => apply_status_effect(ctx, source_actor_id, target_id, &ability.id, effect),
+        "damage_over_time" | "heal_over_time" => {
+            apply_status_effect(ctx, source_actor_id, target_id, &ability.id, effect);
+            let ticks = effect.duration_ms.saturating_add(effect.tick_interval_ms.saturating_sub(1)).saturating_div(effect.tick_interval_ms.max(1)).max(1);
+            let at = ctx.timestamp + TimeDuration::from_micros(i64::from(effect.tick_interval_ms.max(1)) * 1_000);
+            ctx.db.scheduled_effect_tick().insert(ScheduledEffectTick { scheduled_id: 0, scheduled_at: at.into(), source_actor_id: source_actor_id.to_string(), source_actor_name: source_actor_name.to_string(), target_actor_id: target_id.clone(), ability_id: ability.id.clone(), effect_id: effect.id.clone(), remaining_ticks: ticks });
+        }
+        "interrupt" => interrupt_actor_casts(ctx, target_id, room_id, "by an interrupt"),
+        "cleanse" => {
+            let ids = ctx.db.actor_status_effect().iter().filter(|status| status.actor_id == *target_id && matches!(status.kind.as_str(), "debuff" | "stun" | "damage_over_time")).map(|status| status.id).collect::<Vec<_>>();
+            for id in ids { ctx.db.actor_status_effect().id().delete(&id); }
+        }
+        "teleport" => { if let Some(destination) = effect.destination_room_id.as_ref() { let _ = move_actor_to_room(ctx, target_id, destination); } }
+        "revive" => revive_actor_in_place(ctx, target_id, room_id),
+        "summon" => {
+            if let Some(npc_id) = effect.summon_npc_id.as_ref() {
+                if let Some(npc) = ctx.db.npc().id().find(npc_id) { ctx.db.npc().id().update(Npc { current_room: Some(room_id.to_string()), defeated_at: None, ..npc }); }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn execute_ability_effects(ctx: &ReducerContext, room_id: &str, actor_id: &str, actor_name: &str, ability: &AbilityDefinition, primary: &(String, String, bool), effects: Vec<AbilityEffectDefinition>) {
+    for effect in effects {
+        if deterministic_roll(&format!("{}:{}:{}", actor_id, effect.id, ctx.timestamp.to_micros_since_unix_epoch())) % 100 >= effect.chance_percent { continue; }
+        let targets = effect_targets(ctx, room_id, actor_id, actor_name, primary, &effect.target_scope);
+        for target in targets { apply_effect_to_target(ctx, room_id, actor_id, actor_name, ability, &effect, &target); }
+    }
+}
+
 fn cast_ability(
     ctx: &ReducerContext,
     room_id: &str,
@@ -3880,6 +5133,11 @@ fn cast_ability(
     let remaining = cooldown_remaining_ms(ctx, actor_id, &action_id);
     if remaining > 0 {
         rpg_message(ctx, room_id, actor_id, "error", format!("{} will be ready in {:.1} seconds.", ability.name, remaining as f32 / 1000.0));
+        return;
+    }
+    let global_remaining = cooldown_remaining_ms(ctx, actor_id, "global-cooldown");
+    if global_remaining > 0 {
+        rpg_message(ctx, room_id, actor_id, "error", format!("You can use another ability in {:.1} seconds.", global_remaining as f32 / 1000.0));
         return;
     }
     if !resolving_scheduled_cast && ctx.db.scheduled_cast().iter().any(|cast| cast.actor_id == actor_id) {
@@ -3943,15 +5201,21 @@ fn cast_ability(
             return;
         }
     }
-    let effect_stat = ability.effect_stat_id.as_ref()
-        .and_then(|id| ctx.db.stat_definition().id().find(id))
-        .or_else(|| if matches!(ability.effect_type.as_str(), "damage" | "heal") { stat_definition_by_role(ctx, "health") } else { None });
-    let Some(effect_stat) = effect_stat else {
-        rpg_message(ctx, room_id, actor_id, "error", "This ability's effect stat is not configured.".to_string());
+    let mut authored_effects = ctx.db.ability_effect_definition().iter()
+        .filter(|effect| effect.ability_id == ability.id)
+        .collect::<Vec<_>>();
+    authored_effects.sort_by(|left, right| left.sort_order.cmp(&right.sort_order).then(left.id.cmp(&right.id)));
+    let legacy_effect_stat = if authored_effects.is_empty() {
+        ability.effect_stat_id.as_ref()
+            .and_then(|id| ctx.db.stat_definition().id().find(id))
+            .or_else(|| if matches!(ability.effect_type.as_str(), "damage" | "heal" | "restore") { stat_definition_by_role(ctx, "health") } else { None })
+    } else { None };
+    if authored_effects.is_empty() && legacy_effect_stat.is_none() {
+        rpg_message(ctx, room_id, actor_id, "error", "This ability has no configured effects.".to_string());
         return;
-    };
-    let target_row = actor_stat_row(ctx, &target_id, &effect_stat);
-    if ability.effect_type == "damage" && target_row.current_value <= effect_stat.minimum {
+    }
+    let legacy_target_row = legacy_effect_stat.as_ref().map(|stat| actor_stat_row(ctx, &target_id, stat));
+    if ability.effect_type == "damage" && legacy_target_row.as_ref().zip(legacy_effect_stat.as_ref()).map(|(row, stat)| row.current_value <= stat.minimum).unwrap_or(false) {
         rpg_message(ctx, room_id, actor_id, "error", format!("{target_name} is already defeated."));
         return;
     }
@@ -3978,33 +5242,40 @@ fn cast_ability(
     }
     if ability.target_type == "enemy" { clear_actor_spawn_protection(ctx, actor_id); }
     set_cooldown(ctx, actor_id, &action_id, ability.cooldown_ms);
+    let global_cooldown_ms = world_combat_config(ctx).global_cooldown_ms;
+    if global_cooldown_ms > 0 { set_cooldown(ctx, actor_id, "global-cooldown", global_cooldown_ms); }
+    if !authored_effects.is_empty() {
+        let primary = (target_id, target_name, target_is_npc);
+        execute_ability_effects(ctx, room_id, actor_id, actor_name, &ability, &primary, authored_effects);
+        return;
+    }
+    let effect_stat = legacy_effect_stat.expect("legacy effect stat was validated above");
+    let target_row = legacy_target_row.expect("legacy target stat was loaded above");
     let mut power = ability_power(ctx, actor_id, &ability);
-    if ability.effect_type == "damage" && ability.mitigation_type == "armor" {
-        let innate_defense = stat_definition_by_role(ctx, "defense").map(|definition| actor_stat_value(ctx, &target_id, &definition)).unwrap_or(0);
-        let armor = ctx.db.world_object().iter()
-            .filter(|object| object.location_kind == "equipped" && object.location_id == target_id && object.durability > 0)
-            .filter_map(|object| object_definition_for(ctx, &object))
-            .map(|definition| definition.armor_value).sum::<i32>();
-        power = power.saturating_sub(innate_defense.saturating_add(armor)).max(1);
+    let mut damage_outcome = "hit".to_string();
+    if ability.effect_type == "damage" {
+        (power, damage_outcome) = resolve_combat_damage(ctx, actor_id, &target_id, power, &ability.school, ability.mitigation_type == "armor");
     }
 
     match ability.effect_type.as_str() {
         "damage" => {
             let next = target_row.current_value.saturating_sub(power).max(effect_stat.minimum);
-            interrupt_actor_casts(ctx, &target_id, room_id, "by taking damage");
-            if ability.mitigation_type == "armor" { wear_equipped_armor(ctx, &target_id, room_id); }
+            if let Some(npc) = target_npc.as_ref() { record_npc_threat(ctx, &npc.id, actor_id, power); }
+            if power > 0 {
+                interrupt_actor_casts(ctx, &target_id, room_id, "by taking damage");
+                if ability.mitigation_type == "armor" { wear_equipped_armor(ctx, &target_id, room_id); }
+            }
             set_actor_stat_current(ctx, &target_id, &effect_stat, next);
-            let result = if next <= effect_stat.minimum { format!(" {target_name} is defeated.") } else { format!(" {target_name} has {next} {} remaining.", effect_stat.name) };
+            let result = if power == 0 { format!(" {target_name} {} the ability.", if damage_outcome == "parry" { "parries" } else { "dodges" }) } else if next <= effect_stat.minimum { format!(" {target_name} is defeated.") } else { format!(" {target_name} has {next} {} remaining.", effect_stat.name) };
             add_message(ctx, Some(room_id.to_string()), Some(actor_id.to_string()), Some(actor_name.to_string()), None, "combat",
-                format!("{actor_name} uses {} {} on {target_name} for {power} damage.{result}", ability.icon, ability.name), None, None);
+                format!("{actor_name} uses {} {} on {target_name} for {power} damage ({damage_outcome}).{result}", ability.icon, ability.name), None, None);
             if next <= effect_stat.minimum {
                 if let Some(npc) = target_npc {
                     penalize_npc_attack(ctx, room_id, actor_id, actor_name, &npc, true);
                     advance_quest_event(ctx, actor_id, "kill_npc", &npc.id, 1);
                     if let Some(faction_id) = npc.faction.as_ref() { advance_quest_event(ctx, actor_id, "kill_faction", faction_id, 1); }
-                    let xp_reward = npc.xp_reward;
+                    award_npc_experience(ctx, &npc, actor_id, room_id);
                     let drops = defeat_npc(ctx, npc, room_id);
-                    rpg_message(ctx, room_id, actor_id, "system", award_experience(ctx, actor_id, xp_reward));
                     if !drops.is_empty() { rpg_message(ctx, room_id, actor_id, "system", format!("{target_name} drops {}.", drops.join(", "))); }
                 } else {
                     defeat_player(ctx, &target_id, room_id, &target_name, Some(actor_name));
@@ -4042,6 +5313,46 @@ pub fn resolve_scheduled_cast(ctx: &ReducerContext, cast: ScheduledCast) -> Resu
         cast.target_query.as_deref(),
         true,
     );
+    Ok(())
+}
+
+#[reducer]
+pub fn resolve_scheduled_effect_tick(ctx: &ReducerContext, tick: ScheduledEffectTick) -> Result<(), String> {
+    if ctx.sender() != ctx.identity() {
+        return Err("Scheduled effects may only be resolved by the module scheduler.".to_string());
+    }
+    let Some(ability) = ctx.db.ability_definition().id().find(&tick.ability_id) else { return Ok(()) };
+    let Some(mut effect) = ctx.db.ability_effect_definition().id().find(&tick.effect_id) else { return Ok(()) };
+    let status_id = format!("{}::{}", tick.target_actor_id, tick.effect_id);
+    let Some(status) = ctx.db.actor_status_effect().id().find(&status_id) else { return Ok(()) };
+    let now = ctx.timestamp.to_micros_since_unix_epoch();
+    if status.expires_at_micros < now {
+        ctx.db.actor_status_effect().id().delete(&status_id);
+        return Ok(());
+    }
+    let Some(room_id) = actor_current_room(ctx, &tick.target_actor_id) else { return Ok(()) };
+    let Some(target_name) = actor_display_name(ctx, &tick.target_actor_id) else { return Ok(()) };
+    effect.effect_kind = if effect.effect_kind == "damage_over_time" { "damage".to_string() } else { "heal".to_string() };
+    apply_effect_to_target(
+        ctx,
+        &room_id,
+        &tick.source_actor_id,
+        &tick.source_actor_name,
+        &ability,
+        &effect,
+        &(tick.target_actor_id.clone(), target_name, ctx.db.npc().id().find(&tick.target_actor_id).is_some()),
+    );
+    if tick.remaining_ticks > 1 && actor_current_room(ctx, &tick.target_actor_id).is_some() {
+        let at = ctx.timestamp + TimeDuration::from_micros(i64::from(effect.tick_interval_ms.max(1)) * 1_000);
+        ctx.db.scheduled_effect_tick().insert(ScheduledEffectTick {
+            scheduled_id: 0,
+            scheduled_at: at.into(),
+            remaining_ticks: tick.remaining_ticks - 1,
+            ..tick
+        });
+    } else {
+        ctx.db.actor_status_effect().id().delete(&status_id);
+    }
     Ok(())
 }
 
@@ -4103,6 +5414,7 @@ fn apply_death_item_loss(
     actor_id: &str,
     origin_room: &str,
     config: &WorldLifecycleConfig,
+    corpse_id: Option<&str>,
 ) -> (u32, u32) {
     let mode = config.inventory_loss_mode.as_str();
     if mode == "keep" { return (0, 0); }
@@ -4126,8 +5438,8 @@ fn apply_death_item_loss(
             destroyed = destroyed.saturating_add(1);
         } else {
             ctx.db.world_object().id().update(WorldObject {
-                location_kind: "room".to_string(),
-                location_id: origin_room.to_string(),
+                location_kind: if corpse_id.is_some() { "container".to_string() } else { "room".to_string() },
+                location_id: corpse_id.unwrap_or(origin_room).to_string(),
                 equipped_slot: None,
                 is_active: false,
                 state_json: format!(r#"{{"dropped_on_death_by":"{}"}}"#, actor_id),
@@ -4138,6 +5450,16 @@ fn apply_death_item_loss(
         }
     }
     (dropped, destroyed)
+}
+
+fn create_actor_corpse(ctx: &ReducerContext, actor_id: &str, actor_name: &str, room_id: &str) -> String {
+    let definition_id = "system-actor-corpse".to_string();
+    if ctx.db.object_definition().id().find(&definition_id).is_none() {
+        ctx.db.object_definition().insert(ObjectDefinition { id: definition_id.clone(), name: "Fallen adventurer".to_string(), description: "A body containing whatever death left behind.".to_string(), primitive_kind: "container".to_string(), icon: "†".to_string(), tags: "[\"corpse\"]".to_string(), portable: false, stackable: false, max_stack: 1, capacity: 9999, equipment_slot: None, weapon_damage: 0, armor_value: 0, scales_with_stat: None, fuel_value: 0, burn_rate: 0, accepted_fuel_tags: "[]".to_string(), stat_modifiers: "{}".to_string(), on_use: "{}".to_string(), created_at: ctx.timestamp, updated_at: ctx.timestamp, image_url: None, attack_cooldown_ms: 2000, inventory_slots_bonus: 0 });
+    }
+    let id = format!("corpse-{actor_id}-{}", ctx.timestamp.to_micros_since_unix_epoch());
+    ctx.db.world_object().insert(WorldObject { id: id.clone(), definition_id, location_kind: "room".to_string(), location_id: room_id.to_string(), quantity: 1, equipped_slot: None, durability: 100, fuel_remaining: 0, is_active: false, state_json: format!(r#"{{"actor_id":"{actor_id}","actor_name":"{actor_name}"}}"#), created_at: ctx.timestamp, updated_at: ctx.timestamp });
+    id
 }
 
 fn apply_death_progression_loss(ctx: &ReducerContext, actor_id: &str, config: &WorldLifecycleConfig) -> (i32, u32) {
@@ -4258,9 +5580,14 @@ fn defeat_player(ctx: &ReducerContext, actor_id: &str, origin_room: &str, actor_
     if actor_is_dead(ctx, actor_id) { return; }
     let config = world_lifecycle_config(ctx);
     let spawn_point = choose_respawn_point(ctx, actor_id, origin_room);
-    let (dropped, mut destroyed) = apply_death_item_loss(ctx, actor_id, origin_room, &config);
+    let corpse_id = config.create_lootable_corpse.then(|| create_actor_corpse(ctx, actor_id, actor_name, origin_room));
+    let (dropped, mut destroyed) = apply_death_item_loss(ctx, actor_id, origin_room, &config, corpse_id.as_deref());
     let (gold_lost, experience_lost) = apply_death_progression_loss(ctx, actor_id, &config);
     if config.reset_quests_on_death { reset_active_quests_on_death(ctx, actor_id); }
+    let failed_quest_ids = ctx.db.actor_quest().iter().filter(|quest| quest.actor_id == actor_id && matches!(quest.status.as_str(), "active" | "ready"))
+        .filter(|quest| ctx.db.quest_rule().quest_id().find(&quest.quest_id).map(|rule| rule.failure_on_death).unwrap_or(false))
+        .map(|quest| quest.id).collect::<Vec<_>>();
+    for id in failed_quest_ids { if let Some(quest) = ctx.db.actor_quest().id().find(&id) { ctx.db.actor_quest().id().update(ActorQuest { status: "failed".to_string(), updated_at: ctx.timestamp, ..quest }); } }
     let actor_key = actor_id.to_string();
     let previous = ensure_actor_life_state(ctx, actor_id);
     let record_id = format!("{actor_id}:{}", ctx.timestamp.to_micros_since_unix_epoch());
@@ -4272,7 +5599,9 @@ fn defeat_player(ctx: &ReducerContext, actor_id: &str, origin_room: &str, actor_
     });
     add_message(ctx, Some(origin_room.to_string()), Some(actor_key.clone()), None, None, "combat", format!("{actor_name} is defeated."), None, None);
 
-    if config.death_mode == "hardcore" && ctx.db.character().id().find(&actor_key).is_some() {
+    let current_lives = if config.maximum_lives > 0 && previous.lives_remaining == 0 && previous.death_count == 0 { config.maximum_lives } else { previous.lives_remaining };
+    let lives_remaining = if config.maximum_lives > 0 { current_lives.saturating_sub(1) } else { 0 };
+    if (config.death_mode == "hardcore" || (config.maximum_lives > 0 && lives_remaining == 0)) && ctx.db.character().id().find(&actor_key).is_some() {
         let remaining = ctx.db.world_object().iter()
             .filter(|object| object.location_id == actor_id && matches!(object.location_kind.as_str(), "inventory" | "equipped"))
             .count() as u32;
@@ -4281,7 +5610,7 @@ fn defeat_player(ctx: &ReducerContext, actor_id: &str, origin_room: &str, actor_
             ctx.db.actor_death_record().id().update(ActorDeathRecord { item_stacks_destroyed: destroyed, ..record });
         }
         add_message(ctx, Some(origin_room.to_string()), Some(actor_key.clone()), None, Some(actor_key.clone()), "system",
-            "Hardcore death is permanent. This character has been lost; create a new character to return.".to_string(), None, None);
+            if config.death_mode == "hardcore" { "Hardcore death is permanent. This character has been lost; create a new character to return.".to_string() } else { "This character has spent their final life and is permanently lost.".to_string() }, None, None);
         delete_actor_rpg_state(ctx, &actor_key);
         ctx.db.character().id().delete(&actor_key);
         return;
@@ -4292,7 +5621,7 @@ fn defeat_player(ctx: &ReducerContext, actor_id: &str, origin_room: &str, actor_
     ctx.db.actor_life_state().id().update(ActorLifeState {
         state: "dead".to_string(), death_room_id: Some(origin_room.to_string()),
         pending_spawn_point_id: spawn_point.map(|point| point.id), death_count: previous.death_count.saturating_add(1),
-        died_at: Some(ctx.timestamp), respawn_available_at_micros, protected_until_micros: 0, updated_at: ctx.timestamp, ..previous
+        died_at: Some(ctx.timestamp), respawn_available_at_micros, protected_until_micros: 0, lives_remaining, updated_at: ctx.timestamp, ..previous
     });
     if config.respawn_delay_seconds == 0 {
         let _ = complete_actor_respawn(ctx, actor_id, actor_name);
@@ -4306,20 +5635,24 @@ fn npc_attack_player(ctx: &ReducerContext, npc: Npc, room_id: &str, actor_id: &s
     if actor_is_dead(ctx, actor_id) || actor_has_spawn_protection(ctx, actor_id) { return; }
     let current_health = actor_stat_row(ctx, actor_id, health).current_value;
     if current_health <= health.minimum { return; }
-    let (damage, weapon_name) = combat_damage(ctx, &npc.id, actor_id);
+    let (damage, weapon_name, outcome) = combat_damage(ctx, &npc.id, actor_id);
     let next_health = current_health.saturating_sub(damage).max(health.minimum);
-    interrupt_actor_casts(ctx, actor_id, room_id, "by taking damage");
     wear_equipped_weapon(ctx, &npc.id, room_id);
-    wear_equipped_armor(ctx, actor_id, room_id);
+    if damage > 0 {
+        interrupt_actor_casts(ctx, actor_id, room_id, "by taking damage");
+        wear_equipped_armor(ctx, actor_id, room_id);
+    }
     set_actor_stat_current(ctx, actor_id, health, next_health);
     ctx.db.npc().id().update(Npc { last_attack_at: Some(ctx.timestamp), ..npc.clone() });
-    let result = if next_health <= health.minimum {
+    let result = if damage == 0 {
+        format!(" {actor_name} {} the attack.", if outcome == "parry" { "parries" } else { "dodges" })
+    } else if next_health <= health.minimum {
         format!(" {actor_name} is defeated.")
     } else {
         format!(" {actor_name} has {next_health} {} remaining.", health.name)
     };
     add_message(ctx, Some(room_id.to_string()), Some(npc.id.clone()), Some(npc.name.clone()), None, "combat",
-        format!("{} attacks {actor_name} with {weapon_name} for {damage} damage.{result}", npc.name), None, None);
+        format!("{} attacks {actor_name} with {weapon_name} for {damage} damage ({outcome}).{result}", npc.name), None, None);
     if next_health <= health.minimum {
         defeat_player(ctx, actor_id, room_id, actor_name, Some(&npc.name));
     }
@@ -4388,7 +5721,9 @@ fn advance_world(ctx: &ReducerContext, actor_id: &str, actor_name: &str) {
     for npc in hostiles {
         if actor_current_room(ctx, actor_id).as_deref() != Some(room_id.as_str()) { break; }
         if action_is_due(ctx, npc.last_attack_at, npc.attack_interval_seconds) {
-            npc_attack_player(ctx, npc, &room_id, actor_id, actor_name, &health);
+            let (target_id, target_name) = highest_threat_target(ctx, &npc.id, &room_id)
+                .unwrap_or_else(|| (actor_id.to_string(), actor_name.to_string()));
+            npc_attack_player(ctx, npc, &room_id, &target_id, &target_name, &health);
         }
     }
     let guards = ctx.db.npc().iter().filter(|npc| npc.is_guard && npc.current_room.as_deref() == Some(room_id.as_str()) && npc.defeated_at.is_none()).collect::<Vec<_>>();
@@ -4436,12 +5771,34 @@ fn handle_rpg_command(
         return Ok(true);
     }
 
+    let now = ctx.timestamp.to_micros_since_unix_epoch();
+    let stunned = ctx.db.actor_status_effect().iter().find(|status| status.actor_id == actor_id && status.kind == "stun" && status.expires_at_micros > now);
+    if let Some(status) = stunned {
+        if matches!(lower.as_str(), "status" | "statuses" | "effects" | "stats" | "sheet") {
+            list_status_effects(ctx, room_id, actor_id);
+        } else {
+            let seconds = status.expires_at_micros.saturating_sub(now).saturating_add(999_999) / 1_000_000;
+            rpg_message(ctx, room_id, actor_id, "error", format!("You are stunned by {} for another {seconds} second{}.", status.name, if seconds == 1 { "" } else { "s" }));
+        }
+        return Ok(true);
+    }
+
     if matches!(lower.as_str(), "inventory" | "inv" | "i" | "equipment") {
         list_inventory(ctx, room_id, actor_id);
         return Ok(true);
     }
+    if matches!(lower.as_str(), "origins" | "character options" | "classes" | "races" | "backgrounds") {
+        let mut options = ctx.db.character_option_definition().iter().filter(|option| option.active).collect::<Vec<_>>(); options.sort_by(|left, right| left.option_kind.cmp(&right.option_kind).then(left.sort_order.cmp(&right.sort_order)));
+        let lines = options.into_iter().map(|option| format!("• [{}] {} {} (`{}`) — {}", option.option_kind, option.icon, option.name, option.id, option.description)).collect::<Vec<_>>();
+        rpg_message(ctx, room_id, actor_id, "system", format!("[CHARACTER OPTIONS]\n{}\n\nCreate with `create <name> | <race-id> | <class-id> | <background-id>`; omit any category the world does not require.", if lines.is_empty() { "• This world has no authored origins.".to_string() } else { lines.join("\n") }));
+        return Ok(true);
+    }
     if matches!(lower.as_str(), "stats" | "status" | "sheet") {
         list_stats(ctx, room_id, actor_id);
+        return Ok(true);
+    }
+    if matches!(lower.as_str(), "statuses" | "effects" | "buffs" | "debuffs") {
+        list_status_effects(ctx, room_id, actor_id);
         return Ok(true);
     }
     if let Some(rest) = lower.strip_prefix("train ").or_else(|| lower.strip_prefix("spend ")) {
@@ -4462,6 +5819,35 @@ fn handle_rpg_command(
         list_reputation(ctx, room_id, actor_id);
         return Ok(true);
     }
+    if matches!(lower.as_str(), "shop" | "vendor") {
+        list_shop(ctx, room_id, actor_id, "");
+        return Ok(true);
+    }
+    if let Some(query) = lower.strip_prefix("shop ").or_else(|| lower.strip_prefix("vendor ")) { list_shop(ctx, room_id, actor_id, query); return Ok(true); }
+    if let Some(query) = lower.strip_prefix("buy ") { buy_from_vendor(ctx, room_id, actor_id, query); return Ok(true); }
+    if let Some(query) = lower.strip_prefix("sell ") { sell_to_vendor(ctx, room_id, actor_id, query); return Ok(true); }
+    if let Some(query) = lower.strip_prefix("repair ") { repair_at_vendor(ctx, room_id, actor_id, query.trim()); return Ok(true); }
+    if matches!(lower.as_str(), "recipes" | "crafting") { list_recipes(ctx, room_id, actor_id); return Ok(true); }
+    if let Some(query) = lower.strip_prefix("craft ") { craft_recipe(ctx, room_id, actor_id, query.trim()); return Ok(true); }
+    if matches!(lower.as_str(), "bank" | "bank inventory") {
+        let items = ctx.db.world_object().iter().filter(|object| object.location_kind == "bank" && object.location_id == actor_id).filter_map(|object| object_definition_for(ctx, &object).map(|definition| format!("• {} {} x{}", definition.icon, definition.name, object.quantity))).collect::<Vec<_>>();
+        rpg_message(ctx, room_id, actor_id, "system", format!("[BANK]\n{}\n\nUse `bank deposit <item>` or `bank withdraw <item>`.", if items.is_empty() { "• Empty".to_string() } else { items.join("\n") })); return Ok(true);
+    }
+    if let Some(query) = lower.strip_prefix("bank deposit ") {
+        if let Some((object, definition)) = find_carried_object(ctx, actor_id, query.trim()).filter(|(object, _)| object.location_kind == "inventory") { ctx.db.world_object().id().update(WorldObject { location_kind: "bank".to_string(), location_id: actor_id.to_string(), equipped_slot: None, updated_at: ctx.timestamp, ..object }); refresh_actor_acquire_quests(ctx, actor_id); rpg_message(ctx, room_id, actor_id, "system", format!("{} is secured in your bank.", definition.name)); } else { rpg_message(ctx, room_id, actor_id, "error", "You are not carrying that item loose in your inventory.".to_string()); } return Ok(true);
+    }
+    if let Some(query) = lower.strip_prefix("bank withdraw ") {
+        let found = ctx.db.world_object().iter().find(|object| object.location_kind == "bank" && object.location_id == actor_id && object_definition_for(ctx, object).map(|definition| definition.id.eq_ignore_ascii_case(query.trim()) || definition.name.eq_ignore_ascii_case(query.trim())).unwrap_or(false));
+        if let Some(object) = found { if !inventory_has_space(ctx, actor_id, 1) { rpg_message(ctx, room_id, actor_id, "error", "Your inventory is full.".to_string()); } else { let name = object_definition_for(ctx, &object).map(|definition| definition.name).unwrap_or_else(|| object.definition_id.clone()); ctx.db.world_object().id().update(WorldObject { location_kind: "inventory".to_string(), updated_at: ctx.timestamp, ..object }); refresh_actor_acquire_quests(ctx, actor_id); rpg_message(ctx, room_id, actor_id, "system", format!("You withdraw {name}.")); } } else { rpg_message(ctx, room_id, actor_id, "error", "That item is not in your bank.".to_string()); } return Ok(true);
+    }
+    if let Some(rest) = lower.strip_prefix("pay ") {
+        if let Some((amount_part, target_query)) = rest.split_once(" gold to ") {
+            if let Ok(amount) = amount_part.parse::<i64>() { if amount > 0 { if let Some((target_id, target_name, false)) = target_actor_in_room(ctx, room_id, actor_id, target_query) { if change_currency(ctx, actor_id, "gold", -amount).is_ok() { let _ = change_currency(ctx, &target_id, "gold", amount); rpg_message(ctx, room_id, actor_id, "system", format!("You pay {target_name} {amount} gold.")); } else { rpg_message(ctx, room_id, actor_id, "error", "You do not have enough gold.".to_string()); } } else { rpg_message(ctx, room_id, actor_id, "error", "That player is not here.".to_string()); } return Ok(true); } }
+        }
+    }
+    if let Some(rest) = lower.strip_prefix("give ") {
+        if let Some((item_query, target_query)) = rest.split_once(" to ") { if let Some((target_id, target_name, false)) = target_actor_in_room(ctx, room_id, actor_id, target_query) { if !inventory_has_space(ctx, &target_id, 1) { rpg_message(ctx, room_id, actor_id, "error", format!("{target_name}'s inventory is full.")); } else if let Some((object, definition)) = find_carried_object(ctx, actor_id, item_query).filter(|(object, _)| object.location_kind == "inventory") { ctx.db.world_object().id().update(WorldObject { location_id: target_id.clone(), updated_at: ctx.timestamp, ..object }); refresh_actor_acquire_quests(ctx, actor_id); refresh_actor_acquire_quests(ctx, &target_id); rpg_message(ctx, room_id, actor_id, "system", format!("You give {} to {target_name}.", definition.name)); } else { rpg_message(ctx, room_id, actor_id, "error", "You are not carrying that item loose in your inventory.".to_string()); } } else { rpg_message(ctx, room_id, actor_id, "error", "That player is not here.".to_string()); } return Ok(true); }
+    }
     if matches!(lower.as_str(), "quests" | "quest log" | "journal") {
         list_quests(ctx, room_id, actor_id);
         return Ok(true);
@@ -4476,6 +5862,10 @@ fn handle_rpg_command(
     }
     if let Some(query) = lower.strip_prefix("turn in ").or_else(|| lower.strip_prefix("complete ")) {
         turn_in_quest(ctx, room_id, actor_id, query.trim());
+        return Ok(true);
+    }
+    if let Some(query) = lower.strip_prefix("choose ") {
+        choose_quest_branch(ctx, room_id, actor_id, query.trim());
         return Ok(true);
     }
     if let Some(rest) = lower.strip_prefix("cast ").or_else(|| lower.strip_prefix("ability ")) {
@@ -4542,8 +5932,10 @@ fn handle_rpg_command(
         describe_object(ctx, room_id, actor_id, query.trim());
         return Ok(true);
     }
-    if let Some(query) = lower.strip_prefix("examine ").or_else(|| lower.strip_prefix("open ")) {
-        describe_object(ctx, room_id, actor_id, query.trim());
+    if let Some(query) = lower.strip_prefix("examine ").or_else(|| lower.strip_prefix("open ")).or_else(|| lower.strip_prefix("interact ")) {
+        let query = query.trim();
+        if let Some((_, definition)) = find_object_at(ctx, "room", room_id, query).or_else(|| find_carried_object(ctx, actor_id, query)) { advance_quest_event(ctx, actor_id, "interact_object", &definition.id, 1); }
+        describe_object(ctx, room_id, actor_id, query);
         return Ok(true);
     }
 
@@ -4863,7 +6255,7 @@ fn handle_rpg_command(
             rpg_message(ctx, room_id, actor_id, "error", format!("Your next attack will be ready in {:.1} seconds.", remaining as f32 / 1000.0));
             return Ok(true);
         }
-        let (damage, weapon_name) = combat_damage(ctx, actor_id, &target_id);
+        let (damage, weapon_name, outcome) = combat_damage(ctx, actor_id, &target_id);
         let current_health = actor_stat_row(ctx, &target_id, &health_definition).current_value;
         if current_health <= health_definition.minimum {
             rpg_message(ctx, room_id, actor_id, "error", format!("{target_name} is already defeated."));
@@ -4872,21 +6264,23 @@ fn handle_rpg_command(
         clear_actor_spawn_protection(ctx, actor_id);
         set_cooldown(ctx, actor_id, "basic-attack", basic_attack_cooldown_ms(ctx, actor_id));
         let next_health = current_health.saturating_sub(damage).max(health_definition.minimum);
-        interrupt_actor_casts(ctx, &target_id, room_id, "by taking damage");
+        if let Some(npc) = target_npc.as_ref() { record_npc_threat(ctx, &npc.id, actor_id, damage); }
         wear_equipped_weapon(ctx, actor_id, room_id);
-        wear_equipped_armor(ctx, &target_id, room_id);
+        if damage > 0 {
+            interrupt_actor_casts(ctx, &target_id, room_id, "by taking damage");
+            wear_equipped_armor(ctx, &target_id, room_id);
+        }
         set_actor_stat_current(ctx, &target_id, &health_definition, next_health);
-        let result = if next_health <= health_definition.minimum { format!(" {target_name} is defeated.") } else { format!(" {target_name} has {next_health} {} remaining.", health_definition.name) };
+        let result = if damage == 0 { format!(" {target_name} {} the attack.", if outcome == "parry" { "parries" } else { "dodges" }) } else if next_health <= health_definition.minimum { format!(" {target_name} is defeated.") } else { format!(" {target_name} has {next_health} {} remaining.", health_definition.name) };
         add_message(ctx, Some(room_id.to_string()), Some(actor_id.to_string()), Some(actor_name.to_string()), None, "combat",
-            format!("{actor_name} attacks {target_name} with {weapon_name} for {damage} damage.{result}"), None, None);
+            format!("{actor_name} attacks {target_name} with {weapon_name} for {damage} damage ({outcome}).{result}"), None, None);
         if next_health <= health_definition.minimum {
             if let Some(npc) = target_npc {
                 penalize_npc_attack(ctx, room_id, actor_id, actor_name, &npc, true);
                 advance_quest_event(ctx, actor_id, "kill_npc", &npc.id, 1);
                 if let Some(faction_id) = npc.faction.as_ref() { advance_quest_event(ctx, actor_id, "kill_faction", faction_id, 1); }
-                let xp_reward = npc.xp_reward;
+                award_npc_experience(ctx, &npc, actor_id, room_id);
                 let drops = defeat_npc(ctx, npc, room_id);
-                rpg_message(ctx, room_id, actor_id, "system", award_experience(ctx, actor_id, xp_reward));
                 let loot_message = if drops.is_empty() {
                     format!("{target_name} carried no loot.")
                 } else {

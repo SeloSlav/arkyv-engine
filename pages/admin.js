@@ -440,7 +440,7 @@ function PatrolRouteEditor({ rooms, value, onChange }) {
     );
 }
 
-function NpcBehaviorEditor({ value, rooms, onChange }) {
+function NpcBehaviorEditor({ value, rooms, factions = [], onChange }) {
     const set = (key, nextValue) => onChange(key, nextValue);
     const isPatrolling = value?.behavior_type === 'patrol' || value?.behavior_type === 'patrol_hostile';
     return (
@@ -448,7 +448,7 @@ function NpcBehaviorEditor({ value, rooms, onChange }) {
             <div><h4 className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-200">World behavior</h4><p className="mt-1 text-xs normal-case leading-5 tracking-normal text-slate-500">These rules run on the authoritative world state during play.</p></div>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <label className="flex flex-col gap-2 text-[0.65rem] uppercase tracking-[0.2em] text-slate-400">Disposition<select value={value?.disposition || 'neutral'} onChange={(event) => set('disposition', event.target.value)} className="rounded-md border border-slate-600/60 bg-slate-800/70 px-3 py-2 text-sm normal-case tracking-normal text-slate-100"><option value="friendly">Friendly · cannot be attacked</option><option value="neutral">Neutral · retaliates</option><option value="hostile">Hostile · enemy</option></select></label>
-                <label className="flex flex-col gap-2 text-[0.65rem] uppercase tracking-[0.2em] text-slate-400">Faction id<input value={value?.faction || ''} onChange={(event) => set('faction', event.target.value)} placeholder="Create it in Factions & reputation first" className="rounded-md border border-slate-600/60 bg-slate-800/70 px-3 py-2 text-sm normal-case tracking-normal text-slate-100" /></label>
+                <label className="flex flex-col gap-2 text-[0.65rem] uppercase tracking-[0.2em] text-slate-400">Faction<select value={value?.faction || ''} onChange={(event) => set('faction', event.target.value)} className="rounded-md border border-slate-600/60 bg-slate-800/70 px-3 py-2 text-sm normal-case tracking-normal text-slate-100"><option value="">No faction</option>{factions.map((faction) => <option key={faction.id} value={faction.id}>{faction.name}</option>)}</select></label>
                 <label className="flex flex-col gap-2 text-[0.65rem] uppercase tracking-[0.2em] text-slate-400">Movement<select value={value?.behavior_type === 'patrol_hostile' ? 'patrol' : (value?.behavior_type || 'static')} onChange={(event) => set('behavior_type', event.target.value)} className="rounded-md border border-slate-600/60 bg-slate-800/70 px-3 py-2 text-sm normal-case tracking-normal text-slate-100"><option value="static">Stay in spawn room</option><option value="patrol">Patrol an ordered route</option></select></label>
                 <label className="flex items-center gap-3 self-end rounded-md border border-slate-700 bg-slate-900/60 px-3 py-2.5 text-xs normal-case tracking-normal text-slate-300"><input type="checkbox" checked={Boolean(value?.attack_on_sight)} disabled={(value?.disposition || 'neutral') !== 'hostile'} onChange={(event) => set('attack_on_sight', event.target.checked)} className="accent-rose-400" />Attack players on sight</label>
                 <label className="flex flex-col gap-2 text-[0.65rem] uppercase tracking-[0.2em] text-slate-400">Attack cadence (seconds)<input type="number" min="1" value={value?.attack_interval_seconds ?? 6} onChange={(event) => set('attack_interval_seconds', event.target.value)} className="rounded-md border border-slate-600/60 bg-slate-800/70 px-3 py-2 text-sm normal-case tracking-normal text-slate-100" /></label>
@@ -568,6 +568,7 @@ export default function ArkyvAdminPanel() {
     // NPC Management State
     const [npcs, setNpcs] = useState([]);
     const [allRooms, setAllRooms] = useState([]);
+    const [factionDefinitions, setFactionDefinitions] = useState([]);
     const [npcSearchTerm, setNpcSearchTerm] = useState('');
     const [exitRoomSearch, setExitRoomSearch] = useState({});
     const [exitRoomSelection, setExitRoomSelection] = useState({});
@@ -1123,6 +1124,17 @@ export default function ArkyvAdminPanel() {
         return () => {
             isActive = false;
         };
+    }, [session, spacetime, reloadCounter]);
+
+    useEffect(() => {
+        if (!session) return;
+        let isActive = true;
+        spacetime.from('faction_definitions').select('id, name').order('name').then(({ data, error }) => {
+            if (!isActive) return;
+            if (error) console.error('Failed to load NPC factions', error);
+            else setFactionDefinitions(data || []);
+        });
+        return () => { isActive = false; };
     }, [session, spacetime, reloadCounter]);
 
     // Load NPCs
@@ -6385,7 +6397,7 @@ export default function ArkyvAdminPanel() {
                                     </div>
                                 </label>
 
-                                <NpcBehaviorEditor value={editNpc} rooms={allRooms} onChange={updateNpcField} />
+                                <NpcBehaviorEditor value={editNpc} rooms={allRooms} factions={factionDefinitions} onChange={updateNpcField} />
 
                                 <label className="flex flex-col gap-2 text-xs uppercase tracking-[0.25em] text-slate-400 md:col-span-2">
                                     <span className="flex items-center justify-between">
@@ -6783,7 +6795,7 @@ export default function ArkyvAdminPanel() {
                                     </select>
                                 </label>
 
-                                <NpcBehaviorEditor value={newNpc} rooms={allRooms} onChange={(key, nextValue) => setNewNpc((previous) => ({ ...previous, [key]: nextValue }))} />
+                                <NpcBehaviorEditor value={newNpc} rooms={allRooms} factions={factionDefinitions} onChange={(key, nextValue) => setNewNpc((previous) => ({ ...previous, [key]: nextValue }))} />
 
                                 <label className="flex flex-col gap-2 text-xs uppercase tracking-[0.25em] text-slate-400 md:col-span-2">
                                     <span className="flex items-center justify-between">
