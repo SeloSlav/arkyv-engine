@@ -1,0 +1,37 @@
+0 verbose cli C:\Program Files\nodejs\node.exe C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js
+1 info using npm@11.4.2
+2 info using node@v24.3.0
+3 silly config load:file:C:\Program Files\nodejs\node_modules\npm\npmrc
+4 silly config load:file:C:\WebProjects\arkyv-engine\.npmrc
+5 silly config load:file:C:\Users\Asus\.npmrc
+6 silly config load:file:C:\Users\Asus\AppData\Roaming\npm\etc\npmrc
+7 verbose title npm install
+8 verbose argv "install" "--no-audit" "--no-fund" "--ignore-scripts" "--cache" ".npm-cache" "--loglevel" "verbose"
+9 verbose logfile logs-max:10 dir:C:\WebProjects\arkyv-engine\.npm-cache\_logs\2026-07-15T12_46_18_184Z-
+10 verbose logfile C:\WebProjects\arkyv-engine\.npm-cache\_logs\2026-07-15T12_46_18_184Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+13 silly idealTree buildDeps
+14 silly fetch manifest next@15.5.9
+15 silly packumentCache full:https://registry.npmjs.org/next cache-miss
+16 http fetch GET 200 https://registry.npmjs.org/npm 4897ms
+17 http fetch GET 200 https://registry.npmjs.org/next 23603ms (cache miss)
+18 silly packumentCache full:https://registry.npmjs.org/next set size:undefined disposed:false
+19 silly fetch manifest @opentelemetry/api@^1.1.0
+20 silly packumentCache full:https://registry.npmjs.org/@opentelemetry%2fapi cache-miss
+21 http fetch GET 200 https://registry.npmjs.org/@opentelemetry%2fapi 933ms (cache miss)
+22 silly packumentCache full:https://registry.npmjs.org/@opentelemetry%2fapi set size:undefined disposed:false
+23 silly fetch manifest @playwright/test@^1.51.1
+24 silly packumentCache full:https://registry.npmjs.org/@playwright%2ftest cache-miss
+25 http fetch GET 200 https://registry.npmjs.org/@playwright%2ftest 7982ms (cache miss)
+26 silly packumentCache full:https://registry.npmjs.org/@playwright%2ftest set size:undefined disposed:false
+27 silly fetch manifest babel-plugin-react-compiler@*
+28 silly packumentCache full:https://registry.npmjs.org/babel-plugin-react-compiler cache-miss
+29 http fetch GET 200 https://registry.npmjs.org/babel-plugin-react-compiler 1503ms (cache miss)
+30 silly packumentCache full:https://registry.npmjs.org/babel-plugin-react-compiler set size:undefined disposed:false
+31 silly fetch manifest react@19.1.0
+32 silly packumentCache full:https://registry.npmjs.org/react cache-miss
+33 http fetch GET 200 https://registry.npmjs.org/react 7887ms (cache miss)
+34 silly packumentCache full:https://registry.npmjs.org/react set size:undefined disposed:false
+35 silly fetch manifest react-dom@19.1.0
+36 silly packumentCache full:https://registry.npmjs.org/react-dom cache-miss
