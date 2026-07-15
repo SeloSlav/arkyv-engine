@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import getSpacetimeClient from '@/lib/spacetimedbClient';
+import EngineSystemsEditor from '@/components/admin/EngineSystemsEditor';
 
 const PRIMITIVE_PRESETS = [
     { kind: 'item', label: 'Item', icon: '◇', description: 'Portable building block or crafting material.', portable: true, stackable: true, max_stack: 20 },
@@ -27,7 +28,15 @@ const TAB_OPTIONS = [
     { id: 'loot', label: 'Enemy loot' },
     { id: 'actors', label: 'Actor values' },
     { id: 'moderation', label: 'Player moderation' },
+    { id: 'advanced', label: 'Advanced engine' },
 ];
+
+const TAB_PERMISSIONS = {
+    objects: 'systems.manage', stats: 'systems.manage', abilities: 'systems.manage', combat: 'systems.manage', origins: 'systems.manage',
+    progression: 'systems.manage', slots: 'systems.manage', factions: 'world.manage', instances: 'world.manage', loot: 'world.manage',
+    quests: 'quests.manage', economy: 'economy.manage', roles: 'roles.manage', lifecycle: 'lifecycle.manage',
+    actors: 'players.moderate', moderation: 'players.moderate', advanced: ['world.manage', 'systems.manage', 'economy.manage', 'players.moderate'],
+};
 
 const inputClass = 'w-full rounded-md border border-slate-600/70 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-cyan-400 focus:outline-none';
 const labelClass = 'text-[0.65rem] uppercase tracking-[0.22em] text-slate-400';
@@ -151,7 +160,7 @@ function Check({ label, checked, onChange }) {
     );
 }
 
-export default function RpgSystemsEditor({ enabled }) {
+export default function RpgSystemsEditor({ enabled, currentProfile }) {
     const spacetime = useMemo(() => getSpacetimeClient(), []);
     const [activeTab, setActiveTab] = useState('objects');
     const [definitions, setDefinitions] = useState([]);
@@ -186,6 +195,7 @@ export default function RpgSystemsEditor({ enabled }) {
     const [ingredients, setIngredients] = useState([]);
     const [adminRoles, setAdminRoles] = useState([]);
     const [adminAssignments, setAdminAssignments] = useState([]);
+    const [adminRolesLoaded, setAdminRolesLoaded] = useState(false);
     const [spawnPoints, setSpawnPoints] = useState([]);
     const [lifecycleConfigs, setLifecycleConfigs] = useState([]);
     const [lifeStates, setLifeStates] = useState([]);
@@ -248,6 +258,23 @@ export default function RpgSystemsEditor({ enabled }) {
     const [busy, setBusy] = useState(false);
     const [generatingImage, setGeneratingImage] = useState(false);
     const [message, setMessage] = useState(null);
+
+    const grantedPermissions = useMemo(() => {
+        if (!adminRolesLoaded) return new Set();
+        const assignment = adminAssignments.find((row) => row.profile_id === currentProfile?.id);
+        const role = assignment && adminRoles.find((row) => row.id === assignment.role_id);
+        const values = Array.isArray(role?.permissions) ? role.permissions : [];
+        return currentProfile?.is_admin && !assignment ? new Set(['*']) : new Set(values);
+    }, [adminAssignments, adminRoles, adminRolesLoaded, currentProfile]);
+    const can = useCallback((permission) => grantedPermissions.has('*') || grantedPermissions.has(permission), [grantedPermissions]);
+    const visibleTabs = useMemo(() => TAB_OPTIONS.filter((tab) => {
+        const required = TAB_PERMISSIONS[tab.id] || 'world.manage';
+        return Array.isArray(required) ? required.some(can) : can(required);
+    }), [can]);
+
+    useEffect(() => {
+        if (visibleTabs.length && !visibleTabs.some((tab) => tab.id === activeTab)) setActiveTab(visibleTabs[0].id);
+    }, [activeTab, visibleTabs]);
 
     const actors = useMemo(() => [
         ...characters.map((actor) => ({ ...actor, actor_type: 'character', label: `${actor.name} · Hero` })),
@@ -358,6 +385,7 @@ export default function RpgSystemsEditor({ enabled }) {
         setIngredients(results[40].data || []);
         setAdminRoles(results[41].data || []);
         setAdminAssignments(results[42].data || []);
+        setAdminRolesLoaded(true);
     }, [enabled, spacetime]);
 
     useEffect(() => {
@@ -899,7 +927,7 @@ export default function RpgSystemsEditor({ enabled }) {
             </div>
 
             <div className="flex gap-2 overflow-x-auto border-b border-slate-700/50 px-4 py-3 sm:flex-wrap sm:px-6 sm:py-4" role="tablist" aria-label="RPG editor sections">
-                {TAB_OPTIONS.map((tab) => (
+                {visibleTabs.map((tab) => (
                     <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} onClick={() => setActiveTab(tab.id)}
                         className={`shrink-0 rounded-full border px-4 py-2 text-[0.65rem] uppercase tracking-[0.18em] transition ${activeTab === tab.id ? 'border-purple-300 bg-purple-400/20 text-purple-100' : 'border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200'}`}>
                         {tab.label}
@@ -1264,6 +1292,7 @@ export default function RpgSystemsEditor({ enabled }) {
                     </>}
                 </div>
             )}
+            {activeTab === 'advanced' && <EngineSystemsEditor enabled={enabled} permissions={grantedPermissions} actors={actors} />}
         </section>
     );
 }

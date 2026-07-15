@@ -670,8 +670,14 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
                 (error) => console.error('Room-message subscription failed:', error),
             );
 
-        setRoomSubscription(subscription);
-    }, [appendLine, getRegistry, spacetime, unsubscribeFromRoom, activeCharacter, loadAvailableExits, loadRoomNPCs, loadRoomCharacters, conversationMode, addToConversationHistory]);
+        const privateSubscription = spacetime.onInsert(
+            'private_messages',
+            (payload) => appendLine(createMessageLine(payload.new, activeCharacter, roomNPCsRef.current)),
+            (message) => message.target_character_id === (activeCharacter?.id || session?.user?.id),
+            (error) => console.error('Private-message subscription failed:', error),
+        );
+        setRoomSubscription({ unsubscribe: () => { subscription.unsubscribe(); privateSubscription.unsubscribe(); } });
+    }, [appendLine, getRegistry, spacetime, unsubscribeFromRoom, activeCharacter, session?.user?.id, loadAvailableExits, loadRoomNPCs, loadRoomCharacters, conversationMode, addToConversationHistory]);
 
     // Keep active character ref in sync
     useEffect(() => {
@@ -931,21 +937,16 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
             .select('id, room_id, character_id, character_name, target_character_id, kind, body, created_at')
             .eq('room_id', roomId);
 
-        // Filter to show public messages OR private messages targeted to this character
-        if (activeCharId) {
-            query = query.or(`target_character_id.is.null,target_character_id.eq.${activeCharId}`);
-        } else {
-            query = query.is('target_character_id', null);
-        }
+        query = query.is('target_character_id', null);
 
         const entryTime = roomEntryTimesRef.current.get(roomId);
         if (entryTime) {
             query = query.gte('created_at', new Date(entryTime).toISOString());
         }
 
-        const { data, error } = await query
+        const [{ data, error }, privateResult] = await Promise.all([query
             .order('created_at', { ascending: true })
-            .limit(50);
+            .limit(50), spacetime.from('private_messages').select('*').eq('target_character_id', activeCharId || session?.user?.id).order('created_at', { ascending: true }).limit(50)]);
 
         if (error) {
             appendLine(createErrorLine(`Unable to load messages: ${formatError(error)}`));
@@ -954,10 +955,12 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
 
         console.log('🔍 Loaded messages:', data?.length || 0, data?.map(msg => ({ kind: msg.kind, body: msg.body, targetId: msg.target_character_id })));
 
-        if (data?.length) {
-            appendLines(data.map(msg => createMessageLine(msg, activeCharacter, roomNPCs)));
+        if (privateResult.error) appendLine(createErrorLine(`Unable to load private messages: ${formatError(privateResult.error)}`));
+        const messages = [...(data || []), ...(privateResult.data || [])].sort((left, right) => new Date(left.created_at) - new Date(right.created_at));
+        if (messages.length) {
+            appendLines(messages.map(msg => createMessageLine(msg, activeCharacter, roomNPCs)));
         }
-    }, [appendLines, spacetime, activeCharacter, roomNPCs]);
+    }, [appendLine, appendLines, spacetime, activeCharacter, session?.user?.id, roomNPCs]);
 
     const hasLoadedCharacters = useRef(false);
 

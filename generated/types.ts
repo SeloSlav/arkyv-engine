@@ -61,6 +61,20 @@ export const AbilityEffectDefinition = __t.object("AbilityEffectDefinition", {
 });
 export type AbilityEffectDefinition = __Infer<typeof AbilityEffectDefinition>;
 
+export const AbilityUnlockRule = __t.object("AbilityUnlockRule", {
+  abilityId: __t.string(),
+  requiredOptionId: __t.option(__t.string()),
+  prerequisiteAbilityId: __t.option(__t.string()),
+  requiredQuestId: __t.option(__t.string()),
+  requiredFactionId: __t.option(__t.string()),
+  requiredReputation: __t.i32(),
+  talentCost: __t.u32(),
+  exclusiveGroup: __t.option(__t.string()),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type AbilityUnlockRule = __Infer<typeof AbilityUnlockRule>;
+
 export const ActorAbility = __t.object("ActorAbility", {
   id: __t.string(),
   actorId: __t.string(),
@@ -123,6 +137,14 @@ export const ActorDeathRecord = __t.object("ActorDeathRecord", {
 });
 export type ActorDeathRecord = __Infer<typeof ActorDeathRecord>;
 
+export const ActorDialogueState = __t.object("ActorDialogueState", {
+  actorId: __t.string(),
+  npcId: __t.string(),
+  nodeId: __t.string(),
+  updatedAt: __t.timestamp(),
+});
+export type ActorDialogueState = __Infer<typeof ActorDialogueState>;
+
 export const ActorFactionReputation = __t.object("ActorFactionReputation", {
   id: __t.string(),
   actorId: __t.string(),
@@ -131,6 +153,14 @@ export const ActorFactionReputation = __t.object("ActorFactionReputation", {
   updatedAt: __t.timestamp(),
 });
 export type ActorFactionReputation = __Infer<typeof ActorFactionReputation>;
+
+export const ActorLearnedRecipe = __t.object("ActorLearnedRecipe", {
+  id: __t.string(),
+  actorId: __t.string(),
+  recipeId: __t.string(),
+  learnedAt: __t.timestamp(),
+});
+export type ActorLearnedRecipe = __Infer<typeof ActorLearnedRecipe>;
 
 export const ActorLifeState = __t.object("ActorLifeState", {
   id: __t.string(),
@@ -146,6 +176,16 @@ export const ActorLifeState = __t.object("ActorLifeState", {
   livesRemaining: __t.u32(),
 });
 export type ActorLifeState = __Infer<typeof ActorLifeState>;
+
+export const ActorProfession = __t.object("ActorProfession", {
+  id: __t.string(),
+  actorId: __t.string(),
+  professionId: __t.string(),
+  rank: __t.u32(),
+  experience: __t.u32(),
+  updatedAt: __t.timestamp(),
+});
+export type ActorProfession = __Infer<typeof ActorProfession>;
 
 export const ActorProgression = __t.object("ActorProgression", {
   id: __t.string(),
@@ -215,6 +255,24 @@ export const ActorStatusEffect = __t.object("ActorStatusEffect", {
 });
 export type ActorStatusEffect = __Infer<typeof ActorStatusEffect>;
 
+export const ActorTalentPool = __t.object("ActorTalentPool", {
+  actorId: __t.string(),
+  availablePoints: __t.u32(),
+  spentPoints: __t.u32(),
+  lastLevelAwarded: __t.u32(),
+  updatedAt: __t.timestamp(),
+});
+export type ActorTalentPool = __Infer<typeof ActorTalentPool>;
+
+export const ActorTriggerState = __t.object("ActorTriggerState", {
+  id: __t.string(),
+  actorId: __t.string(),
+  triggerId: __t.string(),
+  fireCount: __t.u32(),
+  lastFiredAt: __t.timestamp(),
+});
+export type ActorTriggerState = __Infer<typeof ActorTriggerState>;
+
 export const ActorWallet = __t.object("ActorWallet", {
   id: __t.string(),
   actorId: __t.string(),
@@ -222,6 +280,17 @@ export const ActorWallet = __t.object("ActorWallet", {
   updatedAt: __t.timestamp(),
 });
 export type ActorWallet = __Infer<typeof ActorWallet>;
+
+export const AdminAudit = __t.object("AdminAudit", {
+  id: __t.u64(),
+  scope: __t.string(),
+  profileId: __t.string(),
+  action: __t.string(),
+  target: __t.string(),
+  details: __t.string(),
+  createdAt: __t.timestamp(),
+});
+export type AdminAudit = __Infer<typeof AdminAudit>;
 
 export const AdminRoleAssignment = __t.object("AdminRoleAssignment", {
   profileId: __t.string(),
@@ -239,6 +308,20 @@ export const AdminRoleDefinition = __t.object("AdminRoleDefinition", {
   updatedAt: __t.timestamp(),
 });
 export type AdminRoleDefinition = __Infer<typeof AdminRoleDefinition>;
+
+export const BankConfig = __t.object("BankConfig", {
+  id: __t.string(),
+  accessMode: __t.string(),
+  requiredRoomTag: __t.option(__t.string()),
+  requiredNpcId: __t.option(__t.string()),
+  slotLimit: __t.u32(),
+  depositFee: __t.i64(),
+  withdrawalFee: __t.i64(),
+  sharedByIdentity: __t.bool(),
+  protectsFromDeath: __t.bool(),
+  updatedAt: __t.timestamp(),
+});
+export type BankConfig = __Infer<typeof BankConfig>;
 
 export const Character = __t.object("Character", {
   id: __t.string(),
@@ -292,6 +375,16 @@ export const Command = __t.object("Command", {
 });
 export type Command = __Infer<typeof Command>;
 
+export const ContentIssue = __t.object("ContentIssue", {
+  id: __t.string(),
+  severity: __t.string(),
+  category: __t.string(),
+  recordId: __t.string(),
+  message: __t.string(),
+  detectedAt: __t.timestamp(),
+});
+export type ContentIssue = __Infer<typeof ContentIssue>;
+
 export const CraftingIngredient = __t.object("CraftingIngredient", {
   id: __t.string(),
   recipeId: __t.string(),
@@ -330,6 +423,34 @@ export const CurrencyDefinition = __t.object("CurrencyDefinition", {
 });
 export type CurrencyDefinition = __Infer<typeof CurrencyDefinition>;
 
+export const DialogueChoice = __t.object("DialogueChoice", {
+  id: __t.string(),
+  nodeId: __t.string(),
+  label: __t.string(),
+  nextNodeId: __t.option(__t.string()),
+  actionKind: __t.string(),
+  actionReferenceId: __t.option(__t.string()),
+  actionValue: __t.i32(),
+  sortOrder: __t.u32(),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type DialogueChoice = __Infer<typeof DialogueChoice>;
+
+export const DialogueNode = __t.object("DialogueNode", {
+  id: __t.string(),
+  npcId: __t.string(),
+  text: __t.string(),
+  entryNode: __t.bool(),
+  requiredQuestId: __t.option(__t.string()),
+  requiredFactionId: __t.option(__t.string()),
+  requiredReputation: __t.i32(),
+  sortOrder: __t.u32(),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type DialogueNode = __Infer<typeof DialogueNode>;
+
 export const EquipmentSlotDefinition = __t.object("EquipmentSlotDefinition", {
   id: __t.string(),
   name: __t.string(),
@@ -348,6 +469,20 @@ export const Exit = __t.object("Exit", {
 });
 export type Exit = __Infer<typeof Exit>;
 
+export const ExitRule = __t.object("ExitRule", {
+  exitId: __t.string(),
+  isDoor: __t.bool(),
+  closed: __t.bool(),
+  locked: __t.bool(),
+  keyDefinitionId: __t.option(__t.string()),
+  hidden: __t.bool(),
+  trapDamage: __t.i32(),
+  requiredQuestId: __t.option(__t.string()),
+  requiredOptionId: __t.option(__t.string()),
+  updatedAt: __t.timestamp(),
+});
+export type ExitRule = __Infer<typeof ExitRule>;
+
 export const FactionDefinition = __t.object("FactionDefinition", {
   id: __t.string(),
   name: __t.string(),
@@ -363,6 +498,27 @@ export const FactionDefinition = __t.object("FactionDefinition", {
   updatedAt: __t.timestamp(),
 });
 export type FactionDefinition = __Infer<typeof FactionDefinition>;
+
+export const Guild = __t.object("Guild", {
+  id: __t.string(),
+  name: __t.string(),
+  leaderActorId: __t.string(),
+  description: __t.string(),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type Guild = __Infer<typeof Guild>;
+
+export const GuildMember = __t.object("GuildMember", {
+  id: __t.string(),
+  guildId: __t.string(),
+  actorId: __t.string(),
+  rank: __t.string(),
+  status: __t.string(),
+  invitedByActorId: __t.string(),
+  joinedAt: __t.timestamp(),
+});
+export type GuildMember = __Infer<typeof GuildMember>;
 
 export const LootTableEntry = __t.object("LootTableEntry", {
   id: __t.string(),
@@ -446,6 +602,94 @@ export const ObjectDefinition = __t.object("ObjectDefinition", {
 });
 export type ObjectDefinition = __Infer<typeof ObjectDefinition>;
 
+export const ObjectRule = __t.object("ObjectRule", {
+  definitionId: __t.string(),
+  rarity: __t.string(),
+  itemLevel: __t.u32(),
+  requiredLevel: __t.u32(),
+  requiredOptionId: __t.option(__t.string()),
+  maximumDurability: __t.i32(),
+  baseValue: __t.i64(),
+  repairable: __t.bool(),
+  twoHanded: __t.bool(),
+  weaponType: __t.option(__t.string()),
+  damageSchool: __t.option(__t.string()),
+  bindRule: __t.string(),
+  tradeable: __t.bool(),
+  updatedAt: __t.timestamp(),
+});
+export type ObjectRule = __Infer<typeof ObjectRule>;
+
+export const Party = __t.object("Party", {
+  id: __t.string(),
+  name: __t.string(),
+  leaderActorId: __t.string(),
+  lootRule: __t.string(),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type Party = __Infer<typeof Party>;
+
+export const PartyMember = __t.object("PartyMember", {
+  id: __t.string(),
+  partyId: __t.string(),
+  actorId: __t.string(),
+  status: __t.string(),
+  invitedByActorId: __t.string(),
+  joinedAt: __t.timestamp(),
+});
+export type PartyMember = __Infer<typeof PartyMember>;
+
+export const PlayerReport = __t.object("PlayerReport", {
+  id: __t.string(),
+  scope: __t.string(),
+  reporterActorId: __t.string(),
+  targetActorId: __t.string(),
+  reason: __t.string(),
+  status: __t.string(),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type PlayerReport = __Infer<typeof PlayerReport>;
+
+export const PlayerSanction = __t.object("PlayerSanction", {
+  id: __t.string(),
+  scope: __t.string(),
+  actorId: __t.string(),
+  sanctionKind: __t.string(),
+  reason: __t.string(),
+  expiresAtMicros: __t.i64(),
+  issuedByProfileId: __t.string(),
+  createdAt: __t.timestamp(),
+});
+export type PlayerSanction = __Infer<typeof PlayerSanction>;
+
+export const PrivateMessage = __t.object("PrivateMessage", {
+  id: __t.u64(),
+  recipientIdentity: __t.identity(),
+  senderIdentity: __t.identity(),
+  roomId: __t.option(__t.string()),
+  characterId: __t.option(__t.string()),
+  characterName: __t.option(__t.string()),
+  targetCharacterId: __t.string(),
+  kind: __t.string(),
+  body: __t.string(),
+  createdAt: __t.timestamp(),
+});
+export type PrivateMessage = __Infer<typeof PrivateMessage>;
+
+export const ProfessionDefinition = __t.object("ProfessionDefinition", {
+  id: __t.string(),
+  name: __t.string(),
+  description: __t.string(),
+  maximumRank: __t.u32(),
+  xpPerCraft: __t.u32(),
+  active: __t.bool(),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type ProfessionDefinition = __Infer<typeof ProfessionDefinition>;
+
 export const Profile = __t.object("Profile", {
   id: __t.string(),
   owner: __t.identity(),
@@ -472,6 +716,15 @@ export const ProgressionConfig = __t.object("ProgressionConfig", {
   updatedAt: __t.timestamp(),
 });
 export type ProgressionConfig = __Infer<typeof ProgressionConfig>;
+
+export const ProviderRequestWindow = __t.object("ProviderRequestWindow", {
+  id: __t.string(),
+  owner: __t.identity(),
+  route: __t.string(),
+  windowStartedMicros: __t.i64(),
+  requestCount: __t.u32(),
+});
+export type ProviderRequestWindow = __Infer<typeof ProviderRequestWindow>;
 
 export const QuestChoice = __t.object("QuestChoice", {
   id: __t.string(),
@@ -543,6 +796,17 @@ export const QuestRule = __t.object("QuestRule", {
   updatedAt: __t.timestamp(),
 });
 export type QuestRule = __Infer<typeof QuestRule>;
+
+export const RecipeRule = __t.object("RecipeRule", {
+  recipeId: __t.string(),
+  professionId: __t.option(__t.string()),
+  requiredProfessionRank: __t.u32(),
+  mustBeLearned: __t.bool(),
+  successPercent: __t.u32(),
+  cooldownSeconds: __t.u32(),
+  updatedAt: __t.timestamp(),
+});
+export type RecipeRule = __Infer<typeof RecipeRule>;
 
 export const Region = __t.object("Region", {
   name: __t.string(),
@@ -617,6 +881,22 @@ export const ScheduledEffectTick = __t.object("ScheduledEffectTick", {
 });
 export type ScheduledEffectTick = __Infer<typeof ScheduledEffectTick>;
 
+export const ScheduledWorldTick = __t.object("ScheduledWorldTick", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+});
+export type ScheduledWorldTick = __Infer<typeof ScheduledWorldTick>;
+
+export const SocialRelationship = __t.object("SocialRelationship", {
+  id: __t.string(),
+  owner: __t.identity(),
+  sourceActorId: __t.string(),
+  targetActorId: __t.string(),
+  relationshipKind: __t.string(),
+  createdAt: __t.timestamp(),
+});
+export type SocialRelationship = __Infer<typeof SocialRelationship>;
+
 export const SpawnPoint = __t.object("SpawnPoint", {
   id: __t.string(),
   name: __t.string(),
@@ -654,6 +934,31 @@ export const StatDefinition = __t.object("StatDefinition", {
 });
 export type StatDefinition = __Infer<typeof StatDefinition>;
 
+export const TradeOffer = __t.object("TradeOffer", {
+  id: __t.string(),
+  tradeId: __t.string(),
+  actorId: __t.string(),
+  offerKind: __t.string(),
+  referenceId: __t.string(),
+  quantity: __t.i64(),
+  createdAt: __t.timestamp(),
+});
+export type TradeOffer = __Infer<typeof TradeOffer>;
+
+export const TradeSession = __t.object("TradeSession", {
+  id: __t.string(),
+  firstActorId: __t.string(),
+  firstIdentity: __t.identity(),
+  secondActorId: __t.string(),
+  secondIdentity: __t.identity(),
+  firstConfirmed: __t.bool(),
+  secondConfirmed: __t.bool(),
+  status: __t.string(),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type TradeSession = __Infer<typeof TradeSession>;
+
 export const VendorDefinition = __t.object("VendorDefinition", {
   id: __t.string(),
   npcId: __t.string(),
@@ -667,6 +972,16 @@ export const VendorDefinition = __t.object("VendorDefinition", {
   updatedAt: __t.timestamp(),
 });
 export type VendorDefinition = __Infer<typeof VendorDefinition>;
+
+export const VendorRestockRule = __t.object("VendorRestockRule", {
+  vendorStockId: __t.string(),
+  targetStock: __t.i32(),
+  restockQuantity: __t.u32(),
+  restockSeconds: __t.u32(),
+  lastRestockAtMicros: __t.i64(),
+  updatedAt: __t.timestamp(),
+});
+export type VendorRestockRule = __Infer<typeof VendorRestockRule>;
 
 export const VendorStock = __t.object("VendorStock", {
   id: __t.string(),
@@ -741,4 +1056,39 @@ export const WorldObject = __t.object("WorldObject", {
   updatedAt: __t.timestamp(),
 });
 export type WorldObject = __Infer<typeof WorldObject>;
+
+export const WorldSimulationConfig = __t.object("WorldSimulationConfig", {
+  id: __t.string(),
+  mode: __t.string(),
+  tickSeconds: __t.u32(),
+  dayLengthMinutes: __t.u32(),
+  weatherEnabled: __t.bool(),
+  active: __t.bool(),
+  updatedAt: __t.timestamp(),
+});
+export type WorldSimulationConfig = __Infer<typeof WorldSimulationConfig>;
+
+export const WorldSnapshot = __t.object("WorldSnapshot", {
+  id: __t.string(),
+  scope: __t.string(),
+  name: __t.string(),
+  schemaVersion: __t.u32(),
+  contentJson: __t.string(),
+  createdByProfileId: __t.string(),
+  createdAt: __t.timestamp(),
+});
+export type WorldSnapshot = __Infer<typeof WorldSnapshot>;
+
+export const WorldTrigger = __t.object("WorldTrigger", {
+  id: __t.string(),
+  eventKind: __t.string(),
+  sourceId: __t.option(__t.string()),
+  conditionsJson: __t.string(),
+  actionsJson: __t.string(),
+  oncePerActor: __t.bool(),
+  active: __t.bool(),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type WorldTrigger = __Infer<typeof WorldTrigger>;
 

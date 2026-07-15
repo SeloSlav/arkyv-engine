@@ -7,28 +7,46 @@ import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
 import AdminActorActionReducer from "../admin_actor_action_reducer";
+import AuthorizeProviderRequestReducer from "../authorize_provider_request_reducer";
 import ClientConnectedReducer from "../client_connected_reducer";
 import CompleteNpcCommandReducer from "../complete_npc_command_reducer";
+import ConfigureEngineRecordReducer from "../configure_engine_record_reducer";
 import DeleteCurrentAccountReducer from "../delete_current_account_reducer";
+import DeleteEngineRecordReducer from "../delete_engine_record_reducer";
 import DeleteRowsReducer from "../delete_rows_reducer";
+import DeleteWorldSnapshotReducer from "../delete_world_snapshot_reducer";
 import InsertRowsReducer from "../insert_rows_reducer";
 import InstallRpgStarterKitReducer from "../install_rpg_starter_kit_reducer";
+import ModeratePlayerReducer from "../moderate_player_reducer";
+import ResolvePlayerReportReducer from "../resolve_player_report_reducer";
 import ResolveScheduledCastReducer from "../resolve_scheduled_cast_reducer";
 import ResolveScheduledEffectTickReducer from "../resolve_scheduled_effect_tick_reducer";
+import ResolveWorldTickReducer from "../resolve_world_tick_reducer";
+import SaveWorldSnapshotReducer from "../save_world_snapshot_reducer";
 import SelectCharacterOptionReducer from "../select_character_option_reducer";
 import SubmitCommandReducer from "../submit_command_reducer";
 import UpdateRowsReducer from "../update_rows_reducer";
+import ValidateWorldContentReducer from "../validate_world_content_reducer";
 
 export type AdminActorActionParams = __Infer<typeof AdminActorActionReducer>;
+export type AuthorizeProviderRequestParams = __Infer<typeof AuthorizeProviderRequestReducer>;
 export type ClientConnectedParams = __Infer<typeof ClientConnectedReducer>;
 export type CompleteNpcCommandParams = __Infer<typeof CompleteNpcCommandReducer>;
+export type ConfigureEngineRecordParams = __Infer<typeof ConfigureEngineRecordReducer>;
 export type DeleteCurrentAccountParams = __Infer<typeof DeleteCurrentAccountReducer>;
+export type DeleteEngineRecordParams = __Infer<typeof DeleteEngineRecordReducer>;
 export type DeleteRowsParams = __Infer<typeof DeleteRowsReducer>;
+export type DeleteWorldSnapshotParams = __Infer<typeof DeleteWorldSnapshotReducer>;
 export type InsertRowsParams = __Infer<typeof InsertRowsReducer>;
 export type InstallRpgStarterKitParams = __Infer<typeof InstallRpgStarterKitReducer>;
+export type ModeratePlayerParams = __Infer<typeof ModeratePlayerReducer>;
+export type ResolvePlayerReportParams = __Infer<typeof ResolvePlayerReportReducer>;
 export type ResolveScheduledCastParams = __Infer<typeof ResolveScheduledCastReducer>;
 export type ResolveScheduledEffectTickParams = __Infer<typeof ResolveScheduledEffectTickReducer>;
+export type ResolveWorldTickParams = __Infer<typeof ResolveWorldTickReducer>;
+export type SaveWorldSnapshotParams = __Infer<typeof SaveWorldSnapshotReducer>;
 export type SelectCharacterOptionParams = __Infer<typeof SelectCharacterOptionReducer>;
 export type SubmitCommandParams = __Infer<typeof SubmitCommandReducer>;
 export type UpdateRowsParams = __Infer<typeof UpdateRowsReducer>;
+export type ValidateWorldContentParams = __Infer<typeof ValidateWorldContentReducer>;
 

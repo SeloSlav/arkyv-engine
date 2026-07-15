@@ -6,6 +6,7 @@ import getSpacetimeClient, {
 } from '@/lib/spacetimedbClient';
 import {
   createSavedWorld,
+  importSavedWorldsBackup,
   getActiveWorldId,
   readSavedWorlds,
   removeSavedWorld,
@@ -131,6 +132,12 @@ export function AuthProvider({ children }) {
     return data;
   };
 
+  const restoreSavedWorlds = (backup) => {
+    const result = importSavedWorldsBackup(backup);
+    setSavedWorlds(result.worlds);
+    return result;
+  };
+
   const value = {
     session,
     user: session?.user || null,
@@ -143,6 +150,7 @@ export function AuthProvider({ children }) {
     selectWorld,
     deleteWorld,
     signOut,
+    restoreSavedWorlds,
     refreshProfile,
   };
 

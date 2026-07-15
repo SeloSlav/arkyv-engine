@@ -35,73 +35,121 @@ import {
 
 // Import all reducer arg schemas
 import AdminActorActionReducer from "./admin_actor_action_reducer";
+import AuthorizeProviderRequestReducer from "./authorize_provider_request_reducer";
 import CompleteNpcCommandReducer from "./complete_npc_command_reducer";
+import ConfigureEngineRecordReducer from "./configure_engine_record_reducer";
 import DeleteCurrentAccountReducer from "./delete_current_account_reducer";
+import DeleteEngineRecordReducer from "./delete_engine_record_reducer";
 import DeleteRowsReducer from "./delete_rows_reducer";
+import DeleteWorldSnapshotReducer from "./delete_world_snapshot_reducer";
 import InsertRowsReducer from "./insert_rows_reducer";
 import InstallRpgStarterKitReducer from "./install_rpg_starter_kit_reducer";
+import ModeratePlayerReducer from "./moderate_player_reducer";
+import ResolvePlayerReportReducer from "./resolve_player_report_reducer";
 import ResolveScheduledCastReducer from "./resolve_scheduled_cast_reducer";
 import ResolveScheduledEffectTickReducer from "./resolve_scheduled_effect_tick_reducer";
+import ResolveWorldTickReducer from "./resolve_world_tick_reducer";
+import SaveWorldSnapshotReducer from "./save_world_snapshot_reducer";
 import SelectCharacterOptionReducer from "./select_character_option_reducer";
 import SubmitCommandReducer from "./submit_command_reducer";
 import UpdateRowsReducer from "./update_rows_reducer";
+import ValidateWorldContentReducer from "./validate_world_content_reducer";
 
 // Import all procedure arg schemas
 
 // Import all table schema definitions
 import AbilityDefinitionRow from "./ability_definition_table";
 import AbilityEffectDefinitionRow from "./ability_effect_definition_table";
+import AbilityUnlockRuleRow from "./ability_unlock_rule_table";
 import ActorAbilityRow from "./actor_ability_table";
 import ActorCharacterOptionRow from "./actor_character_option_table";
 import ActorCooldownRow from "./actor_cooldown_table";
 import ActorCrimeRow from "./actor_crime_table";
 import ActorCurrencyRow from "./actor_currency_table";
 import ActorDeathRecordRow from "./actor_death_record_table";
+import ActorDialogueStateRow from "./actor_dialogue_state_table";
 import ActorFactionReputationRow from "./actor_faction_reputation_table";
+import ActorLearnedRecipeRow from "./actor_learned_recipe_table";
 import ActorLifeStateRow from "./actor_life_state_table";
+import ActorProfessionRow from "./actor_profession_table";
 import ActorProgressionRow from "./actor_progression_table";
 import ActorQuestRow from "./actor_quest_table";
 import ActorQuestChoiceRow from "./actor_quest_choice_table";
 import ActorQuestProgressRow from "./actor_quest_progress_table";
 import ActorStatRow from "./actor_stat_table";
 import ActorStatusEffectRow from "./actor_status_effect_table";
+import ActorTalentPoolRow from "./actor_talent_pool_table";
+import ActorTriggerStateRow from "./actor_trigger_state_table";
 import ActorWalletRow from "./actor_wallet_table";
+import AdminAuditRow from "./admin_audit_table";
+import AdminAuditLogRow from "./admin_audit_log_table";
+import AdminPlayerReportsRow from "./admin_player_reports_table";
+import AdminPlayerSanctionsRow from "./admin_player_sanctions_table";
 import AdminRoleAssignmentRow from "./admin_role_assignment_table";
 import AdminRoleDefinitionRow from "./admin_role_definition_table";
+import AdminWorldSnapshotsRow from "./admin_world_snapshots_table";
+import BankConfigRow from "./bank_config_table";
 import CharacterRow from "./character_table";
 import CharacterOptionDefinitionRow from "./character_option_definition_table";
 import CharacterOptionGrantRow from "./character_option_grant_table";
 import CommandRow from "./command_table";
+import ContentIssueRow from "./content_issue_table";
 import CraftingIngredientRow from "./crafting_ingredient_table";
 import CraftingRecipeRow from "./crafting_recipe_table";
 import CurrencyDefinitionRow from "./currency_definition_table";
+import DialogueChoiceRow from "./dialogue_choice_table";
+import DialogueNodeRow from "./dialogue_node_table";
 import EquipmentSlotDefinitionRow from "./equipment_slot_definition_table";
 import ExitRow from "./exit_table";
+import ExitRuleRow from "./exit_rule_table";
 import FactionDefinitionRow from "./faction_definition_table";
+import GuildRow from "./guild_table";
+import GuildMemberRow from "./guild_member_table";
 import LootTableEntryRow from "./loot_table_entry_table";
+import MyPrivateMessagesRow from "./my_private_messages_table";
+import MySocialRelationshipsRow from "./my_social_relationships_table";
+import MyTradeOffersRow from "./my_trade_offers_table";
+import MyTradeSessionsRow from "./my_trade_sessions_table";
 import NpcRow from "./npc_table";
 import NpcThreatRow from "./npc_threat_table";
 import ObjectDefinitionRow from "./object_definition_table";
+import ObjectRuleRow from "./object_rule_table";
+import PartyRow from "./party_table";
+import PartyMemberRow from "./party_member_table";
+import PlayerReportRow from "./player_report_table";
+import PlayerSanctionRow from "./player_sanction_table";
+import PrivateMessageRow from "./private_message_table";
+import ProfessionDefinitionRow from "./profession_definition_table";
 import ProfileRow from "./profile_table";
 import ProgressionConfigRow from "./progression_config_table";
+import ProviderRequestWindowRow from "./provider_request_window_table";
 import QuestChoiceRow from "./quest_choice_table";
 import QuestDefinitionRow from "./quest_definition_table";
 import QuestItemRewardRow from "./quest_item_reward_table";
 import QuestObjectiveRow from "./quest_objective_table";
 import QuestRuleRow from "./quest_rule_table";
+import RecipeRuleRow from "./recipe_rule_table";
 import RegionRow from "./region_table";
 import RegionChatRow from "./region_chat_table";
 import RoomRow from "./room_table";
 import RoomMessageRow from "./room_message_table";
 import ScheduledCastRow from "./scheduled_cast_table";
 import ScheduledEffectTickRow from "./scheduled_effect_tick_table";
+import ScheduledWorldTickRow from "./scheduled_world_tick_table";
+import SocialRelationshipRow from "./social_relationship_table";
 import SpawnPointRow from "./spawn_point_table";
 import StatDefinitionRow from "./stat_definition_table";
+import TradeOfferRow from "./trade_offer_table";
+import TradeSessionRow from "./trade_session_table";
 import VendorDefinitionRow from "./vendor_definition_table";
+import VendorRestockRuleRow from "./vendor_restock_rule_table";
 import VendorStockRow from "./vendor_stock_table";
 import WorldCombatConfigRow from "./world_combat_config_table";
 import WorldLifecycleConfigRow from "./world_lifecycle_config_table";
 import WorldObjectRow from "./world_object_table";
+import WorldSimulationConfigRow from "./world_simulation_config_table";
+import WorldSnapshotRow from "./world_snapshot_table";
+import WorldTriggerRow from "./world_trigger_table";
 
 /** Type-only namespace exports for generated type groups. */
 
@@ -129,6 +177,17 @@ const tablesSchema = __schema({
       { name: 'ability_effect_definition_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, AbilityEffectDefinitionRow),
+  ability_unlock_rule: __table({
+    name: 'ability_unlock_rule',
+    indexes: [
+      { name: 'ability_id', algorithm: 'btree', columns: [
+        'abilityId',
+      ] },
+    ],
+    constraints: [
+      { name: 'ability_unlock_rule_ability_id_key', constraint: 'unique', columns: ['abilityId'] },
+    ],
+  }, AbilityUnlockRuleRow),
   actor_ability: __table({
     name: 'actor_ability',
     indexes: [
@@ -195,6 +254,17 @@ const tablesSchema = __schema({
       { name: 'actor_death_record_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ActorDeathRecordRow),
+  actor_dialogue_state: __table({
+    name: 'actor_dialogue_state',
+    indexes: [
+      { name: 'actor_id', algorithm: 'btree', columns: [
+        'actorId',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_dialogue_state_actor_id_key', constraint: 'unique', columns: ['actorId'] },
+    ],
+  }, ActorDialogueStateRow),
   actor_faction_reputation: __table({
     name: 'actor_faction_reputation',
     indexes: [
@@ -206,6 +276,17 @@ const tablesSchema = __schema({
       { name: 'actor_faction_reputation_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ActorFactionReputationRow),
+  actor_learned_recipe: __table({
+    name: 'actor_learned_recipe',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_learned_recipe_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ActorLearnedRecipeRow),
   actor_life_state: __table({
     name: 'actor_life_state',
     indexes: [
@@ -217,6 +298,17 @@ const tablesSchema = __schema({
       { name: 'actor_life_state_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ActorLifeStateRow),
+  actor_profession: __table({
+    name: 'actor_profession',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_profession_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ActorProfessionRow),
   actor_progression: __table({
     name: 'actor_progression',
     indexes: [
@@ -283,6 +375,28 @@ const tablesSchema = __schema({
       { name: 'actor_status_effect_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ActorStatusEffectRow),
+  actor_talent_pool: __table({
+    name: 'actor_talent_pool',
+    indexes: [
+      { name: 'actor_id', algorithm: 'btree', columns: [
+        'actorId',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_talent_pool_actor_id_key', constraint: 'unique', columns: ['actorId'] },
+    ],
+  }, ActorTalentPoolRow),
+  actor_trigger_state: __table({
+    name: 'actor_trigger_state',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_trigger_state_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ActorTriggerStateRow),
   actor_wallet: __table({
     name: 'actor_wallet',
     indexes: [
@@ -294,6 +408,20 @@ const tablesSchema = __schema({
       { name: 'actor_wallet_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ActorWalletRow),
+  admin_audit: __table({
+    name: 'admin_audit',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { name: 'scope_index', algorithm: 'btree', columns: [
+        'scope',
+      ] },
+    ],
+    constraints: [
+      { name: 'admin_audit_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, AdminAuditRow),
   admin_role_assignment: __table({
     name: 'admin_role_assignment',
     indexes: [
@@ -316,6 +444,17 @@ const tablesSchema = __schema({
       { name: 'admin_role_definition_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, AdminRoleDefinitionRow),
+  bank_config: __table({
+    name: 'bank_config',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'bank_config_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, BankConfigRow),
   character: __table({
     name: 'character',
     indexes: [
@@ -366,6 +505,17 @@ const tablesSchema = __schema({
       { name: 'command_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, CommandRow),
+  content_issue: __table({
+    name: 'content_issue',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'content_issue_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ContentIssueRow),
   crafting_ingredient: __table({
     name: 'crafting_ingredient',
     indexes: [
@@ -399,6 +549,28 @@ const tablesSchema = __schema({
       { name: 'currency_definition_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, CurrencyDefinitionRow),
+  dialogue_choice: __table({
+    name: 'dialogue_choice',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'dialogue_choice_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, DialogueChoiceRow),
+  dialogue_node: __table({
+    name: 'dialogue_node',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'dialogue_node_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, DialogueNodeRow),
   equipment_slot_definition: __table({
     name: 'equipment_slot_definition',
     indexes: [
@@ -421,6 +593,17 @@ const tablesSchema = __schema({
       { name: 'exit_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ExitRow),
+  exit_rule: __table({
+    name: 'exit_rule',
+    indexes: [
+      { name: 'exit_id', algorithm: 'btree', columns: [
+        'exitId',
+      ] },
+    ],
+    constraints: [
+      { name: 'exit_rule_exit_id_key', constraint: 'unique', columns: ['exitId'] },
+    ],
+  }, ExitRuleRow),
   faction_definition: __table({
     name: 'faction_definition',
     indexes: [
@@ -432,6 +615,28 @@ const tablesSchema = __schema({
       { name: 'faction_definition_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, FactionDefinitionRow),
+  guild: __table({
+    name: 'guild',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'guild_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, GuildRow),
+  guild_member: __table({
+    name: 'guild_member',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'guild_member_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, GuildMemberRow),
   loot_table_entry: __table({
     name: 'loot_table_entry',
     indexes: [
@@ -476,6 +681,95 @@ const tablesSchema = __schema({
       { name: 'object_definition_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ObjectDefinitionRow),
+  object_rule: __table({
+    name: 'object_rule',
+    indexes: [
+      { name: 'definition_id', algorithm: 'btree', columns: [
+        'definitionId',
+      ] },
+    ],
+    constraints: [
+      { name: 'object_rule_definition_id_key', constraint: 'unique', columns: ['definitionId'] },
+    ],
+  }, ObjectRuleRow),
+  party: __table({
+    name: 'party',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'party_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, PartyRow),
+  party_member: __table({
+    name: 'party_member',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'party_member_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, PartyMemberRow),
+  player_report: __table({
+    name: 'player_report',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { name: 'scope_index', algorithm: 'btree', columns: [
+        'scope',
+      ] },
+    ],
+    constraints: [
+      { name: 'player_report_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, PlayerReportRow),
+  player_sanction: __table({
+    name: 'player_sanction',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { name: 'scope_index', algorithm: 'btree', columns: [
+        'scope',
+      ] },
+    ],
+    constraints: [
+      { name: 'player_sanction_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, PlayerSanctionRow),
+  private_message: __table({
+    name: 'private_message',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { name: 'recipient', algorithm: 'btree', columns: [
+        'recipientIdentity',
+      ] },
+      { name: 'sender', algorithm: 'btree', columns: [
+        'senderIdentity',
+      ] },
+    ],
+    constraints: [
+      { name: 'private_message_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, PrivateMessageRow),
+  profession_definition: __table({
+    name: 'profession_definition',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'profession_definition_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ProfessionDefinitionRow),
   profile: __table({
     name: 'profile',
     indexes: [
@@ -501,6 +795,17 @@ const tablesSchema = __schema({
       { name: 'progression_config_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ProgressionConfigRow),
+  provider_request_window: __table({
+    name: 'provider_request_window',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'provider_request_window_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ProviderRequestWindowRow),
   quest_choice: __table({
     name: 'quest_choice',
     indexes: [
@@ -556,6 +861,17 @@ const tablesSchema = __schema({
       { name: 'quest_rule_quest_id_key', constraint: 'unique', columns: ['questId'] },
     ],
   }, QuestRuleRow),
+  recipe_rule: __table({
+    name: 'recipe_rule',
+    indexes: [
+      { name: 'recipe_id', algorithm: 'btree', columns: [
+        'recipeId',
+      ] },
+    ],
+    constraints: [
+      { name: 'recipe_rule_recipe_id_key', constraint: 'unique', columns: ['recipeId'] },
+    ],
+  }, RecipeRuleRow),
   region: __table({
     name: 'region',
     indexes: [
@@ -622,6 +938,31 @@ const tablesSchema = __schema({
       { name: 'scheduled_effect_tick_scheduled_id_key', constraint: 'unique', columns: ['scheduledId'] },
     ],
   }, ScheduledEffectTickRow),
+  scheduled_world_tick: __table({
+    name: 'scheduled_world_tick',
+    indexes: [
+      { name: 'scheduled_id', algorithm: 'btree', columns: [
+        'scheduledId',
+      ] },
+    ],
+    constraints: [
+      { name: 'scheduled_world_tick_scheduled_id_key', constraint: 'unique', columns: ['scheduledId'] },
+    ],
+  }, ScheduledWorldTickRow),
+  social_relationship: __table({
+    name: 'social_relationship',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { name: 'owner_index', algorithm: 'btree', columns: [
+        'owner',
+      ] },
+    ],
+    constraints: [
+      { name: 'social_relationship_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, SocialRelationshipRow),
   spawn_point: __table({
     name: 'spawn_point',
     indexes: [
@@ -644,6 +985,37 @@ const tablesSchema = __schema({
       { name: 'stat_definition_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, StatDefinitionRow),
+  trade_offer: __table({
+    name: 'trade_offer',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { name: 'trade_id_index', algorithm: 'btree', columns: [
+        'tradeId',
+      ] },
+    ],
+    constraints: [
+      { name: 'trade_offer_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, TradeOfferRow),
+  trade_session: __table({
+    name: 'trade_session',
+    indexes: [
+      { name: 'first_identity_index', algorithm: 'btree', columns: [
+        'firstIdentity',
+      ] },
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { name: 'second_identity_index', algorithm: 'btree', columns: [
+        'secondIdentity',
+      ] },
+    ],
+    constraints: [
+      { name: 'trade_session_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, TradeSessionRow),
   vendor_definition: __table({
     name: 'vendor_definition',
     indexes: [
@@ -655,6 +1027,17 @@ const tablesSchema = __schema({
       { name: 'vendor_definition_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, VendorDefinitionRow),
+  vendor_restock_rule: __table({
+    name: 'vendor_restock_rule',
+    indexes: [
+      { name: 'vendor_stock_id', algorithm: 'btree', columns: [
+        'vendorStockId',
+      ] },
+    ],
+    constraints: [
+      { name: 'vendor_restock_rule_vendor_stock_id_key', constraint: 'unique', columns: ['vendorStockId'] },
+    ],
+  }, VendorRestockRuleRow),
   vendor_stock: __table({
     name: 'vendor_stock',
     indexes: [
@@ -699,21 +1082,122 @@ const tablesSchema = __schema({
       { name: 'world_object_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, WorldObjectRow),
+  world_simulation_config: __table({
+    name: 'world_simulation_config',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'world_simulation_config_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, WorldSimulationConfigRow),
+  world_snapshot: __table({
+    name: 'world_snapshot',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { name: 'scope_index', algorithm: 'btree', columns: [
+        'scope',
+      ] },
+    ],
+    constraints: [
+      { name: 'world_snapshot_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, WorldSnapshotRow),
+  world_trigger: __table({
+    name: 'world_trigger',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'world_trigger_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, WorldTriggerRow),
+  admin_audit_log: __table({
+    name: 'admin_audit_log',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, AdminAuditLogRow),
+  admin_player_reports: __table({
+    name: 'admin_player_reports',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, AdminPlayerReportsRow),
+  admin_player_sanctions: __table({
+    name: 'admin_player_sanctions',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, AdminPlayerSanctionsRow),
+  admin_world_snapshots: __table({
+    name: 'admin_world_snapshots',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, AdminWorldSnapshotsRow),
+  my_private_messages: __table({
+    name: 'my_private_messages',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, MyPrivateMessagesRow),
+  my_social_relationships: __table({
+    name: 'my_social_relationships',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, MySocialRelationshipsRow),
+  my_trade_offers: __table({
+    name: 'my_trade_offers',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, MyTradeOffersRow),
+  my_trade_sessions: __table({
+    name: 'my_trade_sessions',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, MyTradeSessionsRow),
 });
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
   __reducerSchema("admin_actor_action", AdminActorActionReducer),
+  __reducerSchema("authorize_provider_request", AuthorizeProviderRequestReducer),
   __reducerSchema("complete_npc_command", CompleteNpcCommandReducer),
+  __reducerSchema("configure_engine_record", ConfigureEngineRecordReducer),
   __reducerSchema("delete_current_account", DeleteCurrentAccountReducer),
+  __reducerSchema("delete_engine_record", DeleteEngineRecordReducer),
   __reducerSchema("delete_rows", DeleteRowsReducer),
+  __reducerSchema("delete_world_snapshot", DeleteWorldSnapshotReducer),
   __reducerSchema("insert_rows", InsertRowsReducer),
   __reducerSchema("install_rpg_starter_kit", InstallRpgStarterKitReducer),
+  __reducerSchema("moderate_player", ModeratePlayerReducer),
+  __reducerSchema("resolve_player_report", ResolvePlayerReportReducer),
   __reducerSchema("resolve_scheduled_cast", ResolveScheduledCastReducer),
   __reducerSchema("resolve_scheduled_effect_tick", ResolveScheduledEffectTickReducer),
+  __reducerSchema("resolve_world_tick", ResolveWorldTickReducer),
+  __reducerSchema("save_world_snapshot", SaveWorldSnapshotReducer),
   __reducerSchema("select_character_option", SelectCharacterOptionReducer),
   __reducerSchema("submit_command", SubmitCommandReducer),
   __reducerSchema("update_rows", UpdateRowsReducer),
+  __reducerSchema("validate_world_content", ValidateWorldContentReducer),
 );
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */

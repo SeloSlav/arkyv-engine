@@ -486,6 +486,7 @@ export default function ArkyvAdminPanel() {
     const { session: savedWorldSession, profile: savedWorldProfile, loading: savedWorldLoading } = useAuth();
     const dialogContentRef = useRef(null);
     const [session, setSession] = useState(null);
+    const [adminPermissions, setAdminPermissions] = useState(() => new Set());
     const [isLoading, setIsLoading] = useState(true);
     const [flowNodes, setFlowNodes] = useState([]);
     const [flowEdges, setFlowEdges] = useState([]);
@@ -639,6 +640,24 @@ export default function ArkyvAdminPanel() {
         setSession(savedWorldSession);
         setIsLoading(false);
     }, [router, savedWorldLoading, savedWorldProfile, savedWorldSession]);
+
+    useEffect(() => {
+        if (!session || !savedWorldProfile?.id) return;
+        let cancelled = false;
+        Promise.all([
+            spacetime.from('admin_role_assignments').select('*').eq('profile_id', savedWorldProfile.id).maybeSingle(),
+            spacetime.from('admin_role_definitions').select('*'),
+        ]).then(([assignmentResult, rolesResult]) => {
+            if (cancelled) return;
+            const assignment = assignmentResult.data;
+            if (savedWorldProfile.is_admin && !assignment) { setAdminPermissions(new Set(['*'])); return; }
+            const role = (rolesResult.data || []).find((row) => row.id === assignment?.role_id);
+            setAdminPermissions(new Set(Array.isArray(role?.permissions) ? role.permissions : []));
+        }).catch(() => { if (!cancelled) setAdminPermissions(new Set()); });
+        return () => { cancelled = true; };
+    }, [savedWorldProfile, session, spacetime]);
+
+    const canManageWorld = adminPermissions.has('*') || adminPermissions.has('world.manage');
 
     useEffect(() => {
         if (typeof document === 'undefined') {
@@ -4191,8 +4210,9 @@ export default function ArkyvAdminPanel() {
                 )}
 
                 <main className="max-w-7xl mx-auto px-3 py-4 space-y-5 sm:px-6 sm:py-8 sm:space-y-8">
+                    {!canManageWorld && <div className="rounded-xl border border-cyan-400/20 bg-cyan-500/[0.05] p-4 text-sm text-slate-300">Your delegated administrator role hides the room-map, region, and NPC editors. RPG Systems Studio below shows only the systems your role can manage.</div>}
                     {/* Layers controls moved into Room Map Visualization header */}
-                    <section id="room-map" className="scroll-mt-16 bg-slate-900/70 border border-cyan-400/30 rounded-xl shadow-xl shadow-cyan-400/10 h-[600px] sm:h-[700px] flex flex-col overflow-hidden">
+                    <section id="room-map" className={`${canManageWorld ? '' : 'hidden '}scroll-mt-16 bg-slate-900/70 border border-cyan-400/30 rounded-xl shadow-xl shadow-cyan-400/10 h-[600px] sm:h-[700px] flex flex-col overflow-hidden`}>
                         <div className="p-4 sm:p-6 border-b border-cyan-400/20 flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
                             <div className="min-w-0">
                                 <h2 className="font-terminal text-sm tracking-[0.24em] uppercase text-cyan-200 sm:text-base sm:tracking-[0.35em]">
@@ -4340,9 +4360,9 @@ export default function ArkyvAdminPanel() {
                         </div>
                     </section>
 
-                    <RpgSystemsEditor enabled={Boolean(session)} />
+                    <RpgSystemsEditor enabled={Boolean(session)} currentProfile={savedWorldProfile} />
 
-                    <section id="regions" className="scroll-mt-16 bg-slate-900/70 border border-cyan-400/30 rounded-xl shadow-xl shadow-cyan-400/10">
+                    <section id="regions" className={`${canManageWorld ? '' : 'hidden '}scroll-mt-16 bg-slate-900/70 border border-cyan-400/30 rounded-xl shadow-xl shadow-cyan-400/10`}>
                         <div className="p-4 sm:p-6 border-b border-cyan-400/20 flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-start">
                             <div>
                                 <h2 className="font-terminal text-base tracking-[0.35em] uppercase text-cyan-200">
@@ -4435,7 +4455,7 @@ export default function ArkyvAdminPanel() {
                         </div>
                     </section>
 
-                    <section id="npcs" className="scroll-mt-16 bg-slate-900/70 border border-cyan-400/30 rounded-xl shadow-xl shadow-cyan-400/10">
+                    <section id="npcs" className={`${canManageWorld ? '' : 'hidden '}scroll-mt-16 bg-slate-900/70 border border-cyan-400/30 rounded-xl shadow-xl shadow-cyan-400/10`}>
                         <div className="p-4 sm:p-6 border-b border-cyan-400/20 flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-start">
                             <div>
                                 <h2 className="font-terminal text-base tracking-[0.35em] uppercase text-cyan-200">

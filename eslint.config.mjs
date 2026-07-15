@@ -15,10 +15,17 @@ const eslintConfig = [
     ignores: [
       "node_modules/**",
       ".next/**",
+      ".smoke-build/**",
       "out/**",
       "build/**",
       "next-env.d.ts",
     ],
+  },
+  {
+    files: ["scripts/smoke-rpg-runtime.ts"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+    },
   },
   {
     rules: {

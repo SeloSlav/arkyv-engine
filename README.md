@@ -22,8 +22,13 @@ This repository uses **SpacetimeDB 2.0.1** for its authoritative backend. The pr
 - Composable ability effects for AoE, DoT/HoT, buffs, debuffs, stuns, interrupts, cleanses, teleports, revives, and summons
 - Authoritative inventory limits, multi-item ring/trinket slots, weapon attack speed, durability/repair, ability costs/cooldowns/cast times, hit/crit/dodge/parry/block/resistance, threat, assists, defeat, chests, and enemy loot
 - Authored currencies, NPC vendors, player item/gold transfers, banks, crafting stations, recipes, and ingredients
+- Talent-gated abilities, class/origin restrictions, prerequisite abilities, profession ranks, learned recipes, item rarity/level/binding, two-handed equipment, finite bank capacity, and automatic vendor restocking
+- Authored dialogue trees, conditional responses, doors, locks, keys, traps, room-entry triggers, and scheduled or turn-driven world simulation
+- Parties with shared kill credit, assist XP, leader/round-robin/free-for-all loot, guilds, friends, blocks, private party/guild chat, and bilateral server-validated player trade
+- Private whispers, player reports, mutes, bans, kicks, administrator audits, content validation, server snapshots, and portable world export/import
 - Permissioned administrator roles for world, systems, quests, economy, lifecycle, moderation, and role management
 - Local saved worlds backed by persistent SpacetimeDB identity tokens
+- Explicit identity backup and restore through a local JSON file (the file contains tokens and must be kept secret)
 - Multiple characters per saved world
 - Optional RetroDiffusion room scenes, NPC portraits, and inventory item art
 - Self-hosted persistent state with no email/password service
@@ -134,8 +139,9 @@ Arkyv does not use email addresses or passwords. A saved world is a local label 
 - **Log out**: disconnect and return to the saved-world picker without deleting anything.
 - **Switch**: reconnect with another saved token and load that identity's profile and characters.
 - **Delete**: call the identity-authorized deletion reducer, remove the profile, characters, private commands, and actor-owned chat/messages, then remove its token from localStorage.
+- **Back up / restore**: export or import all local saved-world labels and identity tokens from the picker. Duplicate tokens are ignored during restore.
 
-Tokens exist only in the browser profile where they were created. Back up browser storage if a local identity must be preserved. Anyone who obtains a token can act as that identity, so do not publish tokens or include them in screenshots and logs.
+Tokens exist only in the browser profile where they were created unless the user explicitly exports a recovery file. Anyone who obtains a token or recovery file can act as that identity, so do not publish either or include them in screenshots and logs.
 
 Saved worlds are player identities within the same shared MUD database. Regions, rooms, exits, NPCs, and public chat are shared; profiles and character rosters are identity-owned.
 
@@ -152,7 +158,7 @@ The Rust module in `spacetimedb/src/lib.rs` defines these public replicated tabl
 | `profile` | One identity-owned saved-world profile |
 | `character` | Identity-owned player characters |
 | `command` | Private command audit and pending AI work |
-| `room_message` | Realtime terminal messages |
+| `room_message` / private `private_message` | Public room events and recipient-scoped whispers, group chat, trades, and system messages exposed only through the caller's view |
 | `region_chat` | Realtime regional chat |
 | `stat_definition` | Admin-defined attributes, resource roles, level growth, and regeneration |
 | `object_definition` | Reusable item, container, fixture, weapon, armor, and consumable primitives, including attack speed and inventory bonuses |
@@ -186,6 +192,13 @@ The Rust module in `spacetimedb/src/lib.rs` defines these public replicated tabl
 | `world_lifecycle_config` | World-wide initial spawn, death, loss, recovery, protection, and hardcore rules |
 | `actor_life_state` | Alive/dead state, respawn eligibility, selected point, death count, and protection window |
 | `actor_death_record` | Permanent death audit including location, cause, mode, destination, and applied losses |
+| `ability_unlock_rule` / `actor_talent_pool` | Class/origin, quest, reputation, prerequisite, exclusivity, and talent-point learning rules |
+| `object_rule` / `bank_config` / `vendor_restock_rule` | Item rarity, binding, durability and equipment rules; bank access/capacity/death policy; finite-stock replenishment |
+| `profession_definition` / `recipe_rule` | Crafting progression, learned recipes, rank requirements, success chance, and cooldowns |
+| `dialogue_node` / `dialogue_choice` / `world_trigger` / `exit_rule` | Authored conversations, conditional actions, room events, and doors/locks/keys/traps |
+| `party` / `guild` / private social and trade tables | Group membership, leadership, private relationships, offers, confirmation, and atomic exchange |
+| `player_report` / private sanction, audit, snapshot tables / `content_issue` | Moderation workflow, operator history, portable snapshots, and broken-reference validation |
+| `world_simulation_config` | Turn-driven or scheduled NPC/world advancement and vendor restocking policy |
 
 Reducers are the only write path. They validate identity ownership for profiles and characters, require admin status for world editing, process deterministic commands server-side, and complete AI NPC responses returned by the stateless Next.js AI route.
 
@@ -212,6 +225,7 @@ The studio includes these authoring surfaces:
 - **Placed objects** instantiate a primitive in a room, actor inventory, equipment slot, or another container. Instance state includes quantity, durability, remaining fuel, active/burning state, and a JSON extension object.
 - **Enemy loot** assigns portable object definitions to NPCs with independent drop chances and minimum/maximum quantities.
 - **Actor values** optionally override defaults for a particular hero or NPC. Actors without overrides automatically use the stat definition defaults.
+- **Engine systems** adds JSON-assisted, reducer-validated editors for talent rules, item policy, banks, restocking, professions, recipe learning, dialogue trees, door rules, triggers, simulation, content health, snapshots/import, moderation, reports, balances, and administrator audit history. The tab and its individual systems are filtered by the current administrator role.
 
 The XP requirement for each level starts at `base_xp` and is multiplied by `100% + growth_percent` for each subsequent level. XP is stored as progress within the current level, so changing the curve does not rewrite historical totals. When an NPC is defeated, its authored XP reward goes to the defeating player; crossing one or more thresholds applies every stat's per-level gain and reveals auto-learned abilities.
 
@@ -255,6 +269,17 @@ bank                          inspect banked items
 bank deposit/withdraw <item>  move items between inventory and bank
 give <item> to <player>       transfer an inventory item to a nearby player
 pay <amount> gold to <player> transfer gold to a nearby player
+pay <amount> <currency> to <player> transfer any player-tradeable authored currency
+party create/invite/accept/say   create and communicate with a temporary group
+party loot <rule>               choose leader, round_robin, or free_for_all drops
+guild create/invite/accept/say  create and communicate with a persistent guild
+friend add / block / unblock    manage private social relationships
+trade <player>                  open a bilateral trade; add offers, review, confirm, or cancel
+report <player> <reason>        submit a private moderation report
+talents / learn <ability>       inspect and spend authored talent points
+respec talents                  refund talent-spent abilities
+respond <choice>                continue an authored NPC dialogue
+open/close/lock/unlock <exit>   interact with an authored door
 recipes / craft <recipe>      inspect and execute authored crafting recipes
 take <item>                   move a portable room object into inventory
 drop <item>                   place a carried object in the current room
@@ -293,7 +318,7 @@ npm run smoke:rpg:compile         # Compile the isolated RPG reducer smoke test
 npm run smoke:rpg                 # Run it against arkyv-engine-runtime-test
 ```
 
-The smoke test expects a fresh local database named `arkyv-engine-runtime-test`. Publish the module to that name before running it, then delete the test database afterward. It verifies authoritative room checks, safe/open PvP, attack cooldowns, inventory overflow, patrol movement, XP and level growth, ability costs, resource regeneration, two-item equipment slots, hostile attacks, graph-nearest delayed player recovery and loss rules, enemy drops, guard greetings and safe-region crimes, faction reputation, all quest event paths, turn-in rewards, and hardcore character deletion without touching the main `arkyv-engine` world.
+The smoke test expects a fresh local database named `arkyv-engine-runtime-test`. Publish the module to that name before running it, then delete the test database afterward. It verifies authoritative room and door checks, private messages, parties and enforced loot ownership, bilateral trade, authored dialogue and recipe learning, safe/open PvP, attack cooldowns, inventory overflow, patrol movement, XP/levels/talents, ability costs, resource regeneration, equipment capacity, hostile attacks, graph-nearest delayed recovery, bank/death policies, enemy drops, guards/crimes, faction reputation, quest paths and rewards, validation, and hardcore character deletion without touching the main `arkyv-engine` world.
 
 The PowerShell deploy scripts invoke the installed Windows CLI at `SpacetimeDB/bin/2.0.1`. On macOS or Linux, run the equivalent commands directly:
 
@@ -304,7 +329,7 @@ spacetime generate --no-config --include-private -p ./spacetimedb -l typescript 
 
 ## AI and generated images
 
-Game state never passes through the AI provider. NPC conversation requests contain only the NPC prompt, recent conversation context, and the player's current message. The response is committed through an authenticated SpacetimeDB reducer.
+Game state never passes through the AI provider. NPC conversation requests contain only the NPC prompt, recent conversation context, and the player's current message. The response is committed through an authenticated SpacetimeDB reducer. Every `/api/arkyv/*` provider request must also present the active saved-world token; middleware validates it through SpacetimeDB and applies identity-scoped request limits before a provider key can be used. Provider keys remain server-only.
 
 RetroDiffusion returns base64 PNGs. Arkyv stores them as data URLs in `room.image_url`, `npc.portrait_url`, or `object_definition.image_url`, avoiding a separate object-storage service. The object editor requests centered 128×128 pixel-art assets so inventory cards remain readable and scale cleanly with nearest-neighbor rendering. Large or numerous images will increase replicated database size; production operators may replace this with their own object storage and persist only URLs.
 
@@ -332,6 +357,7 @@ scripts/                 Isolated end-to-end RPG runtime smoke test
 spacetimedb/
   Cargo.toml             Rust module pinned to SpacetimeDB 2.0.1
   src/lib.rs             Tables, authorization, reducers, and seed data
+  src/expansion.rs       Private messaging, social/trade, talents, scripting, item/economy policy, moderation, snapshots, and validation
   deploy-local*.ps1      Publish/generate scripts
 ```
 
