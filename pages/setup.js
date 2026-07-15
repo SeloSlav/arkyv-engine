@@ -5,7 +5,7 @@ import Footer from '@/components/Footer';
 
 const Code = ({ children }) => <pre className="overflow-x-auto rounded-lg border border-cyan-400/20 bg-black p-4 text-sm text-cyan-200"><code>{children}</code></pre>;
 
-export default function SetupPage() {
+export default function SetupPage({ cameFromHostedRuntime }) {
   return (
     <>
       <Head><title>Setup | Arkyv Engine</title></Head>
@@ -15,6 +15,11 @@ export default function SetupPage() {
           <header>
             <h1 className="font-terminal text-4xl tracking-[0.15em] text-cyan-200 uppercase">Arkyv Setup</h1>
             <p className="mt-4 text-slate-400">Arkyv uses a self-hosted SpacetimeDB 2.0.1 module for persistence, realtime updates, identities, and command processing.</p>
+            {cameFromHostedRuntime && (
+              <div className="mt-6 rounded-xl border border-cyan-300/25 bg-cyan-300/[0.07] p-4 text-sm leading-6 text-cyan-100">
+                arkyv.org is the project site and does not host game worlds. Run Arkyv with your own SpacetimeDB instance, then create and enter worlds from that deployment.
+              </div>
+            )}
           </header>
 
           <section className="space-y-4">
@@ -63,4 +68,12 @@ export default function SetupPage() {
       <Footer color="#020617" />
     </>
   );
+}
+
+export function getServerSideProps({ query }) {
+  return {
+    props: {
+      cameFromHostedRuntime: query.from === 'hosted-site',
+    },
+  };
 }

@@ -5,6 +5,9 @@ import { useRouter } from 'next/router';
 import { useAuth } from '@/contexts/AuthContext';
 import HamburgerIcon from '@/components/HamburgerIcon';
 import Footer from '@/components/Footer';
+import { isMarketingSite } from '@/lib/siteMode';
+
+const GITHUB_URL = 'https://github.com/SeloSlav/arkyv-engine';
 
 const CAPABILITIES = [
   { icon: 'world', label: 'World building', title: 'Visual world editor', body: 'Shape regions, rooms, directional exits, NPCs, descriptions, elevation, and atmosphere from one connected canvas.' },
@@ -47,18 +50,17 @@ function Arrow() {
   return <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true"><path d="M4 10h11M11 6l4 4-4 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
-export default function HomePage() {
+export default function HomePage({ marketingSite }) {
   const router = useRouter();
   const { user } = useAuth();
   const primaryAction = () => router.push(user ? '/play' : '/auth');
-  const builderAction = () => router.push(user ? '/admin' : '/setup');
+  const builderAction = () => router.push(!marketingSite && user ? '/admin' : '/setup');
 
   return (
     <>
       <Head>
         <title>Arkyv Engine | Build worlds that remember</title>
         <meta name="description" content="Build and host living text worlds with a visual editor, real-time multiplayer, AI NPCs, custom RPG systems, generated pixel art, and an authoritative Rust backend." />
-        <link rel="icon" href="/arkyv_logo.jpg" />
         <meta name="theme-color" content="#050711" />
       </Head>
 
@@ -83,9 +85,14 @@ export default function HomePage() {
               <h1 className="text-[clamp(3.2rem,7.1vw,6.9rem)] font-black leading-[0.88] tracking-[-0.064em] text-slate-50">Worlds with<span className="landing-gradient-text mt-1 block pb-2">memory.</span></h1>
               <p className="mt-7 max-w-xl text-base leading-7 text-slate-400 sm:text-lg sm:leading-8">Design the map. Give every character a mind. Build the rules. Then step inside the same persistent world as your players.</p>
               <div className="mt-9 flex flex-col gap-3 sm:flex-row">
-                <button type="button" onClick={primaryAction} className="landing-button landing-button--primary group"><span>{user ? 'Enter your world' : 'Create a saved world'}</span><Arrow /></button>
-                <button type="button" onClick={builderAction} className="landing-button landing-button--secondary">{user ? 'Open world editor' : 'See how to run it'}</button>
+                {marketingSite ? (
+                  <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="landing-button landing-button--primary group"><span>View source on GitHub</span><Arrow /></a>
+                ) : (
+                  <button type="button" onClick={primaryAction} className="landing-button landing-button--primary group"><span>{user ? 'Enter your world' : 'Create a saved world'}</span><Arrow /></button>
+                )}
+                <button type="button" onClick={builderAction} className="landing-button landing-button--secondary">{marketingSite ? 'Run Arkyv yourself' : (user ? 'Open world editor' : 'See how to run it')}</button>
               </div>
+              {marketingSite && <p className="mt-4 text-xs leading-5 text-slate-500">arkyv.org is the project site and does not provide world hosting. Run the engine with your own SpacetimeDB instance to build and play.</p>}
               <div className="mt-10 grid max-w-xl grid-cols-3 gap-5 border-t border-slate-800/80 pt-6">
                 <div><p className="text-xl font-bold text-slate-100">Realtime</p><p className="mt-1 text-[0.62rem] uppercase tracking-[0.16em] text-slate-600">Every player</p></div>
                 <div><p className="text-xl font-bold text-slate-100">No-code</p><p className="mt-1 text-[0.62rem] uppercase tracking-[0.16em] text-slate-600">World design</p></div>
@@ -122,7 +129,7 @@ export default function HomePage() {
               <div className="max-w-xl">
                 <p className="landing-kicker"><span>01</span> World building</p><h2 className="mt-5 text-4xl font-black leading-[1.02] tracking-[-0.04em] text-slate-100 sm:text-5xl">From blank canvas to living world.</h2><p className="mt-6 text-base leading-7 text-slate-400 sm:text-lg">Build the place and the rules in the same studio. Arkyv turns world design into a connected, visual system—then makes it playable immediately.</p>
                 <ul className="mt-8 space-y-4">{['Connect regions and rooms with directional exits', 'Place NPCs, encounters, objects, and generated scenes', 'Create stats, gear, consumables, containers, and fuel systems', 'Edit the shared world while the runtime stays authoritative'].map((item) => <li key={item} className="flex items-start gap-3 text-sm leading-6 text-slate-300"><span className="mt-1 grid h-5 w-5 shrink-0 place-items-center rounded-full border border-cyan-300/25 bg-cyan-300/[0.06] text-[0.6rem] text-cyan-300">✓</span>{item}</li>)}</ul>
-                <button type="button" onClick={builderAction} className="mt-9 inline-flex items-center gap-2 text-sm font-bold text-cyan-300 transition hover:text-cyan-200">{user ? 'Launch the world editor' : 'Read the setup guide'} <Arrow /></button>
+                <button type="button" onClick={builderAction} className="mt-9 inline-flex items-center gap-2 text-sm font-bold text-cyan-300 transition hover:text-cyan-200">{marketingSite ? 'Read the self-hosting guide' : (user ? 'Launch the world editor' : 'Read the setup guide')} <Arrow /></button>
               </div>
               <div className="landing-editor relative overflow-hidden rounded-2xl border border-slate-700/70 bg-[#080b15] shadow-2xl shadow-black/50">
                 <div className="flex min-h-14 items-center border-b border-slate-800 px-4 sm:px-5"><div><p className="text-[0.55rem] font-bold uppercase tracking-[0.2em] text-cyan-300/65">World editor</p><p className="mt-0.5 text-xs font-semibold text-slate-300">The Whispering Wilds</p></div><div className="ml-auto flex items-center gap-2"><span className="arkyv-chip hidden sm:inline-flex">Preview</span><span className="arkyv-chip arkyv-chip--accent">Published</span></div></div>
@@ -163,4 +170,17 @@ export default function HomePage() {
       <Footer color="#04060d" />
     </>
   );
+}
+
+export function getServerSideProps({ req }) {
+  const forwardedHost = req.headers['x-forwarded-host'];
+  const requestHost = (Array.isArray(forwardedHost) ? forwardedHost[0] : forwardedHost)?.split(',')[0]
+    || req.headers.host
+    || '';
+
+  return {
+    props: {
+      marketingSite: isMarketingSite(requestHost),
+    },
+  };
 }

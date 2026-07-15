@@ -12,6 +12,7 @@ import {
   setActiveWorldId,
   upsertSavedWorld,
 } from '@/lib/savedWorlds';
+import { isMarketingBrowser } from '@/lib/siteMode';
 
 const AuthContext = createContext(null);
 
@@ -64,6 +65,10 @@ export function AuthProvider({ children }) {
   };
 
   useEffect(() => {
+    if (isMarketingBrowser()) {
+      setLoading(false);
+      return () => disconnectSpacetime();
+    }
     const worlds = refreshWorlds();
     const activeId = getActiveWorldId();
     const world = worlds.find((candidate) => candidate.id === activeId);

@@ -11,12 +11,12 @@ import {
 } from "spacetimedb";
 
 export default __t.row({
-  name: __t.string().primaryKey(),
-  displayName: __t.option(__t.string()).name("display_name"),
-  description: __t.option(__t.string()),
+  id: __t.string().primaryKey(),
+  npcId: __t.string().name("npc_id"),
+  definitionId: __t.string().name("definition_id"),
+  minimumQuantity: __t.u32().name("minimum_quantity"),
+  maximumQuantity: __t.u32().name("maximum_quantity"),
+  chancePercent: __t.u32().name("chance_percent"),
   createdAt: __t.timestamp().name("created_at"),
   updatedAt: __t.timestamp().name("updated_at"),
-  colorScheme: __t.string().name("color_scheme"),
-  pvpEnabled: __t.bool().name("pvp_enabled"),
-  respawnRoomId: __t.option(__t.string()).name("respawn_room_id"),
 });

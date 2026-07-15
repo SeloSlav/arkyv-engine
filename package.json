@@ -9,7 +9,9 @@
     "lint": "eslint",
     "spacetime:check": "cargo check --manifest-path spacetimedb/Cargo.toml",
     "spacetime:deploy": "powershell -ExecutionPolicy Bypass -File ./spacetimedb/deploy-local.ps1",
-    "spacetime:deploy:clean": "powershell -ExecutionPolicy Bypass -File ./spacetimedb/deploy-local-clean.ps1"
+    "spacetime:deploy:clean": "powershell -ExecutionPolicy Bypass -File ./spacetimedb/deploy-local-clean.ps1",
+    "smoke:rpg:compile": "tsc -p tsconfig.smoke.json",
+    "smoke:rpg": "node .smoke-build/scripts/smoke-rpg-runtime.js"
   },
   "dependencies": {
     "@fortawesome/free-brands-svg-icons": "^7.1.0",

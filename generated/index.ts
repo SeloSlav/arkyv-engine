@@ -49,6 +49,7 @@ import ActorStatRow from "./actor_stat_table";
 import CharacterRow from "./character_table";
 import CommandRow from "./command_table";
 import ExitRow from "./exit_table";
+import LootTableEntryRow from "./loot_table_entry_table";
 import NpcRow from "./npc_table";
 import ObjectDefinitionRow from "./object_definition_table";
 import ProfileRow from "./profile_table";
@@ -113,6 +114,17 @@ const tablesSchema = __schema({
       { name: 'exit_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ExitRow),
+  loot_table_entry: __table({
+    name: 'loot_table_entry',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'loot_table_entry_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, LootTableEntryRow),
   npc: __table({
     name: 'npc',
     indexes: [

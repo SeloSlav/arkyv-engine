@@ -11,6 +11,11 @@ function cleanTargetName(value = '') {
     return String(value).split(' [')[0].split(' (talk ')[0].split(' - ')[0].trim();
 }
 
+function npcDisposition(npc) {
+    if (npc?.disposition) return npc.disposition;
+    return npc?.alias?.toLowerCase() === 'archie' ? 'friendly' : 'neutral';
+}
+
 function ItemArt({ definition, size = 'md' }) {
     const dimension = size === 'sm' ? 'h-9 w-9' : 'h-12 w-12';
     if (definition?.image_url) {
@@ -89,8 +94,8 @@ export default function RpgHud({ actor, environmentData = {}, onExecuteCommand, 
     const equipped = objects.filter((object) => object.location_kind === 'equipped');
     const playerTargets = zone.pvpEnabled ? (environmentData.characters || []).map((name) => ({ name: cleanTargetName(name), kind: 'Player' })) : [];
     const npcTargets = nearbyNpcs
-        .filter((npc) => (npc.disposition || 'neutral') !== 'friendly')
-        .map((npc) => ({ name: npc.name, kind: (npc.disposition || 'neutral') === 'hostile' ? 'Enemy NPC' : 'Neutral NPC' }));
+        .filter((npc) => npcDisposition(npc) !== 'friendly')
+        .map((npc) => ({ name: npc.name, kind: npcDisposition(npc) === 'hostile' ? 'Enemy NPC' : 'Neutral NPC' }));
     const targets = [...npcTargets, ...playerTargets].filter((target) => target.name);
 
     return (

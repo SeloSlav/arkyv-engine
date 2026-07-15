@@ -52,6 +52,18 @@ export const Exit = __t.object("Exit", {
 });
 export type Exit = __Infer<typeof Exit>;
 
+export const LootTableEntry = __t.object("LootTableEntry", {
+  id: __t.string(),
+  npcId: __t.string(),
+  definitionId: __t.string(),
+  minimumQuantity: __t.u32(),
+  maximumQuantity: __t.u32(),
+  chancePercent: __t.u32(),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type LootTableEntry = __Infer<typeof LootTableEntry>;
+
 export const Npc = __t.object("Npc", {
   id: __t.string(),
   name: __t.string(),
@@ -64,6 +76,17 @@ export const Npc = __t.object("Npc", {
   alias: __t.option(__t.string()),
   greetingBehavior: __t.string(),
   portraitUrl: __t.option(__t.string()),
+  disposition: __t.option(__t.string()),
+  attackOnSight: __t.bool(),
+  patrolRoute: __t.option(__t.string()),
+  patrolIntervalSeconds: __t.u32(),
+  patrolIndex: __t.u32(),
+  lastPatrolAt: __t.option(__t.timestamp()),
+  attackIntervalSeconds: __t.u32(),
+  lastAttackAt: __t.option(__t.timestamp()),
+  respawnSeconds: __t.u32(),
+  spawnRoom: __t.option(__t.string()),
+  defeatedAt: __t.option(__t.timestamp()),
 });
 export type Npc = __Infer<typeof Npc>;
 
@@ -114,6 +137,8 @@ export const Region = __t.object("Region", {
   createdAt: __t.timestamp(),
   updatedAt: __t.timestamp(),
   colorScheme: __t.string(),
+  pvpEnabled: __t.bool(),
+  respawnRoomId: __t.option(__t.string()),
 });
 export type Region = __Infer<typeof Region>;
 

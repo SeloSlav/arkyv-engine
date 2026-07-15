@@ -104,6 +104,8 @@ pub struct Npc {
     pub spawn_room: Option<String>,
     #[default(None::<Timestamp>)]
     pub defeated_at: Option<Timestamp>,
+    #[default(25)]
+    pub xp_reward: u32,
 }
 
 #[spacetimedb::table(accessor = exit, public)]
@@ -179,6 +181,12 @@ pub struct StatDefinition {
     pub visible: bool,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
+    /// Amount added to an actor's base value whenever they gain a level.
+    #[default(0)]
+    pub per_level_gain: i32,
+    /// Passive recovery per elapsed real-time second. Zero disables regeneration.
+    #[default(0)]
+    pub regeneration_per_second: i32,
 }
 
 /// A reusable RPG primitive authored in the admin editor. Behaviour is stored
@@ -211,6 +219,12 @@ pub struct ObjectDefinition {
     pub updated_at: Timestamp,
     #[default(None::<String>)]
     pub image_url: Option<String>,
+    /// Time before another basic attack can be made while this weapon is equipped.
+    #[default(2000)]
+    pub attack_cooldown_ms: u32,
+    /// Additional top-level inventory stacks granted while this object is equipped.
+    #[default(0)]
+    pub inventory_slots_bonus: u32,
 }
 
 /// A concrete object. `location_kind` is one of room, inventory, equipped, or
@@ -264,6 +278,105 @@ pub struct LootTableEntry {
     pub updated_at: Timestamp,
 }
 
+/// Singleton world-wide progression and carrying rules. The starter kit uses
+/// the id `world`, but keeping an id makes this table migration-friendly.
+#[spacetimedb::table(accessor = progression_config, public)]
+#[derive(Clone)]
+pub struct ProgressionConfig {
+    #[primary_key]
+    pub id: String,
+    pub max_level: u32,
+    pub base_xp: u32,
+    pub growth_percent: u32,
+    pub base_inventory_slots: u32,
+    pub inventory_slots_per_level: u32,
+    pub stat_points_per_level: u32,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+/// Per-actor level state. Experience is progress within the current level,
+/// which keeps the curve editable without rewriting historical totals.
+#[spacetimedb::table(accessor = actor_progression, public)]
+#[derive(Clone)]
+pub struct ActorProgression {
+    #[primary_key]
+    pub id: String,
+    pub actor_id: String,
+    pub level: u32,
+    pub experience: u32,
+    pub unspent_stat_points: u32,
+    pub updated_at: Timestamp,
+}
+
+/// Defines wearable locations and how many objects each location accepts.
+#[spacetimedb::table(accessor = equipment_slot_definition, public)]
+#[derive(Clone)]
+pub struct EquipmentSlotDefinition {
+    #[primary_key]
+    pub id: String,
+    pub name: String,
+    pub capacity: u32,
+    pub sort_order: u32,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+/// Admin-authored combat and utility action. The initial runtime supports
+/// damage, healing, and resource restoration without trusting the client.
+#[spacetimedb::table(accessor = ability_definition, public)]
+#[derive(Clone)]
+pub struct AbilityDefinition {
+    #[primary_key]
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub icon: String,
+    pub school: String,
+    pub effect_type: String,
+    pub target_type: String,
+    pub resource_stat_id: Option<String>,
+    pub resource_cost: i32,
+    pub cooldown_ms: u32,
+    pub cast_time_ms: u32,
+    pub power_min: i32,
+    pub power_max: i32,
+    pub scales_with_stat: Option<String>,
+    pub scaling_percent: i32,
+    pub effect_stat_id: Option<String>,
+    /// `armor` applies defense and equipped armor; `none` deals authored power directly.
+    pub mitigation_type: String,
+    pub required_level: u32,
+    pub auto_learn: bool,
+    pub enabled: bool,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+/// Explicit grants supplement abilities learned automatically by level.
+#[spacetimedb::table(accessor = actor_ability, public)]
+#[derive(Clone)]
+pub struct ActorAbility {
+    #[primary_key]
+    pub id: String,
+    pub actor_id: String,
+    pub ability_id: String,
+    pub granted_at: Timestamp,
+}
+
+/// Server-authoritative readiness for attacks and abilities. Microseconds are
+/// stored directly so the generated browser client can compare them cheaply.
+#[spacetimedb::table(accessor = actor_cooldown, public)]
+#[derive(Clone)]
+pub struct ActorCooldown {
+    #[primary_key]
+    pub id: String,
+    pub actor_id: String,
+    pub action_id: String,
+    pub ready_at_micros: i64,
+    pub updated_at: Timestamp,
+}
+
 fn identity_id(identity: Identity) -> String {
     identity.to_string()
 }
@@ -285,7 +398,8 @@ fn require_admin(ctx: &ReducerContext) -> Result<(), String> {
 }
 
 fn ensure_profile(ctx: &ReducerContext) {
-    if profile_for(ctx, ctx.sender()).is_some() {
+    if let Some(profile) = profile_for(ctx, ctx.sender()) {
+        ensure_actor_progression(ctx, &profile.id);
         return;
     }
 
@@ -295,7 +409,7 @@ fn ensure_profile(ctx: &ReducerContext) {
     ctx.db.profile().insert(Profile {
         id: id.clone(),
         owner: ctx.sender(),
-        user_id: id,
+        user_id: id.clone(),
         created_at: ctx.timestamp,
         description: None,
         current_room: Some(CREATION_ROOM_ID.to_string()),
@@ -304,6 +418,7 @@ fn ensure_profile(ctx: &ReducerContext) {
         membership_tier: Some("local".to_string()),
         is_admin,
     });
+    ensure_actor_progression(ctx, &id);
 }
 
 fn json_string(value: Option<&Value>, fallback: &str) -> String {
@@ -401,14 +516,27 @@ fn add_message(
 }
 
 fn seed_rpg_definitions(ctx: &ReducerContext) {
+    let first_progression_install = ctx.db.progression_config().id().find(&"world".to_string()).is_none();
     let stats = [
-        ("health", "Health", "How much harm an actor can withstand.", "health", 0, 9999, 20),
-        ("strength", "Strength", "Physical power used by weapons and heavy actions.", "power", 0, 999, 3),
-        ("defense", "Defense", "Innate resistance before equipped armor is applied.", "defense", 0, 999, 0),
+        ("health", "Health", "How much harm an actor can withstand.", "health", 0, 9999, 20, 5, 1),
+        ("mana", "Mana", "Arcane power spent on spells and magical abilities.", "mana", 0, 9999, 40, 5, 2),
+        ("energy", "Energy", "Fast-recovering power spent on physical techniques.", "energy", 0, 9999, 100, 0, 5),
+        ("focus", "Focus", "Concentration spent on precise or sustained techniques.", "focus", 0, 9999, 100, 0, 1),
+        ("strength", "Strength", "Physical power used by weapons and heavy actions.", "power", 0, 999, 3, 1, 0),
+        ("defense", "Defense", "Innate resistance before equipped armor is applied.", "defense", 0, 999, 0, 1, 0),
     ];
-    for (id, name, description, role, minimum, maximum, default_value) in stats {
+    for (id, name, description, role, minimum, maximum, default_value, per_level_gain, regeneration_per_second) in stats {
         let id = id.to_string();
-        if ctx.db.stat_definition().id().find(&id).is_none() {
+        if let Some(existing) = ctx.db.stat_definition().id().find(&id) {
+            if first_progression_install {
+                ctx.db.stat_definition().id().update(StatDefinition {
+                    per_level_gain,
+                    regeneration_per_second,
+                    updated_at: ctx.timestamp,
+                    ..existing
+                });
+            }
+        } else {
             ctx.db.stat_definition().insert(StatDefinition {
                 id,
                 name: name.to_string(),
@@ -420,6 +548,8 @@ fn seed_rpg_definitions(ctx: &ReducerContext) {
                 visible: true,
                 created_at: ctx.timestamp,
                 updated_at: ctx.timestamp,
+                per_level_gain,
+                regeneration_per_second,
             });
         }
     }
@@ -432,6 +562,7 @@ fn seed_rpg_definitions(ctx: &ReducerContext) {
             weapon_damage: 0, armor_value: 0, scales_with_stat: None, fuel_value: 300, burn_rate: 0,
             accepted_fuel_tags: "[]".to_string(), stat_modifiers: "{}".to_string(), on_use: "{}".to_string(),
             created_at: ctx.timestamp, updated_at: ctx.timestamp,
+            attack_cooldown_ms: 2000, inventory_slots_bonus: 0,
         },
         ObjectDefinition {
             id: "wooden-box".to_string(), name: "Wooden Box".to_string(), description: "A simple container for loose possessions.".to_string(),
@@ -440,6 +571,7 @@ fn seed_rpg_definitions(ctx: &ReducerContext) {
             weapon_damage: 0, armor_value: 0, scales_with_stat: None, fuel_value: 0, burn_rate: 0,
             accepted_fuel_tags: "[]".to_string(), stat_modifiers: "{}".to_string(), on_use: "{}".to_string(),
             created_at: ctx.timestamp, updated_at: ctx.timestamp,
+            attack_cooldown_ms: 2000, inventory_slots_bonus: 0,
         },
         ObjectDefinition {
             id: "campfire".to_string(), name: "Campfire".to_string(), description: "A stone-ringed fire that burns while it has fuel.".to_string(),
@@ -448,6 +580,7 @@ fn seed_rpg_definitions(ctx: &ReducerContext) {
             weapon_damage: 0, armor_value: 0, scales_with_stat: None, fuel_value: 0, burn_rate: 1,
             accepted_fuel_tags: r#"["fuel"]"#.to_string(), stat_modifiers: "{}".to_string(), on_use: "{}".to_string(),
             created_at: ctx.timestamp, updated_at: ctx.timestamp,
+            attack_cooldown_ms: 2000, inventory_slots_bonus: 0,
         },
         ObjectDefinition {
             id: "iron-sword".to_string(), name: "Iron Sword".to_string(), description: "A dependable one-handed blade.".to_string(),
@@ -456,6 +589,7 @@ fn seed_rpg_definitions(ctx: &ReducerContext) {
             weapon_damage: 5, armor_value: 0, scales_with_stat: Some("strength".to_string()), fuel_value: 0, burn_rate: 0,
             accepted_fuel_tags: "[]".to_string(), stat_modifiers: "{}".to_string(), on_use: "{}".to_string(),
             created_at: ctx.timestamp, updated_at: ctx.timestamp,
+            attack_cooldown_ms: 1800, inventory_slots_bonus: 0,
         },
         ObjectDefinition {
             id: "leather-armor".to_string(), name: "Leather Armor".to_string(), description: "Flexible protection made from boiled leather.".to_string(),
@@ -464,6 +598,7 @@ fn seed_rpg_definitions(ctx: &ReducerContext) {
             weapon_damage: 0, armor_value: 2, scales_with_stat: None, fuel_value: 0, burn_rate: 0,
             accepted_fuel_tags: "[]".to_string(), stat_modifiers: "{}".to_string(), on_use: "{}".to_string(),
             created_at: ctx.timestamp, updated_at: ctx.timestamp,
+            attack_cooldown_ms: 2000, inventory_slots_bonus: 0,
         },
         ObjectDefinition {
             id: "healing-potion".to_string(), name: "Healing Potion".to_string(), description: "A crimson restorative draught.".to_string(),
@@ -473,11 +608,78 @@ fn seed_rpg_definitions(ctx: &ReducerContext) {
             accepted_fuel_tags: "[]".to_string(), stat_modifiers: "{}".to_string(),
             on_use: r#"{"stat_id":"health","delta":8,"consume":true}"#.to_string(),
             created_at: ctx.timestamp, updated_at: ctx.timestamp,
+            attack_cooldown_ms: 2000, inventory_slots_bonus: 0,
         },
     ];
     for definition in definitions {
         if ctx.db.object_definition().id().find(&definition.id).is_none() {
             ctx.db.object_definition().insert(definition);
+        }
+    }
+
+    if first_progression_install {
+        ctx.db.progression_config().insert(ProgressionConfig {
+            id: "world".to_string(),
+            max_level: 60,
+            base_xp: 100,
+            growth_percent: 15,
+            base_inventory_slots: 20,
+            inventory_slots_per_level: 1,
+            stat_points_per_level: 0,
+            created_at: ctx.timestamp,
+            updated_at: ctx.timestamp,
+        });
+    }
+
+    let slots = [
+        ("main-hand", "Main hand", 1, 10), ("off-hand", "Off hand", 1, 20),
+        ("head", "Head", 1, 30), ("neck", "Neck", 1, 40),
+        ("shoulders", "Shoulders", 1, 50), ("back", "Back", 1, 60),
+        ("chest", "Chest", 1, 70), ("body", "Body (legacy)", 1, 75),
+        ("wrists", "Wrists", 1, 80), ("hands", "Hands", 1, 90),
+        ("waist", "Waist", 1, 100), ("legs", "Legs", 1, 110),
+        ("feet", "Feet", 1, 120), ("finger", "Finger", 2, 130),
+        ("trinket", "Trinket", 2, 140),
+    ];
+    for (id, name, capacity, sort_order) in slots {
+        let id = id.to_string();
+        if ctx.db.equipment_slot_definition().id().find(&id).is_none() {
+            ctx.db.equipment_slot_definition().insert(EquipmentSlotDefinition {
+                id, name: name.to_string(), capacity, sort_order,
+                created_at: ctx.timestamp, updated_at: ctx.timestamp,
+            });
+        }
+    }
+
+    let abilities = [
+        AbilityDefinition {
+            id: "strike".to_string(), name: "Strike".to_string(), description: "A committed physical blow.".to_string(),
+            icon: "⚔️".to_string(), school: "physical".to_string(), effect_type: "damage".to_string(), target_type: "enemy".to_string(),
+            resource_stat_id: Some("energy".to_string()), resource_cost: 25, cooldown_ms: 3000, cast_time_ms: 0,
+            power_min: 4, power_max: 7, scales_with_stat: Some("strength".to_string()), scaling_percent: 100,
+            effect_stat_id: Some("health".to_string()), mitigation_type: "armor".to_string(), required_level: 1, auto_learn: true, enabled: true,
+            created_at: ctx.timestamp, updated_at: ctx.timestamp,
+        },
+        AbilityDefinition {
+            id: "firebolt".to_string(), name: "Firebolt".to_string(), description: "Hurl a bolt of fire at an enemy.".to_string(),
+            icon: "🔥".to_string(), school: "fire".to_string(), effect_type: "damage".to_string(), target_type: "enemy".to_string(),
+            resource_stat_id: Some("mana".to_string()), resource_cost: 12, cooldown_ms: 2500, cast_time_ms: 1000,
+            power_min: 7, power_max: 11, scales_with_stat: None, scaling_percent: 0,
+            effect_stat_id: Some("health".to_string()), mitigation_type: "none".to_string(), required_level: 2, auto_learn: true, enabled: true,
+            created_at: ctx.timestamp, updated_at: ctx.timestamp,
+        },
+        AbilityDefinition {
+            id: "mend".to_string(), name: "Mend".to_string(), description: "Restore your own vitality.".to_string(),
+            icon: "✨".to_string(), school: "restoration".to_string(), effect_type: "heal".to_string(), target_type: "self".to_string(),
+            resource_stat_id: Some("mana".to_string()), resource_cost: 10, cooldown_ms: 6000, cast_time_ms: 1500,
+            power_min: 6, power_max: 10, scales_with_stat: None, scaling_percent: 0,
+            effect_stat_id: Some("health".to_string()), mitigation_type: "none".to_string(), required_level: 3, auto_learn: true, enabled: true,
+            created_at: ctx.timestamp, updated_at: ctx.timestamp,
+        },
+    ];
+    for ability in abilities {
+        if ctx.db.ability_definition().id().find(&ability.id).is_none() {
+            ctx.db.ability_definition().insert(ability);
         }
     }
 }
@@ -573,6 +775,7 @@ fn seed_world(ctx: &ReducerContext) {
             respawn_seconds: 60,
             spawn_room: Some(CREATION_ROOM_ID.to_string()),
             defeated_at: None,
+            xp_reward: 0,
         });
     }
 }
@@ -618,7 +821,7 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                 }
                 let user_id = identity_id(ctx.sender());
                 ctx.db.character().insert(Character {
-                    id,
+                    id: id.clone(),
                     owner: ctx.sender(),
                     user_id,
                     name,
@@ -626,6 +829,7 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                     created_at: ctx.timestamp,
                     description: optional_string(&row, "description"),
                 });
+                ensure_actor_progression(ctx, &id);
             }
         }
         "regions" => {
@@ -668,6 +872,8 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                     visible: bool_value(&row, "visible", true),
                     created_at: ctx.timestamp,
                     updated_at: ctx.timestamp,
+                    per_level_gain: i32_value(&row, "per_level_gain", 0),
+                    regeneration_per_second: i32_value(&row, "regeneration_per_second", 0).max(0),
                 });
             }
         }
@@ -700,6 +906,124 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                     stat_modifiers: json_string(row.get("stat_modifiers"), "{}"),
                     on_use: json_string(row.get("on_use"), "{}"),
                     created_at: ctx.timestamp,
+                    updated_at: ctx.timestamp,
+                    attack_cooldown_ms: u32_value(&row, "attack_cooldown_ms", 2000),
+                    inventory_slots_bonus: u32_value(&row, "inventory_slots_bonus", 0),
+                });
+            }
+        }
+        "progression_configs" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = string(&row, "id", "world");
+                if id.is_empty() || ctx.db.progression_config().id().find(&id).is_some() {
+                    return Err("Progression config id is missing or already exists.".to_string());
+                }
+                ctx.db.progression_config().insert(ProgressionConfig {
+                    id,
+                    max_level: u32_value(&row, "max_level", 60).max(1),
+                    base_xp: u32_value(&row, "base_xp", 100).max(1),
+                    growth_percent: u32_value(&row, "growth_percent", 15),
+                    base_inventory_slots: u32_value(&row, "base_inventory_slots", 20),
+                    inventory_slots_per_level: u32_value(&row, "inventory_slots_per_level", 1),
+                    stat_points_per_level: u32_value(&row, "stat_points_per_level", 0),
+                    created_at: ctx.timestamp,
+                    updated_at: ctx.timestamp,
+                });
+            }
+        }
+        "equipment_slot_definitions" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = normalized_key(&string(&row, "id", &string(&row, "name", "")));
+                if id.is_empty() || ctx.db.equipment_slot_definition().id().find(&id).is_some() {
+                    return Err("Equipment slot id is missing or already exists.".to_string());
+                }
+                ctx.db.equipment_slot_definition().insert(EquipmentSlotDefinition {
+                    id,
+                    name: string(&row, "name", "Untitled slot"),
+                    capacity: u32_value(&row, "capacity", 1).max(1),
+                    sort_order: u32_value(&row, "sort_order", 100),
+                    created_at: ctx.timestamp,
+                    updated_at: ctx.timestamp,
+                });
+            }
+        }
+        "ability_definitions" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let id = normalized_key(&string(&row, "id", &string(&row, "name", "")));
+                if id.is_empty() || ctx.db.ability_definition().id().find(&id).is_some() {
+                    return Err("Ability id is missing or already exists.".to_string());
+                }
+                let effect_type = string(&row, "effect_type", "damage").to_lowercase();
+                let target_type = string(&row, "target_type", "enemy").to_lowercase();
+                let mitigation_type = string(&row, "mitigation_type", "none").to_lowercase();
+                if !matches!(effect_type.as_str(), "damage" | "heal" | "restore") {
+                    return Err("Ability effect must be damage, heal, or restore.".to_string());
+                }
+                if !matches!(target_type.as_str(), "enemy" | "self" | "ally") {
+                    return Err("Ability target must be enemy, self, or ally.".to_string());
+                }
+                if !matches!(mitigation_type.as_str(), "none" | "armor") {
+                    return Err("Ability mitigation must be none or armor.".to_string());
+                }
+                let power_min = i32_value(&row, "power_min", 1).max(0);
+                let power_max = i32_value(&row, "power_max", power_min).max(power_min);
+                ctx.db.ability_definition().insert(AbilityDefinition {
+                    id,
+                    name: string(&row, "name", "Untitled ability"),
+                    description: string(&row, "description", ""),
+                    icon: string(&row, "icon", "✦"),
+                    school: string(&row, "school", "untyped"),
+                    effect_type,
+                    target_type,
+                    resource_stat_id: optional_string(&row, "resource_stat_id").filter(|value| !value.trim().is_empty()),
+                    resource_cost: i32_value(&row, "resource_cost", 0).max(0),
+                    cooldown_ms: u32_value(&row, "cooldown_ms", 0),
+                    cast_time_ms: u32_value(&row, "cast_time_ms", 0),
+                    power_min,
+                    power_max,
+                    scales_with_stat: optional_string(&row, "scales_with_stat").filter(|value| !value.trim().is_empty()),
+                    scaling_percent: i32_value(&row, "scaling_percent", 0).max(0),
+                    effect_stat_id: optional_string(&row, "effect_stat_id").filter(|value| !value.trim().is_empty()),
+                    mitigation_type,
+                    required_level: u32_value(&row, "required_level", 1).max(1),
+                    auto_learn: bool_value(&row, "auto_learn", true),
+                    enabled: bool_value(&row, "enabled", true),
+                    created_at: ctx.timestamp,
+                    updated_at: ctx.timestamp,
+                });
+            }
+        }
+        "actor_abilities" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let actor_id = string(&row, "actor_id", "");
+                let ability_id = string(&row, "ability_id", "");
+                if !actor_exists(ctx, &actor_id) || ctx.db.ability_definition().id().find(&ability_id).is_none() {
+                    return Err("Ability grants require an existing actor and ability.".to_string());
+                }
+                let id = format!("{actor_id}::{ability_id}");
+                if ctx.db.actor_ability().id().find(&id).is_some() {
+                    return Err("That actor already has this ability grant.".to_string());
+                }
+                ctx.db.actor_ability().insert(ActorAbility { id, actor_id, ability_id, granted_at: ctx.timestamp });
+            }
+        }
+        "actor_progressions" => {
+            require_admin(ctx)?;
+            for row in rows {
+                let actor_id = string(&row, "actor_id", "");
+                if !actor_exists(ctx, &actor_id) || ctx.db.actor_progression().id().find(&actor_id).is_some() {
+                    return Err("Progression requires an existing actor without a progression row.".to_string());
+                }
+                let config = world_progression_config(ctx);
+                ctx.db.actor_progression().insert(ActorProgression {
+                    id: actor_id.clone(), actor_id,
+                    level: u32_value(&row, "level", 1).clamp(1, config.max_level.max(1)),
+                    experience: u32_value(&row, "experience", 0),
+                    unspent_stat_points: u32_value(&row, "unspent_stat_points", 0),
                     updated_at: ctx.timestamp,
                 });
             }
@@ -835,6 +1159,7 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                     respawn_seconds: u32_value(&row, "respawn_seconds", 60),
                     spawn_room: optional_string(&row, "spawn_room").or_else(|| optional_string(&row, "current_room")),
                     defeated_at: None,
+                    xp_reward: u32_value(&row, "xp_reward", 25),
                 });
             }
         }
@@ -947,6 +1272,8 @@ pub fn update_rows(
                     maximum,
                     default_value,
                     visible: payload.get("visible").and_then(Value::as_bool).unwrap_or(existing.visible),
+                    per_level_gain: payload.get("per_level_gain").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.per_level_gain),
+                    regeneration_per_second: payload.get("regeneration_per_second").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.regeneration_per_second).max(0),
                     updated_at: ctx.timestamp,
                     ..existing
                 });
@@ -976,6 +1303,8 @@ pub fn update_rows(
                     accepted_fuel_tags: payload.get("accepted_fuel_tags").map(|value| json_string(Some(value), &existing.accepted_fuel_tags)).unwrap_or(existing.accepted_fuel_tags),
                     stat_modifiers: payload.get("stat_modifiers").map(|value| json_string(Some(value), &existing.stat_modifiers)).unwrap_or(existing.stat_modifiers),
                     on_use: payload.get("on_use").map(|value| json_string(Some(value), &existing.on_use)).unwrap_or(existing.on_use),
+                    attack_cooldown_ms: payload.get("attack_cooldown_ms").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.attack_cooldown_ms),
+                    inventory_slots_bonus: payload.get("inventory_slots_bonus").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.inventory_slots_bonus),
                     updated_at: ctx.timestamp,
                     ..existing
                 });
@@ -1017,6 +1346,88 @@ pub fn update_rows(
                 let base_value = payload.get("base_value").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.base_value).clamp(definition.minimum, definition.maximum);
                 let current_value = payload.get("current_value").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.current_value).clamp(definition.minimum, definition.maximum);
                 ctx.db.actor_stat().id().update(ActorStat { base_value, current_value, updated_at: ctx.timestamp, ..existing });
+            }
+        }
+        "progression_configs" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.progression_config().id().find(&id) else { continue };
+                ctx.db.progression_config().id().update(ProgressionConfig {
+                    max_level: payload.get("max_level").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.max_level).max(1),
+                    base_xp: payload.get("base_xp").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.base_xp).max(1),
+                    growth_percent: payload.get("growth_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.growth_percent),
+                    base_inventory_slots: payload.get("base_inventory_slots").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.base_inventory_slots),
+                    inventory_slots_per_level: payload.get("inventory_slots_per_level").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.inventory_slots_per_level),
+                    stat_points_per_level: payload.get("stat_points_per_level").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.stat_points_per_level),
+                    updated_at: ctx.timestamp,
+                    ..existing
+                });
+            }
+        }
+        "equipment_slot_definitions" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.equipment_slot_definition().id().find(&id) else { continue };
+                ctx.db.equipment_slot_definition().id().update(EquipmentSlotDefinition {
+                    name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(),
+                    capacity: payload.get("capacity").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.capacity).max(1),
+                    sort_order: payload.get("sort_order").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.sort_order),
+                    updated_at: ctx.timestamp,
+                    ..existing
+                });
+            }
+        }
+        "ability_definitions" => {
+            require_admin(ctx)?;
+            for id in ids {
+                let Some(existing) = ctx.db.ability_definition().id().find(&id) else { continue };
+                let effect_type = payload.get("effect_type").and_then(Value::as_str).unwrap_or(&existing.effect_type).to_lowercase();
+                let target_type = payload.get("target_type").and_then(Value::as_str).unwrap_or(&existing.target_type).to_lowercase();
+                let mitigation_type = payload.get("mitigation_type").and_then(Value::as_str).unwrap_or(&existing.mitigation_type).to_lowercase();
+                if !matches!(effect_type.as_str(), "damage" | "heal" | "restore")
+                    || !matches!(target_type.as_str(), "enemy" | "self" | "ally")
+                    || !matches!(mitigation_type.as_str(), "none" | "armor") {
+                    return Err("Ability effect, target, or mitigation type is invalid.".to_string());
+                }
+                let power_min = payload.get("power_min").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.power_min).max(0);
+                let power_max = payload.get("power_max").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.power_max).max(power_min);
+                ctx.db.ability_definition().id().update(AbilityDefinition {
+                    name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(),
+                    description: payload.get("description").and_then(Value::as_str).unwrap_or(&existing.description).to_string(),
+                    icon: payload.get("icon").and_then(Value::as_str).unwrap_or(&existing.icon).to_string(),
+                    school: payload.get("school").and_then(Value::as_str).unwrap_or(&existing.school).to_string(),
+                    effect_type,
+                    target_type,
+                    resource_stat_id: payload.get("resource_stat_id").map(|_| optional_string(&payload, "resource_stat_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.resource_stat_id),
+                    resource_cost: payload.get("resource_cost").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.resource_cost).max(0),
+                    cooldown_ms: payload.get("cooldown_ms").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.cooldown_ms),
+                    cast_time_ms: payload.get("cast_time_ms").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.cast_time_ms),
+                    power_min,
+                    power_max,
+                    scales_with_stat: payload.get("scales_with_stat").map(|_| optional_string(&payload, "scales_with_stat").filter(|value| !value.trim().is_empty())).unwrap_or(existing.scales_with_stat),
+                    scaling_percent: payload.get("scaling_percent").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.scaling_percent).max(0),
+                    effect_stat_id: payload.get("effect_stat_id").map(|_| optional_string(&payload, "effect_stat_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.effect_stat_id),
+                    mitigation_type,
+                    required_level: payload.get("required_level").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.required_level).max(1),
+                    auto_learn: payload.get("auto_learn").and_then(Value::as_bool).unwrap_or(existing.auto_learn),
+                    enabled: payload.get("enabled").and_then(Value::as_bool).unwrap_or(existing.enabled),
+                    updated_at: ctx.timestamp,
+                    ..existing
+                });
+            }
+        }
+        "actor_progressions" => {
+            require_admin(ctx)?;
+            let config = world_progression_config(ctx);
+            for id in ids {
+                let Some(existing) = ctx.db.actor_progression().id().find(&id) else { continue };
+                ctx.db.actor_progression().id().update(ActorProgression {
+                    level: payload.get("level").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.level).clamp(1, config.max_level.max(1)),
+                    experience: payload.get("experience").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.experience),
+                    unspent_stat_points: payload.get("unspent_stat_points").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.unspent_stat_points),
+                    updated_at: ctx.timestamp,
+                    ..existing
+                });
             }
         }
         "loot_table_entries" => {
@@ -1080,6 +1491,7 @@ pub fn update_rows(
                     attack_interval_seconds: payload.get("attack_interval_seconds").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.attack_interval_seconds).max(1),
                     respawn_seconds: payload.get("respawn_seconds").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.respawn_seconds),
                     spawn_room: payload.get("spawn_room").map(|_| optional_string(&payload, "spawn_room")).unwrap_or(existing.spawn_room),
+                    xp_reward: payload.get("xp_reward").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.xp_reward),
                     ..existing
                 });
             }
@@ -1136,7 +1548,12 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
         "profiles" => delete_current_account(ctx)?,
         "regions" => {
             require_admin(ctx)?;
-            for id in ids { ctx.db.region().name().delete(&id); }
+            for id in ids {
+                if ctx.db.room().iter().any(|room| room.region_name.as_deref() == Some(id.as_str())) {
+                    return Err("Move or delete every room in this region before deleting the region.".to_string());
+                }
+                ctx.db.region().name().delete(&id);
+            }
         }
         "stat_definitions" => {
             require_admin(ctx)?;
@@ -1177,6 +1594,29 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
             for id in ids {
                 let exits = ctx.db.exit().iter().filter(|exit| exit.from_room.as_deref() == Some(id.as_str()) || exit.to_room.as_deref() == Some(id.as_str())).map(|exit| exit.id).collect::<Vec<_>>();
                 for exit_id in exits { ctx.db.exit().id().delete(&exit_id); }
+                let object_ids = ctx.db.world_object().iter().filter(|object| object.location_kind == "room" && object.location_id == id).map(|object| object.id).collect::<Vec<_>>();
+                for object_id in object_ids { delete_world_object_tree(ctx, &object_id); }
+                let npcs = ctx.db.npc().iter().filter(|npc| npc.current_room.as_deref() == Some(id.as_str()) || npc.spawn_room.as_deref() == Some(id.as_str())).collect::<Vec<_>>();
+                for npc in npcs {
+                    let route = npc.patrol_route.as_deref().and_then(|route| serde_json::from_str::<Vec<String>>(route).ok()).unwrap_or_default().into_iter().filter(|room_id| room_id != &id).collect::<Vec<_>>();
+                    ctx.db.npc().id().update(Npc {
+                        current_room: if npc.current_room.as_deref() == Some(id.as_str()) { None } else { npc.current_room.clone() },
+                        spawn_room: if npc.spawn_room.as_deref() == Some(id.as_str()) { None } else { npc.spawn_room.clone() },
+                        patrol_route: Some(serde_json::to_string(&route).unwrap_or_else(|_| "[]".to_string())),
+                        patrol_index: 0,
+                        ..npc
+                    });
+                }
+                let characters = ctx.db.character().iter().filter(|character| character.current_room.as_deref() == Some(id.as_str())).collect::<Vec<_>>();
+                for character in characters {
+                    ctx.db.character().id().update(Character { current_room: Some(STARTING_ROOM_ID.to_string()).filter(|room_id| room_id != &id), ..character });
+                }
+                let profiles = ctx.db.profile().iter().filter(|profile| profile.current_room.as_deref() == Some(id.as_str())).collect::<Vec<_>>();
+                for profile in profiles {
+                    ctx.db.profile().id().update(Profile { current_room: Some(STARTING_ROOM_ID.to_string()).filter(|room_id| room_id != &id), ..profile });
+                }
+                let regions = ctx.db.region().iter().filter(|region| region.respawn_room_id.as_deref() == Some(id.as_str())).collect::<Vec<_>>();
+                for region in regions { ctx.db.region().name().update(Region { respawn_room_id: None, updated_at: ctx.timestamp, ..region }); }
                 ctx.db.room().id().delete(&id);
             }
         }
@@ -1293,16 +1733,74 @@ fn stat_definition_by_role(ctx: &ReducerContext, role: &str) -> Option<StatDefin
     ctx.db.stat_definition().iter().find(|definition| definition.role.as_deref() == Some(role))
 }
 
+fn world_progression_config(ctx: &ReducerContext) -> ProgressionConfig {
+    ctx.db.progression_config().id().find(&"world".to_string())
+        .or_else(|| ctx.db.progression_config().iter().next())
+        .unwrap_or(ProgressionConfig {
+            id: "world".to_string(), max_level: 60, base_xp: 100, growth_percent: 15,
+            base_inventory_slots: 20, inventory_slots_per_level: 1, stat_points_per_level: 0,
+            created_at: ctx.timestamp, updated_at: ctx.timestamp,
+        })
+}
+
+fn ensure_actor_progression(ctx: &ReducerContext, actor_id: &str) -> ActorProgression {
+    let actor_key = actor_id.to_string();
+    let progression = ctx.db.actor_progression().id().find(&actor_key).unwrap_or_else(|| {
+        let row = ActorProgression {
+            id: actor_key.clone(), actor_id: actor_key.clone(), level: 1, experience: 0,
+            unspent_stat_points: 0, updated_at: ctx.timestamp,
+        };
+        ctx.db.actor_progression().insert(row.clone());
+        row
+    });
+    let definitions = ctx.db.stat_definition().iter().collect::<Vec<_>>();
+    for definition in definitions {
+        let id = actor_stat_id(actor_id, &definition.id);
+        if ctx.db.actor_stat().id().find(&id).is_none() {
+            ctx.db.actor_stat().insert(ActorStat {
+                id, actor_id: actor_key.clone(), stat_definition_id: definition.id,
+                base_value: definition.default_value, current_value: definition.default_value,
+                updated_at: ctx.timestamp,
+            });
+        }
+    }
+    progression
+}
+
+fn xp_for_next_level(config: &ProgressionConfig, level: u32) -> u32 {
+    let mut required = config.base_xp.max(1);
+    for _ in 1..level.max(1) {
+        let grown = u64::from(required)
+            .saturating_mul(u64::from(100u32.saturating_add(config.growth_percent)))
+            / 100;
+        required = u32::try_from(grown).unwrap_or(u32::MAX).max(required.saturating_add(1));
+    }
+    required
+}
+
 fn actor_stat_row(ctx: &ReducerContext, actor_id: &str, definition: &StatDefinition) -> ActorStat {
     let id = actor_stat_id(actor_id, &definition.id);
-    ctx.db.actor_stat().id().find(&id).unwrap_or(ActorStat {
+    let Some(mut row) = ctx.db.actor_stat().id().find(&id) else { return ActorStat {
         id,
         actor_id: actor_id.to_string(),
         stat_definition_id: definition.id.clone(),
         base_value: definition.default_value,
         current_value: definition.default_value,
         updated_at: ctx.timestamp,
-    })
+    }};
+    if definition.regeneration_per_second > 0 && row.current_value < row.base_value {
+        let elapsed_micros = ctx.timestamp.to_micros_since_unix_epoch()
+            .saturating_sub(row.updated_at.to_micros_since_unix_epoch());
+        let elapsed_seconds = elapsed_micros / 1_000_000;
+        if elapsed_seconds > 0 {
+            let recovered = i64::from(definition.regeneration_per_second).saturating_mul(elapsed_seconds);
+            row.current_value = i64::from(row.current_value).saturating_add(recovered)
+                .min(i64::from(row.base_value)).min(i64::from(definition.maximum)) as i32;
+            row.updated_at = ctx.timestamp;
+            ctx.db.actor_stat().id().update(row.clone());
+        }
+    }
+    row
 }
 
 fn equipment_stat_bonus(ctx: &ReducerContext, actor_id: &str, stat_id: &str) -> i32 {
@@ -1323,12 +1821,115 @@ fn actor_stat_value(ctx: &ReducerContext, actor_id: &str, definition: &StatDefin
 fn set_actor_stat_current(ctx: &ReducerContext, actor_id: &str, definition: &StatDefinition, value: i32) {
     let mut row = actor_stat_row(ctx, actor_id, definition);
     let exists = ctx.db.actor_stat().id().find(&row.id).is_some();
-    row.current_value = value.clamp(definition.minimum, definition.maximum);
+    row.current_value = value.clamp(definition.minimum, row.base_value.clamp(definition.minimum, definition.maximum));
     row.updated_at = ctx.timestamp;
     if exists {
         ctx.db.actor_stat().id().update(row);
     } else {
         ctx.db.actor_stat().insert(row);
+    }
+}
+
+fn award_experience(ctx: &ReducerContext, actor_id: &str, amount: u32) -> String {
+    let config = world_progression_config(ctx);
+    let mut progression = ensure_actor_progression(ctx, actor_id);
+    if amount == 0 {
+        return "This enemy grants no experience.".to_string();
+    }
+    if progression.level >= config.max_level.max(1) {
+        return format!("You are already at the level cap ({}).", config.max_level.max(1));
+    }
+    let starting_level = progression.level;
+    progression.experience = progression.experience.saturating_add(amount);
+    while progression.level < config.max_level.max(1) {
+        let required = xp_for_next_level(&config, progression.level);
+        if progression.experience < required { break; }
+        progression.experience = progression.experience.saturating_sub(required);
+        progression.level = progression.level.saturating_add(1);
+        progression.unspent_stat_points = progression.unspent_stat_points.saturating_add(config.stat_points_per_level);
+        let definitions = ctx.db.stat_definition().iter().collect::<Vec<_>>();
+        for definition in definitions {
+            if definition.per_level_gain == 0 { continue; }
+            let mut row = actor_stat_row(ctx, actor_id, &definition);
+            let previous_base = row.base_value;
+            row.base_value = row.base_value.saturating_add(definition.per_level_gain).clamp(definition.minimum, definition.maximum);
+            let applied = row.base_value.saturating_sub(previous_base);
+            row.current_value = row.current_value.saturating_add(applied).clamp(definition.minimum, row.base_value);
+            row.updated_at = ctx.timestamp;
+            if ctx.db.actor_stat().id().find(&row.id).is_some() {
+                ctx.db.actor_stat().id().update(row);
+            } else {
+                ctx.db.actor_stat().insert(row);
+            }
+        }
+    }
+    progression.updated_at = ctx.timestamp;
+    ctx.db.actor_progression().id().update(progression.clone());
+    if progression.level == starting_level {
+        let required = xp_for_next_level(&config, progression.level);
+        return format!("You gain {amount} XP ({}/{} toward level {}).", progression.experience, required, progression.level.saturating_add(1));
+    }
+    let unlocked = ctx.db.ability_definition().iter()
+        .filter(|ability| ability.enabled && ability.auto_learn && ability.required_level > starting_level && ability.required_level <= progression.level)
+        .map(|ability| ability.name)
+        .collect::<Vec<_>>();
+    let mut message = format!("You gain {amount} XP and reach level {}!", progression.level);
+    if !unlocked.is_empty() { message.push_str(&format!(" New abilities: {}.", unlocked.join(", "))); }
+    if config.stat_points_per_level > 0 {
+        message.push_str(&format!(" Unspent stat points: {}.", progression.unspent_stat_points));
+    }
+    message
+}
+
+fn inventory_slots(ctx: &ReducerContext, actor_id: &str) -> u32 {
+    let config = world_progression_config(ctx);
+    let level = ensure_actor_progression(ctx, actor_id).level.max(1);
+    let equipment_bonus = ctx.db.world_object().iter()
+        .filter(|object| object.location_kind == "equipped" && object.location_id == actor_id)
+        .filter_map(|object| object_definition_for(ctx, &object))
+        .map(|definition| definition.inventory_slots_bonus)
+        .fold(0u32, u32::saturating_add);
+    config.base_inventory_slots
+        .saturating_add(config.inventory_slots_per_level.saturating_mul(level.saturating_sub(1)))
+        .saturating_add(equipment_bonus)
+}
+
+fn inventory_used(ctx: &ReducerContext, actor_id: &str) -> u32 {
+    ctx.db.world_object().iter()
+        .filter(|object| object.location_kind == "inventory" && object.location_id == actor_id)
+        .count() as u32
+}
+
+fn inventory_has_space(ctx: &ReducerContext, actor_id: &str, additional_stacks: u32) -> bool {
+    inventory_used(ctx, actor_id).saturating_add(additional_stacks) <= inventory_slots(ctx, actor_id)
+}
+
+fn equipment_slot_capacity(ctx: &ReducerContext, slot: &str) -> u32 {
+    ctx.db.equipment_slot_definition().id().find(&slot.to_string()).map(|definition| definition.capacity.max(1)).unwrap_or(1)
+}
+
+fn cooldown_id(actor_id: &str, action_id: &str) -> String {
+    format!("{actor_id}::{action_id}")
+}
+
+fn cooldown_remaining_ms(ctx: &ReducerContext, actor_id: &str, action_id: &str) -> u32 {
+    let id = cooldown_id(actor_id, action_id);
+    let Some(cooldown) = ctx.db.actor_cooldown().id().find(&id) else { return 0 };
+    let remaining = cooldown.ready_at_micros.saturating_sub(ctx.timestamp.to_micros_since_unix_epoch());
+    if remaining <= 0 { 0 } else { u32::try_from((remaining.saturating_add(999)) / 1000).unwrap_or(u32::MAX) }
+}
+
+fn set_cooldown(ctx: &ReducerContext, actor_id: &str, action_id: &str, duration_ms: u32) {
+    let id = cooldown_id(actor_id, action_id);
+    let row = ActorCooldown {
+        id: id.clone(), actor_id: actor_id.to_string(), action_id: action_id.to_string(),
+        ready_at_micros: ctx.timestamp.to_micros_since_unix_epoch().saturating_add(i64::from(duration_ms) * 1000),
+        updated_at: ctx.timestamp,
+    };
+    if ctx.db.actor_cooldown().id().find(&id).is_some() {
+        ctx.db.actor_cooldown().id().update(row);
+    } else {
+        ctx.db.actor_cooldown().insert(row);
     }
 }
 
@@ -1341,6 +1942,19 @@ fn consume_object_quantity(ctx: &ReducerContext, object: WorldObject, quantity: 
         });
     } else {
         delete_world_object_tree(ctx, &object.id);
+    }
+}
+
+fn object_is_inside(ctx: &ReducerContext, object_id: &str, possible_ancestor_id: &str) -> bool {
+    let mut current_id = object_id.to_string();
+    let mut visited = Vec::new();
+    loop {
+        if current_id == possible_ancestor_id { return true; }
+        if visited.contains(&current_id) { return false; }
+        visited.push(current_id.clone());
+        let Some(object) = ctx.db.world_object().id().find(&current_id) else { return false };
+        if object.location_kind != "container" { return false; }
+        current_id = object.location_id;
     }
 }
 
@@ -1423,7 +2037,9 @@ fn target_actor_in_room(ctx: &ReducerContext, room_id: &str, actor_id: &str, que
 }
 
 fn npc_disposition(npc: &Npc) -> &str {
-    npc.disposition.as_deref().filter(|value| !value.trim().is_empty()).unwrap_or("neutral")
+    npc.disposition.as_deref().filter(|value| !value.trim().is_empty()).unwrap_or_else(|| {
+        if npc.alias.as_deref().map(|alias| alias.eq_ignore_ascii_case("archie")).unwrap_or(false) { "friendly" } else { "neutral" }
+    })
 }
 
 fn region_for_room(ctx: &ReducerContext, room_id: &str) -> Option<Region> {
@@ -1660,6 +2276,17 @@ fn handle_rpg_command(
         list_stats(ctx, room_id, actor_id);
         return Ok(true);
     }
+    if matches!(lower.as_str(), "exits" | "directions") {
+        let exits = ctx.db.exit().iter()
+            .filter(|exit| exit.from_room.as_deref() == Some(room_id))
+            .map(|exit| {
+                let destination = exit.to_room.as_ref().and_then(|id| ctx.db.room().id().find(id)).map(|room| room.name).unwrap_or_else(|| "unknown destination".to_string());
+                format!("• {} → {}", exit.verb, destination)
+            })
+            .collect::<Vec<_>>();
+        rpg_message(ctx, room_id, actor_id, "system", if exits.is_empty() { "[EXITS]\n• None".to_string() } else { format!("[EXITS]\n{}", exits.join("\n")) });
+        return Ok(true);
+    }
     if matches!(lower.as_str(), "wait" | "pass") {
         rpg_message(ctx, room_id, actor_id, "system", "You wait and watch the world move around you.".to_string());
         return Ok(true);
@@ -1798,6 +2425,10 @@ fn handle_rpg_command(
         };
         if container.id == item.id {
             rpg_message(ctx, room_id, actor_id, "error", "An object cannot contain itself.".to_string());
+            return Ok(true);
+        }
+        if object_is_inside(ctx, &container.id, &item.id) {
+            rpg_message(ctx, room_id, actor_id, "error", "That would create an impossible container loop.".to_string());
             return Ok(true);
         }
         if container_definition.burn_rate > 0 {
@@ -2012,7 +2643,11 @@ pub fn submit_command(
     let (actor_name, actor_id, is_profile) = actor(ctx, &character_id)?;
     let world_actor_id = actor_id.clone();
     let world_actor_name = actor_name.clone();
-    let room_id = room_id.ok_or_else(|| "A room is required.".to_string())?;
+    let requested_room_id = room_id.ok_or_else(|| "A room is required.".to_string())?;
+    let room_id = actor_current_room(ctx, &actor_id).ok_or_else(|| "Your actor is not currently in a room.".to_string())?;
+    if requested_room_id != room_id {
+        return Err("The command room does not match your actor's current location.".to_string());
+    }
     let raw = raw.trim().to_string();
     ctx.db.command().insert(Command {
         id: command_id.clone(), owner: ctx.sender(), character_id: character_id.clone(), room_id: Some(room_id.clone()),
@@ -2095,7 +2730,13 @@ pub fn submit_command(
     } else if let Some(target) = raw.strip_prefix("inspect ") {
         let target = target.trim();
         let result = ctx.db.character().iter().find(|row| row.current_room.as_deref() == Some(room_id.as_str()) && row.name.eq_ignore_ascii_case(target));
-        let body = result.map(|row| format!("[{}]\n{}", row.name.to_uppercase(), row.description.unwrap_or_else(|| "A persona inhabiting the Arkyv.".to_string()))).unwrap_or_else(|| "No one by that name is here.".to_string());
+        let body = result.map(|row| format!("[{}]\n{}", row.name.to_uppercase(), row.description.unwrap_or_else(|| "A persona inhabiting the Arkyv.".to_string())))
+            .or_else(|| ctx.db.npc().iter().find(|npc| npc.current_room.as_deref() == Some(room_id.as_str()) && (npc.name.eq_ignore_ascii_case(target) || npc.alias.as_deref().map(|alias| alias.eq_ignore_ascii_case(target)).unwrap_or(false))).map(|npc| {
+                let disposition = npc_disposition(&npc).to_uppercase();
+                let movement = if npc.behavior_type.starts_with("patrol") { "patrolling" } else { "stationary" };
+                format!("[{} · {} · {}]\n{}", npc.name.to_uppercase(), disposition, movement, npc.description.unwrap_or_else(|| "You cannot discern much about them.".to_string()))
+            }))
+            .unwrap_or_else(|| "No one by that name is here.".to_string());
         add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", body, None, None);
     } else if let Some(rest) = raw.strip_prefix("whisper ") {
         let mut parts = rest.trim().splitn(2, ' ');

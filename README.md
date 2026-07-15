@@ -12,8 +12,10 @@ This repository uses **SpacetimeDB 2.0.1** for its authoritative backend. The pr
 - Rust reducers for commands, movement, profiles, characters, and world editing
 - AI-powered NPC conversations with OpenAI or Grok
 - Visual region, room, exit, NPC, and RPG systems editor
+- Admin-authored NPC patrol routes, friendly/neutral/hostile disposition, attack-on-sight behavior, combat cadence, and respawning
+- Region-level safe/PvP rules with configurable player recovery rooms
 - Admin-defined items, containers, fuel burners, weapons, armor, consumables, equipment slots, and hero stats
-- Authoritative inventory, equipment, fuel consumption, stat effects, and combat reducers
+- Authoritative inventory, equipment, fuel consumption, stat effects, combat, defeat, chest, and enemy-loot reducers
 - Local saved worlds backed by persistent SpacetimeDB identity tokens
 - Multiple characters per saved world
 - Optional RetroDiffusion room scenes, NPC portraits, and inventory item art
@@ -69,6 +71,7 @@ The output should report `spacetimedb tool version 2.0.1`.
 3. Configure `.env.local`:
 
    ```env
+   NEXT_PUBLIC_ARKYV_SITE_MODE=runtime
    NEXT_PUBLIC_SPACETIMEDB_URI=http://127.0.0.1:3000
    NEXT_PUBLIC_SPACETIMEDB_DB_NAME=arkyv-engine
 
@@ -104,6 +107,8 @@ The output should report `spacetimedb tool version 2.0.1`.
 
 The first identity connected to a fresh database becomes its administrator and can open `/admin`.
 
+`NEXT_PUBLIC_ARKYV_SITE_MODE=runtime` enables the saved-world, play, profile, and editor routes on self-hosted domains. A project/marketing deployment that does not provide world hosting should set it to `marketing`; those routes then redirect to the self-hosting guide and the browser never opens a SpacetimeDB connection. The canonical `arkyv.org` and `www.arkyv.org` hostnames always use marketing mode.
+
 ### Clean local reset
 
 To intentionally wipe all local Arkyv data and republish the module:
@@ -133,10 +138,10 @@ The Rust module in `spacetimedb/src/lib.rs` defines these public replicated tabl
 
 | Table | Purpose |
 | --- | --- |
-| `region` | Region metadata and color themes |
+| `region` | Region metadata, color themes, PvP policy, and defeat recovery room |
 | `room` | Locations, descriptions, images, and elevation |
 | `exit` | Directed room connections |
-| `npc` | NPC placement, personality, behavior, and portraits |
+| `npc` | Placement, personality, patrol, disposition, aggression, defeat, respawn, and portraits |
 | `profile` | One identity-owned saved-world profile |
 | `character` | Identity-owned player characters |
 | `command` | Private command audit and pending AI work |
@@ -146,6 +151,7 @@ The Rust module in `spacetimedb/src/lib.rs` defines these public replicated tabl
 | `object_definition` | Reusable item, container, fixture, weapon, armor, and consumable primitives |
 | `world_object` | Concrete objects placed in rooms, containers, inventories, or equipment slots |
 | `actor_stat` | Sparse character/NPC stat overrides; absent rows inherit definition defaults |
+| `loot_table_entry` | Independently rolled object drops for defeated NPCs |
 
 Reducers are the only write path. They validate identity ownership for profiles and characters, require admin status for world editing, process deterministic commands server-side, and complete AI NPC responses returned by the stateless Next.js AI route.
 
@@ -155,12 +161,19 @@ The frontend consumes generated bindings in `generated/`. The client data layer 
 
 Administrators can open `/admin` and use **RPG Systems Studio** to create game rules from reusable primitives. The built-in starter kit is optional and contains Health, Strength, Defense, firewood, a wooden box, a fuel-burning campfire, a sword, armor, and a healing potion. It can be installed repeatedly without overwriting edited definitions.
 
-The studio has four authoring surfaces:
+The studio has five authoring surfaces:
 
 - **Object primitives** define presentation and pixel-art imagery, portability, stacking, container capacity, fuel production/acceptance, elapsed-time burn rate, equipment slot, weapon and armor values, stat scaling, equipment modifiers, and consumable stat effects.
 - **Hero stats** define numeric ranges, defaults, visibility, and optional system roles. Combat discovers Health, Combat Power, and Defense through these roles, so display names and additional custom stats remain game-specific.
 - **Placed objects** instantiate a primitive in a room, actor inventory, equipment slot, or another container. Instance state includes quantity, durability, remaining fuel, active/burning state, and a JSON extension object.
+- **Enemy loot** assigns portable object definitions to NPCs with independent drop chances and minimum/maximum quantities.
 - **Actor values** optionally override defaults for a particular hero or NPC. Actors without overrides automatically use the stat definition defaults.
+
+Region dialogs define whether player-versus-player combat is allowed throughout that region and where defeated players recover. NPC dialogs define whether an NPC is friendly, neutral, or hostile; whether a hostile NPC attacks on sight; its attack and respawn timing; and an ordered patrol route. Patrol stops must be joined by directed exits. World behavior advances deterministically as players issue commands, and `wait` explicitly advances a turn without taking another action.
+
+Friendly NPCs cannot be attacked. Neutral NPCs can be attacked and retaliate. Hostile NPCs may attack automatically when configured. On defeat, players keep their inventory, recover their authored base health, and move to the region recovery room. Defeated NPCs leave authored drops in the room and either remain defeated or return to their spawn room after their configured delay.
+
+Chests use the same primitives as every other container: place a container instance in a room, then place object instances inside it. Players can inspect the chest, take individual contents, or collect all portable contents. No separate chest-only item model is required.
 
 Fuel burners consume fuel according to elapsed server time whenever their state is observed or changed. Fuel objects declare a fuel value and tags; burners declare accepted tags and a burn rate. For example, putting a `fuel`-tagged log into a campfire converts the stack into fuel time, and the campfire remains burning until that fuel is exhausted or it is extinguished.
 
@@ -172,14 +185,22 @@ stats                         show visible hero stats and equipment bonuses
 take <item>                   move a portable room object into inventory
 drop <item>                   place a carried object in the current room
 examine <object>              inspect state, fuel, or container contents
+open <container>              inspect a chest or other container
+loot                          list portable room drops
+loot <container>              inspect lootable container contents
 put <item> in <container>     store an item or add accepted fuel
 take <item> from <container>  retrieve a contained item
+take all from <container>     collect every portable contained item
 equip <item>                  equip it in its admin-defined slot
 unequip <item-or-slot>        return equipped gear to inventory
 light <object>                start a fueled burner
 extinguish <object>           stop burning without discarding fuel
 use <item>                    apply its configured stat effect
 attack <target>               resolve configured stats, weapon, and armor
+combat                        show zone PvP rules and visible enemies
+rest                          restore base health when no hostile is present
+wait                          pass a turn and advance NPC behavior
+flee <direction>              leave combat through an authored exit
 ```
 
 All runtime mutations occur in the Rust module. The browser only sends commands and renders replicated state; it does not calculate authoritative damage, fuel, inventory ownership, or stat changes.
@@ -193,7 +214,11 @@ npm run lint                      # ESLint
 npm run spacetime:check           # Check the Rust module
 npm run spacetime:deploy          # Publish and regenerate bindings
 npm run spacetime:deploy:clean    # Wipe, publish, and regenerate bindings
+npm run smoke:rpg:compile         # Compile the isolated RPG reducer smoke test
+npm run smoke:rpg                 # Run it against arkyv-engine-runtime-test
 ```
+
+The smoke test expects a fresh local database named `arkyv-engine-runtime-test`. Publish the module to that name before running it, then delete the test database afterward. It verifies authoritative room checks, safe and open PvP, chest pickup, patrol movement, hostile attacks, player recovery, and enemy drops without touching the main `arkyv-engine` world.
 
 The PowerShell deploy scripts invoke the installed Windows CLI at `SpacetimeDB/bin/2.0.1`. On macOS or Linux, run the equivalent commands directly:
 
@@ -228,6 +253,7 @@ lib/
   savedWorlds.js         localStorage registry for named identity tokens
   spacetimedbClient.js   connection, subscriptions, and query adapter
 pages/                   Next.js pages and stateless AI/image routes
+scripts/                 Isolated end-to-end RPG runtime smoke test
 spacetimedb/
   Cargo.toml             Rust module pinned to SpacetimeDB 2.0.1
   src/lib.rs             Tables, authorization, reducers, and seed data

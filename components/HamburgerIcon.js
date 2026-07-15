@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/contexts/AuthContext';
+import useMarketingSite from '@/lib/useMarketingSite';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faHome,
@@ -19,6 +20,7 @@ export default function HamburgerIcon() {
   const panelRef = useRef(null);
   const router = useRouter();
   const { user, profile, activeWorld, signOut } = useAuth();
+  const marketingSite = useMarketingSite();
 
   React.useEffect(() => {
     const handleEsc = (event) => {
@@ -94,15 +96,15 @@ export default function HamburgerIcon() {
         >
           <div className="mb-2 rounded-xl border border-slate-800 bg-black/25 p-3">
             <p className="text-[0.58rem] font-semibold uppercase tracking-[0.24em] text-cyan-300/70">Arkyv Engine</p>
-            <p className="mt-1 truncate text-sm font-semibold text-slate-100">{activeWorld?.name || 'World maker'}</p>
-            <p className="mt-0.5 text-xs text-slate-500">{user ? 'Saved locally in this browser' : 'Select a saved world to begin'}</p>
+            <p className="mt-1 truncate text-sm font-semibold text-slate-100">{marketingSite ? 'Open-source world engine' : (activeWorld?.name || 'World maker')}</p>
+            <p className="mt-0.5 text-xs text-slate-500">{marketingSite ? 'Self-host Arkyv to build and play' : (user ? 'Saved locally in this browser' : 'Select a saved world to begin')}</p>
           </div>
 
           <nav className="space-y-1">
             <button type="button" onClick={() => go('/')} className={navClass('/')}><FontAwesomeIcon icon={faHome} className="h-4 w-4 text-slate-500" /><span>Home</span></button>
             <button type="button" onClick={() => go('/setup')} className={navClass('/setup')}><FontAwesomeIcon icon={faBook} className="h-4 w-4 text-slate-500" /><span>Setup guide</span></button>
 
-            {user ? (
+            {!marketingSite && (user ? (
               <>
                 <button type="button" onClick={() => go('/play')} className={navClass('/play', 'primary')}><FontAwesomeIcon icon={faGamepad} className="h-4 w-4" /><span>Play world</span></button>
                 {profile?.is_admin && <button type="button" onClick={() => go('/admin')} className={navClass('/admin')}><FontAwesomeIcon icon={faShield} className="h-4 w-4 text-slate-500" /><span>World editor</span></button>}
@@ -111,7 +113,7 @@ export default function HamburgerIcon() {
               </>
             ) : (
               <button type="button" onClick={() => go('/auth')} className={navClass('/auth', 'primary')}><FontAwesomeIcon icon={faRightToBracket} className="h-4 w-4" /><span>Choose saved world</span></button>
-            )}
+            ))}
           </nav>
 
           <div className="mt-2 border-t border-slate-800 pt-2">
