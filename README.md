@@ -246,7 +246,7 @@ The Rust module in `spacetimedb/src/lib.rs` defines these public replicated tabl
 | `character_option_definition` / `character_option_grant` | Race, class, and background choices with starting stats, items, abilities, gold, and rooms |
 | `currency_definition` / `actor_currency` | Authored currencies and actor balances |
 | `vendor_definition` / `vendor_stock` | NPC shops, prices, stock, buyback, and reputation access |
-| `crafting_recipe` / `crafting_ingredient` | Crafting outputs, stations, levels, costs, and materials |
+| `crafting_recipe` / `crafting_ingredient` / `crafting_batch` | Immediate crafting plus timed cooking/processing inside authored station containers |
 | `admin_role_definition` / `admin_role_assignment` | Permission keys and saved-world administrator assignments |
 | `spawn_point` | Named initial-entry and respawn locations with eligibility and priority |
 | `world_lifecycle_config` | World-wide initial spawn, death, loss, recovery, protection, and hardcore rules |
@@ -270,14 +270,14 @@ Administrators can open `/admin` and use **RPG Systems Studio** to create game r
 
 The studio includes these authoring surfaces:
 
-- **Object primitives** define presentation and pixel-art imagery, portability, stacking, container capacity, fuel production/acceptance, elapsed-time burn rate, wearable slot, weapon damage, armor, basic-attack cooldown, inventory-slot bonuses, stat scaling, equipment modifiers, and consumable effects.
+- **Object primitives** define presentation and pixel-art imagery, portability, stacking, container capacity, fuel production/acceptance, elapsed-time burn rate, base merchant value and tradeability, wearable slot, weapon damage, armor, basic-attack cooldown, inventory-slot bonuses, stat scaling, equipment modifiers, and consumable effects.
 - **Hero stats** define numeric ranges, level-one bases, per-level gains, passive regeneration, visibility, and optional Health, Mana, Energy, Focus, Combat Power, and Defense roles. Additional resources and attributes can remain fully custom.
 - **Abilities & magic** defines learning, targeting, cost and cast pacing, followed by an ordered effect composer for direct/periodic damage or healing, resources, buffs/debuffs, stuns, interrupts, cleanses, area scopes, teleports, revives, and summons.
 - **Combat rules** controls hit, critical damage, dodge, parry, block, armor effectiveness, school resistance, PvP scaling, global cooldown, NPC threat, and assist XP.
 - **Factions & reputation** define starting/minimum/maximum reputation, hostile and friendly thresholds, reputation lost for attacks and kills, and direct actor-standing adjustments for moderation.
 - **Quests** defines giver and turn-in NPCs, prerequisites, timers, death failure, completion limits, branches, follow-ups, objective sequences, consumption, and XP/gold/reputation/item rewards.
 - **Character creation** defines races, classes, and backgrounds with structured stat, item, ability, gold, and starting-room grants.
-- **Economy** defines currencies, NPC vendors and stock, buyback, reputation gates, recipes, ingredients, level requirements, currency costs, and station tags.
+- **Economy** defines currencies, NPC vendors and stock, buyback, reputation gates, immediate recipes, and timed cooking/processing recipes. A timed recipe selects its ingredient items, exact station container (campfire, furnace, oven, and so on), elapsed duration, active-station requirement, output, and the output item's base merchant value.
 - **Admin roles** assigns explicit permissions to saved-world profiles. An unassigned founding administrator remains the unrestricted owner.
 - **Spawn & death** creates named entry/recovery points and configures origin/faction/death-region eligibility, graph-nearest/fixed/priority/random respawn, finite lives, lootable corpses, ability revival, delays, protection, losses, restoration, quest/wanted resets, and hardcore mode.
 - **Levels & inventory** defines the level cap, XP needed for level two, percentage threshold growth, stat points per level, base inventory slots, and slots gained per level. A live preview shows the first ten thresholds, and actor levels can be adjusted for testing or moderation.
@@ -285,7 +285,7 @@ The studio includes these authoring surfaces:
 - **Placed objects** instantiate a primitive in a room, actor inventory, equipment slot, or another container. Instance state includes quantity, durability, remaining fuel, active/burning state, and a JSON extension object.
 - **Enemy loot** assigns portable object definitions to NPCs with independent drop chances and minimum/maximum quantities.
 - **Actor values** optionally override defaults for a particular hero or NPC. Actors without overrides automatically use the stat definition defaults.
-- **Engine systems** adds JSON-assisted, reducer-validated editors for talent rules, item policy, banks, restocking, professions, recipe learning, dialogue trees, door rules, triggers, simulation, content health, snapshots/import, moderation, reports, balances, and administrator audit history. The tab and its individual systems are filtered by the current administrator role.
+- **Engine systems** adds visual, reducer-validated fields for talent rules, item policy, banks, restocking, professions, recipe learning, dialogue trees, door rules, triggers, and simulation, with an optional expert JSON view. It also provides content health, complete world-content snapshots/import, moderation, reports, balances, and administrator audit history. The tab and its individual systems are filtered by the current administrator role.
 
 The XP requirement for each level starts at `base_xp` and is multiplied by `100% + growth_percent` for each subsequent level. XP is stored as progress within the current level, so changing the curve does not rewrite historical totals. When an NPC is defeated, its authored XP reward goes to the defeating player; crossing one or more thresholds applies every stat's per-level gain and reveals auto-learned abilities.
 
@@ -340,7 +340,8 @@ talents / learn <ability>       inspect and spend authored talent points
 respec talents                  refund talent-spent abilities
 respond <choice>                continue an authored NPC dialogue
 open/close/lock/unlock <exit>   interact with an authored door
-recipes / craft <recipe>      inspect and execute authored crafting recipes
+recipes / craft <recipe>      inspect recipes or execute an immediate recipe
+cook <recipe> in <station>    process ingredients placed inside a station over time
 take <item>                   move a portable room object into inventory
 drop <item>                   place a carried object in the current room
 examine <object>              inspect state, fuel, or container contents

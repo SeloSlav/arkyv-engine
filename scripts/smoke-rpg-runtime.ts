@@ -88,6 +88,7 @@ async function main() {
                     'SELECT * FROM my_trade_sessions', 'SELECT * FROM my_trade_offers',
                     'SELECT * FROM bank_config', 'SELECT * FROM object_rule', 'SELECT * FROM vendor_restock_rule',
                     'SELECT * FROM profession_definition', 'SELECT * FROM recipe_rule', 'SELECT * FROM actor_profession', 'SELECT * FROM actor_learned_recipe',
+                    'SELECT * FROM crafting_batch',
                     'SELECT * FROM dialogue_node', 'SELECT * FROM dialogue_choice', 'SELECT * FROM actor_dialogue_state',
                     'SELECT * FROM exit_rule', 'SELECT * FROM world_trigger', 'SELECT * FROM content_issue',
                 ]);
@@ -183,6 +184,44 @@ async function main() {
         await command('runtime-talk-greeter-first', 'talk greeter');
         await command('runtime-talk-greeter-second', 'talk greeter');
         assert([...connection.db.room_message.iter()].filter((row: any) => row.body.includes('Runtime Greeter: "The road is quiet today."')).length === 2, 'A one-line authored dialogue did not repeat on each conversation.');
+
+        await insert('object_definitions', [
+            { id: 'runtime-raw-fish', name: 'Raw Runtime Fish', description: 'An uncooked test ingredient.', primitive_kind: 'item', icon: '◇', portable: true, stackable: true, max_stack: 10 },
+            { id: 'runtime-cooked-fish', name: 'Cooked Runtime Fish', description: 'A finished test meal.', primitive_kind: 'consumable', icon: '◇', portable: true, stackable: true, max_stack: 10 },
+            { id: 'runtime-oven', name: 'Runtime Oven', description: 'A fueled timed-processing station.', primitive_kind: 'fixture', icon: '◇', portable: false, capacity: 4, burn_rate: 1, accepted_fuel_tags: ['fuel'] },
+        ]);
+        await insert('crafting_recipes', {
+            id: 'runtime-cooked-fish-recipe', name: 'Runtime Cooked Fish', description: 'Cooks one fish over time.',
+            output_definition_id: 'runtime-cooked-fish', output_quantity: 1, station_definition_id: 'runtime-oven',
+            process_seconds: 1, requires_active_station: true, required_level: 1, currency_cost: 0, active: true,
+        });
+        await insert('crafting_ingredients', { id: 'runtime-cooked-fish-input', recipe_id: 'runtime-cooked-fish-recipe', definition_id: 'runtime-raw-fish', quantity: 1, consumed: true });
+        await insert('world_objects', [
+            { id: 'runtime-oven-instance', definition_id: 'runtime-oven', location_kind: 'room', location_id: roomA, quantity: 1 },
+            { id: 'runtime-raw-fish-instance', definition_id: 'runtime-raw-fish', location_kind: 'inventory', location_id: heroId, quantity: 1 },
+            { id: 'runtime-cooking-fuel', definition_id: 'wood', location_kind: 'inventory', location_id: heroId, quantity: 1 },
+        ]);
+        await command('runtime-fuel-oven', 'put Firewood in Runtime Oven');
+        await command('runtime-load-oven', 'put Raw Runtime Fish in Runtime Oven');
+        await command('runtime-light-oven', 'light Runtime Oven');
+        await command('runtime-start-cooking', 'cook Runtime Cooked Fish in Runtime Oven');
+        assert([...connection.db.crafting_batch.iter()].some((row: any) => row.stationObjectId === 'runtime-oven-instance'), 'Timed cooking did not start after ingredients were placed in the configured station.');
+        assert(![...connection.db.world_object.iter()].some((row: any) => row.id === 'runtime-raw-fish-instance'), 'Timed cooking did not consume the placed ingredient.');
+        await command('runtime-pause-cooking', 'extinguish Runtime Oven');
+        await delay(1_100);
+        await command('runtime-check-paused-cooking', 'wait');
+        assert(![...connection.db.world_object.iter()].some((row: any) => row.definitionId === 'runtime-cooked-fish'), 'Cooking progressed while its required station was inactive.');
+        await command('runtime-resume-cooking', 'light Runtime Oven');
+        await delay(1_100);
+        await command('runtime-finish-cooking', 'wait');
+        await waitFor(() => [...connection.db.world_object.iter()].some((row: any) => row.definitionId === 'runtime-cooked-fish' && row.locationKind === 'container' && row.locationId === 'runtime-oven-instance'), 'timed cooking output');
+        await connection.reducers.configureEngineRecord({ tableName: 'object_rules', payloadJson: JSON.stringify({ definition_id: 'runtime-cooked-fish', rarity: 'common', item_level: 1, required_level: 1, maximum_durability: 100, base_value: 20, repairable: true, two_handed: false, bind_rule: 'none', tradeable: true }) });
+        await insert('vendor_definitions', { id: 'runtime-cook-vendor', npc_id: 'runtime-mentor', name: 'Runtime Cook Vendor', currency_id: 'gold', buys_from_players: true, sell_price_percent: 50, required_reputation: 0 });
+        await command('runtime-take-cooked-fish', 'take Cooked Runtime Fish from Runtime Oven');
+        const cookingGoldBefore = [...connection.db.actor_wallet.iter()].find((row: any) => row.actorId === heroId)?.gold || 0;
+        await command('runtime-sell-cooked-fish', 'sell Cooked Runtime Fish to Runtime Cook Vendor');
+        const cookingGoldAfter = [...connection.db.actor_wallet.iter()].find((row: any) => row.actorId === heroId)?.gold || 0;
+        assert(cookingGoldAfter === cookingGoldBefore + 10, `Base merchant value did not sell at the vendor percentage (expected +10, got +${cookingGoldAfter - cookingGoldBefore}).`);
 
         await command('runtime-safe-pvp', 'attack Runtime Rival');
         const safeHealth = [...connection.db.actor_stat.iter()].find((row: any) => row.id === `${rivalId}::health`)?.currentValue;

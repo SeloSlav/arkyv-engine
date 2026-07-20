@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "strict": false
   },
-  "include": ["scripts/smoke-rpg-runtime.ts", "generated/**/*.ts"]
+  "include": ["scripts/smoke-rpg-runtime.ts", "scripts/smoke-cooking-runtime.ts", "scripts/smoke-admin-runtime.ts", "generated/**/*.ts"]
 }

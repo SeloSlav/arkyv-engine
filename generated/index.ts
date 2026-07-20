@@ -94,6 +94,7 @@ import CharacterOptionDefinitionRow from "./character_option_definition_table";
 import CharacterOptionGrantRow from "./character_option_grant_table";
 import CommandRow from "./command_table";
 import ContentIssueRow from "./content_issue_table";
+import CraftingBatchRow from "./crafting_batch_table";
 import CraftingIngredientRow from "./crafting_ingredient_table";
 import CraftingRecipeRow from "./crafting_recipe_table";
 import CurrencyDefinitionRow from "./currency_definition_table";
@@ -516,6 +517,17 @@ const tablesSchema = __schema({
       { name: 'content_issue_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ContentIssueRow),
+  crafting_batch: __table({
+    name: 'crafting_batch',
+    indexes: [
+      { name: 'station_object_id', algorithm: 'btree', columns: [
+        'stationObjectId',
+      ] },
+    ],
+    constraints: [
+      { name: 'crafting_batch_station_object_id_key', constraint: 'unique', columns: ['stationObjectId'] },
+    ],
+  }, CraftingBatchRow),
   crafting_ingredient: __table({
     name: 'crafting_ingredient',
     indexes: [

@@ -5,7 +5,7 @@ import EngineSystemsEditor from '@/components/admin/EngineSystemsEditor';
 const PRIMITIVE_PRESETS = [
     { kind: 'item', label: 'Item', icon: '◇', description: 'Portable building block or crafting material.', portable: true, stackable: true, max_stack: 20 },
     { kind: 'container', label: 'Container', icon: '📦', description: 'Stores other object instances.', portable: true, capacity: 12 },
-    { kind: 'fixture', label: 'Fuel burner', icon: '🔥', description: 'Burns accepted fuel over elapsed real time.', portable: false, burn_rate: 1, accepted_fuel_tags: 'fuel' },
+    { kind: 'fixture', label: 'Fuel burner', icon: '🔥', description: 'Burns accepted fuel and can process ingredients over elapsed real time.', portable: false, capacity: 4, burn_rate: 1, accepted_fuel_tags: 'fuel' },
     { kind: 'weapon', label: 'Weapon', icon: '⚔️', description: 'Equippable object that contributes attack damage.', portable: true, equipment_slot: 'main-hand', weapon_damage: 4 },
     { kind: 'armor', label: 'Armor', icon: '🛡️', description: 'Equippable object that reduces incoming damage.', portable: true, equipment_slot: 'body', armor_value: 2 },
     { kind: 'consumable', label: 'Consumable', icon: '🧪', description: 'Applies a configured stat change when used.', portable: true, stackable: true, max_stack: 10 },
@@ -46,7 +46,7 @@ const emptyDefinition = () => ({
     id: '', name: '', description: '', primitive_kind: 'item', icon: '◇', image_url: '', tags: '', portable: true,
     stackable: false, max_stack: 1, capacity: 0, equipment_slot: '', weapon_damage: 0, armor_value: 0,
     scales_with_stat: '', attack_cooldown_ms: 2000, inventory_slots_bonus: 0, fuel_value: 0, burn_rate: 0, accepted_fuel_tags: '', stat_modifiers: '{}',
-    use_stat_id: '', use_delta: 0, use_consume: true,
+    use_stat_id: '', use_delta: 0, use_consume: true, base_value: 0, tradeable: true,
 });
 
 const emptyStat = () => ({ id: '', name: '', description: '', role: '', minimum: 0, maximum: 100, default_value: 10, per_level_gain: 0, regeneration_per_second: 0, player_allocatable: true, point_cost: 1, points_per_rank: 1, visible: true });
@@ -71,7 +71,12 @@ const emptyCharacterGrant = () => ({ id: '', option_id: '', grant_kind: 'stat', 
 const emptyCurrency = () => ({ id: '', name: '', icon: '¤', maximum_balance: 1000000, tradeable: true });
 const emptyVendor = () => ({ id: '', npc_id: '', name: '', currency_id: 'gold', buys_from_players: true, sell_price_percent: 50, required_faction_id: '', required_reputation: 0 });
 const emptyVendorStock = () => ({ id: '', vendor_id: '', definition_id: '', price: 1, stock: -1, maximum_per_purchase: 99 });
-const emptyRecipe = () => ({ id: '', name: '', description: '', output_definition_id: '', output_quantity: 1, station_tag: '', required_level: 1, currency_id: '', currency_cost: 0, active: true });
+const emptyRecipe = () => ({
+    id: '', name: '', description: '', output_definition_id: '', output_quantity: 1, station_tag: '',
+    station_definition_id: '', process_seconds: 0, requires_active_station: false,
+    required_level: 1, currency_id: '', currency_cost: 0, active: true,
+    output_base_value: 0, output_tradeable: true,
+});
 const emptyIngredient = () => ({ id: '', recipe_id: '', definition_id: '', quantity: 1, consumed: true });
 const emptyRole = () => ({ id: '', name: '', description: '', permissions: ['world.manage'] });
 const emptyRoleAssignment = () => ({ profile_id: '', role_id: '' });
@@ -100,7 +105,25 @@ function jsonObject(value, fallback = {}) {
     return fallback;
 }
 
-function definitionToForm(definition) {
+function objectRulePayload(definitionId, values = {}, existing = {}) {
+    return {
+        definition_id: definitionId,
+        rarity: existing.rarity || 'common',
+        item_level: Math.max(1, Number(existing.item_level) || 1),
+        required_level: Math.max(1, Number(existing.required_level) || 1),
+        required_option_id: existing.required_option_id || null,
+        maximum_durability: Math.max(0, Number(existing.maximum_durability) || 100),
+        base_value: Math.max(0, Number(values.base_value ?? existing.base_value) || 0),
+        repairable: existing.repairable !== false,
+        two_handed: Boolean(existing.two_handed),
+        weapon_type: existing.weapon_type || null,
+        damage_school: existing.damage_school || null,
+        bind_rule: existing.bind_rule || 'none',
+        tradeable: values.tradeable ?? existing.tradeable ?? true,
+    };
+}
+
+function definitionToForm(definition, objectRule) {
     const onUse = jsonObject(definition.on_use);
     return {
         ...emptyDefinition(),
@@ -114,6 +137,8 @@ function definitionToForm(definition) {
         use_stat_id: onUse.stat_id || '',
         use_delta: onUse.delta || 0,
         use_consume: onUse.consume !== false,
+        base_value: objectRule?.base_value || 0,
+        tradeable: objectRule?.tradeable !== false,
     };
 }
 
@@ -193,6 +218,7 @@ export default function RpgSystemsEditor({ enabled, currentProfile }) {
     const [vendorStocks, setVendorStocks] = useState([]);
     const [recipes, setRecipes] = useState([]);
     const [ingredients, setIngredients] = useState([]);
+    const [objectRules, setObjectRules] = useState([]);
     const [adminRoles, setAdminRoles] = useState([]);
     const [adminAssignments, setAdminAssignments] = useState([]);
     const [adminRolesLoaded, setAdminRolesLoaded] = useState(false);
@@ -283,6 +309,7 @@ export default function RpgSystemsEditor({ enabled, currentProfile }) {
     ].sort((left, right) => left.label.localeCompare(right.label)), [characters, npcs, profiles]);
 
     const definitionsById = useMemo(() => new Map(definitions.map((definition) => [definition.id, definition])), [definitions]);
+    const objectRulesById = useMemo(() => new Map(objectRules.map((rule) => [rule.definition_id, rule])), [objectRules]);
     const roomsById = useMemo(() => new Map(rooms.map((room) => [room.id, room])), [rooms]);
     const actorsById = useMemo(() => new Map(actors.map((actor) => [actor.id, actor])), [actors]);
     const instancesById = useMemo(() => new Map(instances.map((instance) => [instance.id, instance])), [instances]);
@@ -333,6 +360,7 @@ export default function RpgSystemsEditor({ enabled, currentProfile }) {
             spacetime.from('crafting_ingredients').select('*'),
             spacetime.from('admin_role_definitions').select('*').order('name'),
             spacetime.from('admin_role_assignments').select('*'),
+            spacetime.from('object_rules').select('*'),
         ]);
         const firstError = results.find((result) => result.error)?.error;
         if (firstError) throw firstError;
@@ -385,6 +413,7 @@ export default function RpgSystemsEditor({ enabled, currentProfile }) {
         setIngredients(results[40].data || []);
         setAdminRoles(results[41].data || []);
         setAdminAssignments(results[42].data || []);
+        setObjectRules(results[43].data || []);
         setAdminRolesLoaded(true);
     }, [enabled, spacetime]);
 
@@ -455,9 +484,17 @@ export default function RpgSystemsEditor({ enabled, currentProfile }) {
         try { payload = definitionPayload(definitionForm); } catch (error) { setMessage({ type: 'error', text: error.message }); return; }
         if (!payload.id || !payload.name) { setMessage({ type: 'error', text: 'Object id and name are required.' }); return; }
         const ok = await run(
-            () => editingDefinition
-                ? spacetime.from('object_definitions').update(payload).eq('id', editingDefinition).select()
-                : spacetime.from('object_definitions').insert(payload).select(),
+            async () => {
+                const definitionResult = editingDefinition
+                    ? await spacetime.from('object_definitions').update(payload).eq('id', editingDefinition).select()
+                    : await spacetime.from('object_definitions').insert(payload).select();
+                if (definitionResult?.error) return definitionResult;
+                return spacetime.configureEngineRecord('object_rules', objectRulePayload(
+                    payload.id,
+                    { base_value: definitionForm.base_value, tradeable: definitionForm.tradeable },
+                    objectRulesById.get(payload.id),
+                ));
+            },
             editingDefinition ? 'Object primitive updated.' : 'Object primitive created.',
         );
         if (ok) { setEditingDefinition(null); setDefinitionForm(emptyDefinition()); }
@@ -631,9 +668,36 @@ export default function RpgSystemsEditor({ enabled, currentProfile }) {
         if (await saveManagedRow('vendor_stocks', payload, null, 'Vendor stock')) setVendorStockForm({ ...emptyVendorStock(), vendor_id: payload.vendor_id });
     };
     const saveRecipe = async () => {
-        const payload = { ...recipeForm, id: recipeForm.id.trim(), name: recipeForm.name.trim(), station_tag: recipeForm.station_tag || null, currency_id: recipeForm.currency_id || null, output_quantity: Math.max(1, Number(recipeForm.output_quantity) || 1), required_level: Math.max(1, Number(recipeForm.required_level) || 1), currency_cost: Math.max(0, Number(recipeForm.currency_cost) || 0) };
+        const processSeconds = Math.max(0, Number(recipeForm.process_seconds) || 0);
+        const recipeFields = { ...recipeForm };
+        delete recipeFields.output_base_value;
+        delete recipeFields.output_tradeable;
+        const payload = {
+            ...recipeFields,
+            id: recipeForm.id.trim(),
+            name: recipeForm.name.trim(),
+            station_tag: processSeconds > 0 ? null : (recipeForm.station_tag || null),
+            station_definition_id: processSeconds > 0 ? (recipeForm.station_definition_id || null) : null,
+            process_seconds: processSeconds,
+            requires_active_station: processSeconds > 0 && Boolean(recipeForm.requires_active_station),
+            currency_id: recipeForm.currency_id || null,
+            output_quantity: Math.max(1, Number(recipeForm.output_quantity) || 1),
+            required_level: Math.max(1, Number(recipeForm.required_level) || 1),
+            currency_cost: Math.max(0, Number(recipeForm.currency_cost) || 0),
+        };
         if (!payload.id || !payload.name || !payload.output_definition_id) { setMessage({ type: 'error', text: 'Recipe id, name, and output are required.' }); return; }
-        const ok = await saveManagedRow('crafting_recipes', payload, editingRecipe ? { key: 'id', value: editingRecipe } : null, 'Recipe');
+        if (processSeconds > 0 && !payload.station_definition_id) { setMessage({ type: 'error', text: 'Timed recipes require a station container.' }); return; }
+        const ok = await run(async () => {
+            const recipeResult = editingRecipe
+                ? await spacetime.from('crafting_recipes').update(payload).eq('id', editingRecipe).select()
+                : await spacetime.from('crafting_recipes').insert(payload).select();
+            if (recipeResult?.error) return recipeResult;
+            return spacetime.configureEngineRecord('object_rules', objectRulePayload(
+                payload.output_definition_id,
+                { base_value: recipeForm.output_base_value, tradeable: recipeForm.output_tradeable },
+                objectRulesById.get(payload.output_definition_id),
+            ));
+        }, editingRecipe ? 'Recipe updated.' : 'Recipe created.');
         if (ok) { setEditingRecipe(payload.id); setIngredientForm((value) => ({ ...value, recipe_id: payload.id })); }
     };
     const saveIngredient = async () => {
@@ -959,7 +1023,7 @@ export default function RpgSystemsEditor({ enabled, currentProfile }) {
                             <div className="mb-3 flex items-center justify-between"><h3 className="text-xs uppercase tracking-[0.24em] text-slate-300">Definitions</h3><span className="text-xs text-slate-500">{definitions.length}</span></div>
                             <div className="max-h-[560px] space-y-2 overflow-y-auto pr-1">
                                 {definitions.map((definition) => (
-                                    <button key={definition.id} type="button" aria-pressed={editingDefinition === definition.id} onClick={() => { setEditingDefinition(definition.id); setDefinitionForm(definitionToForm(definition)); }} className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition ${editingDefinition === definition.id ? 'border-purple-300 bg-purple-500/15' : 'border-slate-700/70 bg-slate-950/40 hover:border-slate-500'}`}>
+                                    <button key={definition.id} type="button" aria-pressed={editingDefinition === definition.id} onClick={() => { setEditingDefinition(definition.id); setDefinitionForm(definitionToForm(definition, objectRulesById.get(definition.id))); }} className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition ${editingDefinition === definition.id ? 'border-purple-300 bg-purple-500/15' : 'border-slate-700/70 bg-slate-950/40 hover:border-slate-500'}`}>
                                         <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-700 bg-black/40 text-xl">{definition.image_url ? <img src={definition.image_url} alt="" className="h-full w-full object-cover [image-rendering:pixelated]" /> : definition.icon}</span><span className="min-w-0"><span className="block truncate text-sm text-slate-100">{definition.name}</span><span className="mt-1 block truncate text-[0.62rem] uppercase tracking-[0.18em] text-slate-500">{definition.primitive_kind} · {definition.id}</span></span>
                                     </button>
                                 ))}
@@ -989,13 +1053,14 @@ export default function RpgSystemsEditor({ enabled, currentProfile }) {
                             <Field label="Primitive type"><select className={inputClass} value={definitionForm.primitive_kind} onChange={(e) => setDefinitionForm((value) => ({ ...value, primitive_kind: e.target.value }))}>{PRIMITIVE_PRESETS.map((preset) => <option key={preset.kind} value={preset.kind}>{preset.label}</option>)}</select></Field>
                             <Field label="Tags (comma separated)"><input className={inputClass} value={definitionForm.tags} onChange={(e) => setDefinitionForm((value) => ({ ...value, tags: e.target.value }))} placeholder="fuel, wood, crafting" /></Field>
                         </div>
-                        <div className="grid gap-2 sm:grid-cols-2"><Check label="Portable" checked={definitionForm.portable} onChange={(portable) => setDefinitionForm((value) => ({ ...value, portable }))} /><Check label="Stackable" checked={definitionForm.stackable} onChange={(stackable) => setDefinitionForm((value) => ({ ...value, stackable }))} /></div>
+                        <div className="grid gap-2 sm:grid-cols-3"><Check label="Portable" checked={definitionForm.portable} onChange={(portable) => setDefinitionForm((value) => ({ ...value, portable }))} /><Check label="Stackable" checked={definitionForm.stackable} onChange={(stackable) => setDefinitionForm((value) => ({ ...value, stackable }))} /><Check label="Merchants may buy this" checked={definitionForm.tradeable} onChange={(tradeable) => setDefinitionForm((value) => ({ ...value, tradeable }))} /></div>
                         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                             <Field label="Max stack"><input type="number" min="1" className={inputClass} value={definitionForm.max_stack} onChange={(e) => setDefinitionForm((value) => ({ ...value, max_stack: e.target.value }))} /></Field>
                             <Field label="Container slots"><input type="number" min="0" className={inputClass} value={definitionForm.capacity} onChange={(e) => setDefinitionForm((value) => ({ ...value, capacity: e.target.value }))} /></Field>
                             <Field label="Fuel value (seconds)"><input type="number" min="0" className={inputClass} value={definitionForm.fuel_value} onChange={(e) => setDefinitionForm((value) => ({ ...value, fuel_value: e.target.value }))} /></Field>
                             <Field label="Burn rate / second"><input type="number" min="0" className={inputClass} value={definitionForm.burn_rate} onChange={(e) => setDefinitionForm((value) => ({ ...value, burn_rate: e.target.value }))} /></Field>
                         </div>
+                        <Field label="Base merchant value"><input type="number" min="0" className={inputClass} value={definitionForm.base_value} onChange={(e) => setDefinitionForm((value) => ({ ...value, base_value: e.target.value }))} /></Field><p className="-mt-3 text-xs leading-5 text-slate-500">A buying merchant pays this value multiplied by that merchant&apos;s player sell percentage. A merchant-specific stock price overrides it.</p>
                         <Field label="Accepted fuel tags"><input className={inputClass} value={definitionForm.accepted_fuel_tags} onChange={(e) => setDefinitionForm((value) => ({ ...value, accepted_fuel_tags: e.target.value }))} placeholder="fuel, oil" /></Field>
                         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                             <Field label="Equipment slot"><select className={inputClass} value={definitionForm.equipment_slot} onChange={(e) => setDefinitionForm((value) => ({ ...value, equipment_slot: e.target.value }))}><option value="">Not equippable</option>{definitionForm.equipment_slot && !equipmentSlots.some((slot) => slot.id === definitionForm.equipment_slot) && <option value={definitionForm.equipment_slot}>{definitionForm.equipment_slot} (legacy)</option>}{equipmentSlots.map((slot) => <option key={slot.id} value={slot.id}>{slot.name} · {slot.capacity} item{slot.capacity === 1 ? '' : 's'}</option>)}</select></Field>
@@ -1149,7 +1214,84 @@ export default function RpgSystemsEditor({ enabled, currentProfile }) {
                     <div className="grid gap-6 xl:grid-cols-3">
                         <div className="space-y-4 rounded-xl border border-slate-700 bg-slate-950/35 p-4"><h3 className="text-sm uppercase tracking-[0.22em] text-emerald-200">Currencies</h3><div className="flex flex-wrap gap-2"><span className="rounded-full border border-amber-400/30 px-3 py-1 text-xs text-amber-200">gold · built in</span>{currencies.map((currency) => <button key={currency.id} type="button" onClick={() => { setEditingCurrency(currency.id); setCurrencyForm({ ...emptyCurrency(), ...currency }); }} className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">{currency.icon} {currency.name}</button>)}</div><div className="grid grid-cols-[70px_1fr] gap-3"><Field label="Icon"><input className={inputClass} value={currencyForm.icon} onChange={(event) => setCurrencyForm((value) => ({ ...value, icon: event.target.value }))} /></Field><Field label="Name"><input className={inputClass} value={currencyForm.name} onChange={(event) => setCurrencyForm((value) => ({ ...value, name: event.target.value }))} /></Field></div><Field label="Stable id"><input disabled={Boolean(editingCurrency)} className={inputClass} value={currencyForm.id} onChange={(event) => setCurrencyForm((value) => ({ ...value, id: event.target.value }))} /></Field><Field label="Maximum balance"><input type="number" min="0" className={inputClass} value={currencyForm.maximum_balance} onChange={(event) => setCurrencyForm((value) => ({ ...value, maximum_balance: event.target.value }))} /></Field><Check label="Players may transfer this currency" checked={currencyForm.tradeable} onChange={(tradeable) => setCurrencyForm((value) => ({ ...value, tradeable }))} /><div className="flex justify-end gap-2">{editingCurrency && <button type="button" onClick={() => remove('currency_definitions', editingCurrency, 'Currency')} className="text-xs text-rose-300">Delete</button>}<button type="button" onClick={saveCurrency} className={buttonClass}>Save</button></div></div>
                         <div className="space-y-4 rounded-xl border border-slate-700 bg-slate-950/35 p-4"><h3 className="text-sm uppercase tracking-[0.22em] text-emerald-200">NPC vendors</h3><div className="flex flex-wrap gap-2">{vendors.map((vendor) => <button key={vendor.id} type="button" onClick={() => { setEditingVendor(vendor.id); setVendorForm({ ...emptyVendor(), ...vendor, required_faction_id: vendor.required_faction_id || '' }); setVendorStockForm({ ...emptyVendorStock(), vendor_id: vendor.id }); }} className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">{vendor.name}</button>)}</div><div className="grid gap-3 sm:grid-cols-2"><Field label="Name"><input className={inputClass} value={vendorForm.name} onChange={(event) => setVendorForm((value) => ({ ...value, name: event.target.value }))} /></Field><Field label="Stable id"><input disabled={Boolean(editingVendor)} className={inputClass} value={vendorForm.id} onChange={(event) => setVendorForm((value) => ({ ...value, id: event.target.value }))} /></Field><Field label="NPC"><select className={inputClass} value={vendorForm.npc_id} onChange={(event) => setVendorForm((value) => ({ ...value, npc_id: event.target.value }))}><option value="">Choose NPC…</option>{npcs.map((npc) => <option key={npc.id} value={npc.id}>{npc.name}</option>)}</select></Field><Field label="Currency"><select className={inputClass} value={vendorForm.currency_id} onChange={(event) => setVendorForm((value) => ({ ...value, currency_id: event.target.value }))}><option value="gold">Gold</option>{currencies.map((currency) => <option key={currency.id} value={currency.id}>{currency.name}</option>)}</select></Field><Field label="Player sell value %"><input type="number" min="0" className={inputClass} value={vendorForm.sell_price_percent} onChange={(event) => setVendorForm((value) => ({ ...value, sell_price_percent: event.target.value }))} /></Field><Field label="Required faction"><select className={inputClass} value={vendorForm.required_faction_id} onChange={(event) => setVendorForm((value) => ({ ...value, required_faction_id: event.target.value }))}><option value="">None</option>{factions.map((faction) => <option key={faction.id} value={faction.id}>{faction.name}</option>)}</select></Field><Field label="Required reputation"><input type="number" className={inputClass} value={vendorForm.required_reputation} onChange={(event) => setVendorForm((value) => ({ ...value, required_reputation: event.target.value }))} /></Field></div><Check label="Vendor buys from players" checked={vendorForm.buys_from_players} onChange={(buys_from_players) => setVendorForm((value) => ({ ...value, buys_from_players }))} /><button type="button" onClick={saveVendor} className={buttonClass}>Save vendor</button><div className="border-t border-slate-800 pt-3"><div className="flex flex-wrap gap-2">{vendorStocks.filter((stock) => stock.vendor_id === editingVendor).map((stock) => <button key={stock.id} type="button" onClick={() => remove('vendor_stocks', stock.id, 'Stock')} className="rounded-full border border-slate-700 px-2 py-1 text-[0.65rem] text-slate-400">{definitionsById.get(stock.definition_id)?.name || stock.definition_id} · {stock.price} ×</button>)}</div><div className="mt-3 grid gap-3 sm:grid-cols-2"><Field label="Stock id"><input className={inputClass} value={vendorStockForm.id} onChange={(event) => setVendorStockForm((value) => ({ ...value, id: event.target.value }))} /></Field><Field label="Item"><select className={inputClass} value={vendorStockForm.definition_id} onChange={(event) => setVendorStockForm((value) => ({ ...value, definition_id: event.target.value }))}><option value="">Choose…</option>{definitions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field><Field label="Price"><input type="number" min="0" className={inputClass} value={vendorStockForm.price} onChange={(event) => setVendorStockForm((value) => ({ ...value, price: event.target.value }))} /></Field><Field label="Stock (-1 unlimited)"><input type="number" min="-1" className={inputClass} value={vendorStockForm.stock} onChange={(event) => setVendorStockForm((value) => ({ ...value, stock: event.target.value }))} /></Field><Field label="Maximum per purchase"><input type="number" min="1" className={inputClass} value={vendorStockForm.maximum_per_purchase} onChange={(event) => setVendorStockForm((value) => ({ ...value, maximum_per_purchase: event.target.value }))} /></Field></div><button type="button" onClick={saveVendorStock} className={`${buttonClass} mt-3`}>Add stock</button></div></div>
-                        <div className="space-y-4 rounded-xl border border-slate-700 bg-slate-950/35 p-4"><h3 className="text-sm uppercase tracking-[0.22em] text-emerald-200">Crafting recipes</h3><div className="flex flex-wrap gap-2">{recipes.map((recipe) => <button key={recipe.id} type="button" onClick={() => { setEditingRecipe(recipe.id); setRecipeForm({ ...emptyRecipe(), ...recipe, station_tag: recipe.station_tag || '', currency_id: recipe.currency_id || '' }); setIngredientForm({ ...emptyIngredient(), recipe_id: recipe.id }); }} className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">{recipe.name}</button>)}</div><div className="grid gap-3 sm:grid-cols-2"><Field label="Name"><input className={inputClass} value={recipeForm.name} onChange={(event) => setRecipeForm((value) => ({ ...value, name: event.target.value }))} /></Field><Field label="Stable id"><input disabled={Boolean(editingRecipe)} className={inputClass} value={recipeForm.id} onChange={(event) => setRecipeForm((value) => ({ ...value, id: event.target.value }))} /></Field><Field label="Output"><select className={inputClass} value={recipeForm.output_definition_id} onChange={(event) => setRecipeForm((value) => ({ ...value, output_definition_id: event.target.value }))}><option value="">Choose…</option>{definitions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field><Field label="Output quantity"><input type="number" min="1" className={inputClass} value={recipeForm.output_quantity} onChange={(event) => setRecipeForm((value) => ({ ...value, output_quantity: event.target.value }))} /></Field><Field label="Station object tag"><input className={inputClass} value={recipeForm.station_tag} onChange={(event) => setRecipeForm((value) => ({ ...value, station_tag: event.target.value }))} placeholder="forge (blank = anywhere)" /></Field><Field label="Required level"><input type="number" min="1" className={inputClass} value={recipeForm.required_level} onChange={(event) => setRecipeForm((value) => ({ ...value, required_level: event.target.value }))} /></Field><Field label="Cost currency"><select className={inputClass} value={recipeForm.currency_id} onChange={(event) => setRecipeForm((value) => ({ ...value, currency_id: event.target.value }))}><option value="">No currency cost</option><option value="gold">Gold</option>{currencies.map((currency) => <option key={currency.id} value={currency.id}>{currency.name}</option>)}</select></Field><Field label="Currency cost"><input type="number" min="0" className={inputClass} value={recipeForm.currency_cost} onChange={(event) => setRecipeForm((value) => ({ ...value, currency_cost: event.target.value }))} /></Field></div><Field label="Description"><input className={inputClass} value={recipeForm.description} onChange={(event) => setRecipeForm((value) => ({ ...value, description: event.target.value }))} /></Field><Check label="Recipe is active" checked={recipeForm.active} onChange={(active) => setRecipeForm((value) => ({ ...value, active }))} /><button type="button" onClick={saveRecipe} className={buttonClass}>Save recipe</button><div className="border-t border-slate-800 pt-3"><div className="flex flex-wrap gap-2">{ingredients.filter((row) => row.recipe_id === editingRecipe).map((row) => <button key={row.id} type="button" onClick={() => remove('crafting_ingredients', row.id, 'Ingredient')} className="rounded-full border border-slate-700 px-2 py-1 text-[0.65rem] text-slate-400">{definitionsById.get(row.definition_id)?.name || row.definition_id} ×{row.quantity} ×</button>)}</div><div className="mt-3 grid gap-3 sm:grid-cols-2"><Field label="Ingredient id"><input className={inputClass} value={ingredientForm.id} onChange={(event) => setIngredientForm((value) => ({ ...value, id: event.target.value }))} /></Field><Field label="Item"><select className={inputClass} value={ingredientForm.definition_id} onChange={(event) => setIngredientForm((value) => ({ ...value, definition_id: event.target.value }))}><option value="">Choose…</option>{definitions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field><Field label="Quantity"><input type="number" min="1" className={inputClass} value={ingredientForm.quantity} onChange={(event) => setIngredientForm((value) => ({ ...value, quantity: event.target.value }))} /></Field><div className="flex items-end"><Check label="Consumed when crafted" checked={ingredientForm.consumed} onChange={(consumed) => setIngredientForm((value) => ({ ...value, consumed }))} /></div></div><button type="button" onClick={saveIngredient} className={`${buttonClass} mt-3`}>Add ingredient</button></div></div>
+                        <div className="space-y-4 rounded-xl border border-slate-700 bg-slate-950/35 p-4">
+                            <div>
+                                <h3 className="text-sm uppercase tracking-[0.22em] text-emerald-200">Crafting, cooking & processing</h3>
+                                <p className="mt-2 text-xs leading-5 text-slate-500">Immediate recipes consume inventory ingredients. Timed recipes consume ingredients placed inside a specific container such as a campfire, oven, furnace, drying rack, or alchemy vat.</p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                {recipes.map((recipe) => (
+                                    <button key={recipe.id} type="button" onClick={() => {
+                                        const outputRule = objectRulesById.get(recipe.output_definition_id);
+                                        setEditingRecipe(recipe.id);
+                                        setRecipeForm({
+                                            ...emptyRecipe(),
+                                            ...recipe,
+                                            station_tag: recipe.station_tag || '',
+                                            station_definition_id: recipe.station_definition_id || '',
+                                            currency_id: recipe.currency_id || '',
+                                            output_base_value: outputRule?.base_value || 0,
+                                            output_tradeable: outputRule?.tradeable !== false,
+                                        });
+                                        setIngredientForm({ ...emptyIngredient(), recipe_id: recipe.id });
+                                    }} className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">
+                                        {recipe.name}{recipe.process_seconds > 0 ? ` · ${recipe.process_seconds}s` : ''}
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="grid gap-3 sm:grid-cols-2">
+                                <Field label="Name"><input className={inputClass} value={recipeForm.name} onChange={(event) => setRecipeForm((value) => ({ ...value, name: event.target.value }))} /></Field>
+                                <Field label="Stable id"><input disabled={Boolean(editingRecipe)} className={inputClass} value={recipeForm.id} onChange={(event) => setRecipeForm((value) => ({ ...value, id: event.target.value }))} /></Field>
+                                <Field label="Output">
+                                    <select className={inputClass} value={recipeForm.output_definition_id} onChange={(event) => {
+                                        const outputRule = objectRulesById.get(event.target.value);
+                                        setRecipeForm((value) => ({
+                                            ...value,
+                                            output_definition_id: event.target.value,
+                                            output_base_value: outputRule?.base_value || 0,
+                                            output_tradeable: outputRule?.tradeable !== false,
+                                        }));
+                                    }}>
+                                        <option value="">Choose…</option>
+                                        {definitions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                                    </select>
+                                </Field>
+                                <Field label="Output quantity"><input type="number" min="1" className={inputClass} value={recipeForm.output_quantity} onChange={(event) => setRecipeForm((value) => ({ ...value, output_quantity: event.target.value }))} /></Field>
+                                <Field label="Processing time (seconds)"><input type="number" min="0" className={inputClass} value={recipeForm.process_seconds} onChange={(event) => setRecipeForm((value) => ({ ...value, process_seconds: event.target.value }))} /></Field>
+                                {Number(recipeForm.process_seconds) > 0 ? (
+                                    <Field label="Station container">
+                                        <select className={inputClass} value={recipeForm.station_definition_id} onChange={(event) => setRecipeForm((value) => ({ ...value, station_definition_id: event.target.value }))}>
+                                            <option value="">Choose campfire, furnace, oven…</option>
+                                            {definitions.filter((item) => item.capacity > 0).map((item) => <option key={item.id} value={item.id}>{item.icon} {item.name}</option>)}
+                                        </select>
+                                    </Field>
+                                ) : (
+                                    <Field label="Nearby station tag"><input className={inputClass} value={recipeForm.station_tag} onChange={(event) => setRecipeForm((value) => ({ ...value, station_tag: event.target.value }))} placeholder="forge (blank = anywhere)" /></Field>
+                                )}
+                                <Field label="Required level"><input type="number" min="1" className={inputClass} value={recipeForm.required_level} onChange={(event) => setRecipeForm((value) => ({ ...value, required_level: event.target.value }))} /></Field>
+                                <Field label="Base merchant value"><input type="number" min="0" className={inputClass} value={recipeForm.output_base_value} onChange={(event) => setRecipeForm((value) => ({ ...value, output_base_value: event.target.value }))} /></Field>
+                                <Field label="Cost currency"><select className={inputClass} value={recipeForm.currency_id} onChange={(event) => setRecipeForm((value) => ({ ...value, currency_id: event.target.value }))}><option value="">No currency cost</option><option value="gold">Gold</option>{currencies.map((currency) => <option key={currency.id} value={currency.id}>{currency.name}</option>)}</select></Field>
+                                <Field label="Currency cost"><input type="number" min="0" className={inputClass} value={recipeForm.currency_cost} onChange={(event) => setRecipeForm((value) => ({ ...value, currency_cost: event.target.value }))} /></Field>
+                            </div>
+                            <Field label="Description"><input className={inputClass} value={recipeForm.description} onChange={(event) => setRecipeForm((value) => ({ ...value, description: event.target.value }))} /></Field>
+                            <div className="grid gap-2 sm:grid-cols-3">
+                                <Check label="Recipe is active" checked={recipeForm.active} onChange={(active) => setRecipeForm((value) => ({ ...value, active }))} />
+                                <Check label="Merchants may buy output" checked={recipeForm.output_tradeable} onChange={(output_tradeable) => setRecipeForm((value) => ({ ...value, output_tradeable }))} />
+                                {Number(recipeForm.process_seconds) > 0 && <Check label="Station must stay active" checked={recipeForm.requires_active_station} onChange={(requires_active_station) => setRecipeForm((value) => ({ ...value, requires_active_station }))} />}
+                            </div>
+                            {Number(recipeForm.process_seconds) > 0 && <p className="text-xs leading-5 text-amber-200/70">Player flow: put each ingredient in the station, activate it if required, then use <span className="font-mono">cook {recipeForm.name || '<recipe>'} in &lt;station&gt;</span>. The output appears inside the station when the timer finishes.</p>}
+                            <button type="button" onClick={saveRecipe} className={buttonClass}>Save recipe</button>
+                            <div className="border-t border-slate-800 pt-3">
+                                <div className="flex flex-wrap gap-2">{ingredients.filter((row) => row.recipe_id === editingRecipe).map((row) => <button key={row.id} type="button" onClick={() => remove('crafting_ingredients', row.id, 'Ingredient')} className="rounded-full border border-slate-700 px-2 py-1 text-[0.65rem] text-slate-400">{definitionsById.get(row.definition_id)?.name || row.definition_id} ×{row.quantity} ×</button>)}</div>
+                                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                                    <Field label="Ingredient id"><input className={inputClass} value={ingredientForm.id} onChange={(event) => setIngredientForm((value) => ({ ...value, id: event.target.value }))} /></Field>
+                                    <Field label="Item"><select className={inputClass} value={ingredientForm.definition_id} onChange={(event) => setIngredientForm((value) => ({ ...value, definition_id: event.target.value }))}><option value="">Choose…</option>{definitions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
+                                    <Field label="Quantity"><input type="number" min="1" className={inputClass} value={ingredientForm.quantity} onChange={(event) => setIngredientForm((value) => ({ ...value, quantity: event.target.value }))} /></Field>
+                                    <div className="flex items-end"><Check label="Consumed when crafted" checked={ingredientForm.consumed} onChange={(consumed) => setIngredientForm((value) => ({ ...value, consumed }))} /></div>
+                                </div>
+                                <button type="button" onClick={saveIngredient} className={`${buttonClass} mt-3`}>Add ingredient</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

@@ -1,42 +1,63 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import getSpacetimeClient from '@/lib/spacetimedbClient';
+import {
+  ENGINE_SYSTEM_TABLES,
+  WORLD_CONTENT_PRIMARY_KEYS,
+  WORLD_CONTENT_TABLES,
+  orderWorldObjectsForRestore,
+  selectExportableWorldObjects,
+} from '@/lib/worldContentBundle';
 
 const inputClass = 'w-full rounded-md border border-slate-600/70 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-cyan-400 focus:outline-none';
 const buttonClass = 'rounded-md border border-cyan-400/50 bg-cyan-500/10 px-4 py-2 text-xs uppercase tracking-[0.16em] text-cyan-100 disabled:opacity-40';
 
 const SYSTEMS = [
-  { table: 'ability_unlock_rules', label: 'Ability unlocks & talents', permission: 'systems.manage', key: 'ability_id', template: { ability_id: 'fireball', required_option_id: 'mage', prerequisite_ability_id: null, required_quest_id: null, required_faction_id: null, required_reputation: 0, talent_cost: 1, exclusive_group: null } },
-  { table: 'object_rules', label: 'Advanced item rules', permission: 'systems.manage', key: 'definition_id', template: { definition_id: 'iron-sword', rarity: 'common', item_level: 1, required_level: 1, required_option_id: null, maximum_durability: 100, base_value: 25, repairable: true, two_handed: false, weapon_type: 'sword', damage_school: 'physical', bind_rule: 'none', tradeable: true } },
-  { table: 'bank_configs', label: 'Bank policy', permission: 'economy.manage', key: 'id', template: { id: 'world', access_mode: 'fixture_or_npc', required_room_tag: 'bank', required_npc_id: null, slot_limit: 40, deposit_fee: 0, withdrawal_fee: 0, shared_by_identity: false, protects_from_death: true } },
-  { table: 'vendor_restock_rules', label: 'Vendor restocking', permission: 'economy.manage', key: 'vendor_stock_id', template: { vendor_stock_id: 'vendor-stock-id', target_stock: 10, restock_quantity: 1, restock_seconds: 300 } },
-  { table: 'profession_definitions', label: 'Professions', permission: 'economy.manage', key: 'id', template: { id: 'blacksmithing', name: 'Blacksmithing', description: '', maximum_rank: 100, xp_per_craft: 1, active: true } },
-  { table: 'recipe_rules', label: 'Recipe learning & quality', permission: 'economy.manage', key: 'recipe_id', template: { recipe_id: 'iron-sword-recipe', profession_id: 'blacksmithing', required_profession_rank: 10, must_be_learned: true, success_percent: 95, cooldown_seconds: 0 } },
-  { table: 'dialogue_nodes', label: 'Dialogue nodes', permission: 'world.manage', key: 'id', template: { id: 'guard-greeting', npc_id: 'guard-id', text: 'State your business.', entry_node: true, required_quest_id: null, required_faction_id: null, required_reputation: 0, sort_order: 100 } },
-  { table: 'dialogue_choices', label: 'Dialogue choices', permission: 'world.manage', key: 'id', template: { id: 'guard-greeting-continue', node_id: 'guard-greeting', label: 'I come in peace.', next_node_id: null, action_kind: 'none', action_reference_id: null, action_value: 0, sort_order: 100, action_examples: ['start_quest', 'gold', 'reputation', 'give_item', 'learn_recipe', 'learn_profession'] } },
-  { table: 'exit_rules', label: 'Doors, locks & traps', permission: 'world.manage', key: 'exit_id', template: { exit_id: 'exit-id', is_door: true, closed: false, locked: false, key_definition_id: null, hidden: false, trap_damage: 0, required_quest_id: null, required_option_id: null } },
-  { table: 'world_triggers', label: 'Conditions & actions', permission: 'world.manage', key: 'id', template: { id: 'welcome-trigger', event_kind: 'room_enter', source_id: 'room-id', conditions_json: { minimum_level: 1 }, actions_json: [{ kind: 'message', text: 'A bell tolls in the distance.' }], once_per_actor: true, active: true } },
-  { table: 'world_simulation_configs', label: 'World simulation', permission: 'world.manage', key: 'id', template: { id: 'world', mode: 'turn_driven', tick_seconds: 5, day_length_minutes: 60, weather_enabled: false, active: false } },
+  { table: 'ability_unlock_rules', label: 'Ability unlocks & talents', permission: 'systems.manage', key: 'ability_id', references: { ability_id: 'ability_definitions', required_option_id: 'character_option_definitions', prerequisite_ability_id: 'ability_definitions', required_quest_id: 'quest_definitions', required_faction_id: 'faction_definitions' }, template: { ability_id: '', required_option_id: null, prerequisite_ability_id: null, required_quest_id: null, required_faction_id: null, required_reputation: 0, talent_cost: 1, exclusive_group: null } },
+  { table: 'object_rules', label: 'Advanced item rules', permission: 'systems.manage', key: 'definition_id', references: { definition_id: 'object_definitions', required_option_id: 'character_option_definitions' }, options: { rarity: ['common', 'uncommon', 'rare', 'epic', 'legendary'], bind_rule: ['none', 'bound', 'bind_on_equip'] }, template: { definition_id: '', rarity: 'common', item_level: 1, required_level: 1, required_option_id: null, maximum_durability: 100, base_value: 25, repairable: true, two_handed: false, weapon_type: 'sword', damage_school: 'physical', bind_rule: 'none', tradeable: true } },
+  { table: 'bank_configs', label: 'Bank policy', permission: 'economy.manage', key: 'id', references: { required_npc_id: 'npcs' }, options: { access_mode: ['anywhere', 'fixture_or_npc'] }, template: { id: 'world', access_mode: 'fixture_or_npc', required_room_tag: 'bank', required_npc_id: null, slot_limit: 40, deposit_fee: 0, withdrawal_fee: 0, shared_by_identity: false, protects_from_death: true } },
+  { table: 'vendor_restock_rules', label: 'Vendor restocking', permission: 'economy.manage', key: 'vendor_stock_id', references: { vendor_stock_id: 'vendor_stocks' }, template: { vendor_stock_id: '', target_stock: 10, restock_quantity: 1, restock_seconds: 300 } },
+  { table: 'profession_definitions', label: 'Professions', permission: 'economy.manage', key: 'id', template: { id: '', name: '', description: '', maximum_rank: 100, xp_per_craft: 1, active: true } },
+  { table: 'recipe_rules', label: 'Recipe learning & quality', permission: 'economy.manage', key: 'recipe_id', references: { recipe_id: 'crafting_recipes', profession_id: 'profession_definitions' }, template: { recipe_id: '', profession_id: null, required_profession_rank: 0, must_be_learned: true, success_percent: 95, cooldown_seconds: 0 } },
+  { table: 'dialogue_nodes', label: 'Dialogue nodes', permission: 'world.manage', key: 'id', references: { npc_id: 'npcs', required_quest_id: 'quest_definitions', required_faction_id: 'faction_definitions' }, template: { id: '', npc_id: '', text: '', entry_node: true, required_quest_id: null, required_faction_id: null, required_reputation: 0, sort_order: 100 } },
+  { table: 'dialogue_choices', label: 'Dialogue choices', permission: 'world.manage', key: 'id', references: { node_id: 'dialogue_nodes', next_node_id: 'dialogue_nodes' }, options: { action_kind: ['none', 'start_quest', 'gold', 'reputation', 'give_item', 'learn_recipe', 'learn_profession'] }, template: { id: '', node_id: '', label: '', next_node_id: null, action_kind: 'none', action_reference_id: null, action_value: 0, sort_order: 100 } },
+  { table: 'exit_rules', label: 'Doors, locks & traps', permission: 'world.manage', key: 'exit_id', references: { exit_id: 'exits', key_definition_id: 'object_definitions', required_quest_id: 'quest_definitions', required_option_id: 'character_option_definitions' }, template: { exit_id: '', is_door: true, closed: false, locked: false, key_definition_id: null, hidden: false, trap_damage: 0, required_quest_id: null, required_option_id: null } },
+  { table: 'world_triggers', label: 'Conditions & actions', permission: 'world.manage', key: 'id', references: { source_id: 'rooms' }, options: { event_kind: ['room_enter'] }, template: { id: '', event_kind: 'room_enter', source_id: null, conditions_json: { minimum_level: 1 }, actions_json: [{ kind: 'message', text: 'A bell tolls in the distance.' }], once_per_actor: true, active: true } },
+  { table: 'world_simulation_configs', label: 'World simulation', permission: 'world.manage', key: 'id', options: { mode: ['turn_driven', 'scheduled'] }, template: { id: 'world', mode: 'turn_driven', tick_seconds: 5, day_length_minutes: 60, weather_enabled: false, active: false } },
 ];
 
-const WORLD_CONTENT_TABLES = [
-  'regions', 'rooms', 'exits', 'npcs', 'stat_definitions', 'object_definitions', 'equipment_slot_definitions',
-  'progression_configs', 'world_combat_configs', 'faction_definitions', 'quest_definitions', 'quest_objectives',
-  'quest_item_rewards', 'quest_rules', 'quest_choices', 'character_option_definitions', 'character_option_grants',
-  'currency_definitions', 'vendor_definitions', 'vendor_stocks', 'crafting_recipes', 'crafting_ingredients',
-  'spawn_points', 'world_lifecycle_configs', ...SYSTEMS.map((system) => system.table),
-];
-
-const PRIMARY_KEYS = { regions: 'name', quest_rules: 'quest_id', ability_unlock_rules: 'ability_id', object_rules: 'definition_id', vendor_restock_rules: 'vendor_stock_id', recipe_rules: 'recipe_id', exit_rules: 'exit_id' };
-
+const REFERENCE_TABLES = [...new Set(SYSTEMS.flatMap((system) => Object.values(system.references || {})))];
 const canUse = (permissions, permission) => permissions?.has?.('*') || permissions?.has?.(permission);
 const pretty = (value) => JSON.stringify(value, null, 2);
+const fieldLabel = (field) => field.replace(/_/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
+const referenceLabel = (row) => row.name || row.title || row.label || row.verb || row.id || row.quest_id || row.vendor_stock_id;
+
+function ConfigField({ field, value, onChange, options, disabled = false }) {
+  if (typeof value === 'boolean') {
+    return <label className="flex items-center gap-3 rounded-lg border border-slate-700/70 bg-slate-950/45 px-3 py-2 text-xs text-slate-300"><input type="checkbox" checked={value} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className="accent-cyan-400" />{fieldLabel(field)}</label>;
+  }
+  if (options?.length) {
+    return <label className="flex flex-col gap-1.5 text-[0.65rem] uppercase tracking-[0.18em] text-slate-400">{fieldLabel(field)}<select className={inputClass} value={value ?? ''} disabled={disabled} onChange={(event) => onChange(event.target.value || (value === null ? null : ''))}><option value="">{value === null ? 'None' : 'Choose…'}</option>{options.map((option) => <option key={option.value ?? option} value={option.value ?? option}>{option.label ?? option}</option>)}</select></label>;
+  }
+  if (typeof value === 'number') {
+    return <label className="flex flex-col gap-1.5 text-[0.65rem] uppercase tracking-[0.18em] text-slate-400">{fieldLabel(field)}<input type="number" className={inputClass} value={value} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))} /></label>;
+  }
+  if (Array.isArray(value) || (value && typeof value === 'object')) {
+    return <label className="flex flex-col gap-1.5 text-[0.65rem] uppercase tracking-[0.18em] text-slate-400 sm:col-span-2">{fieldLabel(field)}<textarea key={pretty(value)} className={`${inputClass} min-h-28 font-mono text-xs`} defaultValue={pretty(value)} onBlur={(event) => { try { onChange(JSON.parse(event.target.value)); } catch { /* The raw JSON editor below reports invalid JSON on save. */ } }} /></label>;
+  }
+  return <label className="flex flex-col gap-1.5 text-[0.65rem] uppercase tracking-[0.18em] text-slate-400">{fieldLabel(field)}<input className={inputClass} value={value ?? ''} disabled={disabled} placeholder={value === null ? 'Optional — leave blank for none' : ''} onChange={(event) => onChange(value === null && event.target.value === '' ? null : event.target.value)} /></label>;
+}
 
 export default function EngineSystemsEditor({ enabled, permissions, actors = [] }) {
   const spacetime = useMemo(() => getSpacetimeClient(), []);
   const availableSystems = useMemo(() => SYSTEMS.filter((system) => canUse(permissions, system.permission)), [permissions]);
+  const portableContentTables = useMemo(
+    () => WORLD_CONTENT_TABLES.filter((table) => table !== 'admin_role_definitions' || canUse(permissions, 'roles.manage')),
+    [permissions],
+  );
   const [selectedTable, setSelectedTable] = useState(availableSystems[0]?.table || '');
   const selectedSystem = availableSystems.find((system) => system.table === selectedTable) || availableSystems[0];
   const [rowsByTable, setRowsByTable] = useState({});
+  const [referenceRowsByTable, setReferenceRowsByTable] = useState({});
   const [payloadText, setPayloadText] = useState(pretty(selectedSystem?.template || {}));
   const [selectedId, setSelectedId] = useState('');
   const [issues, setIssues] = useState([]);
@@ -60,10 +81,16 @@ export default function EngineSystemsEditor({ enabled, permissions, actors = [] 
 
   const load = useCallback(async () => {
     if (!enabled) return;
-    const systemResults = await Promise.all(availableSystems.map((system) => spacetime.from(system.table).select('*')));
+    const [systemResults, referenceResults] = await Promise.all([
+      Promise.all(availableSystems.map((system) => spacetime.from(system.table).select('*'))),
+      Promise.all(REFERENCE_TABLES.map((table) => spacetime.from(table).select('*'))),
+    ]);
     const next = {};
     availableSystems.forEach((system, index) => { next[system.table] = systemResults[index].data || []; });
     setRowsByTable(next);
+    const nextReferences = {};
+    REFERENCE_TABLES.forEach((table, index) => { nextReferences[table] = referenceResults[index].data || []; });
+    setReferenceRowsByTable(nextReferences);
     const [issueResult, auditResult, reportResult, sanctionResult, snapshotResult, currencyResult, walletResult, balanceResult] = await Promise.all([
       spacetime.from('content_issues').select('*'),
       spacetime.from('admin_audit_log').select('*').order('created_at', { ascending: false }),
@@ -101,9 +128,13 @@ export default function EngineSystemsEditor({ enabled, permissions, actors = [] 
   const removeRecord = () => selectedId && run(() => spacetime.deleteEngineRecord(selectedSystem.table, selectedId), 'Engine record deleted.');
 
   const collectWorld = async () => {
-    const results = await Promise.all(WORLD_CONTENT_TABLES.map((table) => spacetime.from(table).select('*')));
+    if (SYSTEMS.some((system) => !ENGINE_SYSTEM_TABLES.includes(system.table))) {
+      throw new Error('The engine-system editor and world bundle catalog are out of sync.');
+    }
+    const results = await Promise.all(portableContentTables.map((table) => spacetime.from(table).select('*')));
     const tables = {};
-    WORLD_CONTENT_TABLES.forEach((table, index) => { if (results[index].error) throw results[index].error; tables[table] = results[index].data || []; });
+    portableContentTables.forEach((table, index) => { if (results[index].error) throw results[index].error; tables[table] = results[index].data || []; });
+    tables.world_objects = selectExportableWorldObjects(tables.world_objects);
     return { format: 'arkyv-world', version: 1, exported_at: new Date().toISOString(), tables };
   };
 
@@ -120,14 +151,15 @@ export default function EngineSystemsEditor({ enabled, permissions, actors = [] 
 
   const restoreWorld = async (bundle) => {
     if (bundle?.format !== 'arkyv-world' || !bundle.tables) throw new Error('This is not an Arkyv world bundle.');
-    for (const table of WORLD_CONTENT_TABLES) {
-      const records = Array.isArray(bundle.tables[table]) ? bundle.tables[table] : [];
+    for (const table of portableContentTables) {
+      const sourceRecords = Array.isArray(bundle.tables[table]) ? bundle.tables[table] : [];
+      const records = table === 'world_objects' ? orderWorldObjectsForRestore(sourceRecords) : sourceRecords;
       const system = SYSTEMS.find((value) => value.table === table);
       for (const record of records) {
         if (system) {
           const result = await spacetime.configureEngineRecord(table, record); if (result.error) throw result.error;
         } else {
-          const key = PRIMARY_KEYS[table] || 'id'; const id = record[key]; if (id == null) continue;
+          const key = WORLD_CONTENT_PRIMARY_KEYS[table] || 'id'; const id = record[key]; if (id == null) continue;
           const existing = await spacetime.from(table).select('*').eq(key, id).maybeSingle();
           const result = existing.data ? await spacetime.from(table).update(record).eq(key, id).select() : await spacetime.from(table).insert(record).select();
           if (result.error) throw result.error;
@@ -143,6 +175,33 @@ export default function EngineSystemsEditor({ enabled, permissions, actors = [] 
   };
 
   const rows = rowsByTable[selectedSystem?.table] || [];
+  const parsedPayload = useMemo(() => {
+    try { return JSON.parse(payloadText); } catch { return null; }
+  }, [payloadText]);
+  const updatePayloadField = (field, value) => {
+    if (!parsedPayload || typeof parsedPayload !== 'object' || Array.isArray(parsedPayload)) return;
+    setPayloadText(pretty({ ...parsedPayload, [field]: value }));
+  };
+  const optionsForField = (field) => {
+    const configured = selectedSystem?.options?.[field];
+    if (configured) return configured;
+    let referenceTable = selectedSystem?.references?.[field];
+    if (selectedSystem?.table === 'dialogue_choices' && field === 'action_reference_id') {
+      referenceTable = {
+        start_quest: 'quest_definitions',
+        reputation: 'faction_definitions',
+        give_item: 'object_definitions',
+        learn_recipe: 'crafting_recipes',
+        learn_profession: 'profession_definitions',
+      }[parsedPayload?.action_kind];
+    }
+    return referenceTable
+      ? (referenceRowsByTable[referenceTable] || rowsByTable[referenceTable] || []).map((row) => ({
+        value: String(row.id ?? row.quest_id ?? row.vendor_stock_id),
+        label: `${referenceLabel(row)} · ${row.id ?? row.quest_id ?? row.vendor_stock_id}`,
+      }))
+      : null;
+  };
   const mayModerate = canUse(permissions, 'players.moderate');
   const mayManageWorld = canUse(permissions, 'world.manage');
   const selectBalance = (actorId, currencyId) => {
@@ -163,8 +222,9 @@ export default function EngineSystemsEditor({ enabled, permissions, actors = [] 
           <div className="max-h-[32rem] space-y-2 overflow-auto">{rows.map((row) => { const id = String(row[selectedSystem.key]); return <button type="button" key={id} onClick={() => { setSelectedId(id); setPayloadText(pretty(row)); }} className={`w-full rounded-lg border p-3 text-left text-sm ${selectedId === id ? 'border-cyan-300 bg-cyan-500/10 text-cyan-50' : 'border-slate-800 text-slate-300'}`}><span className="block font-medium">{row.name || row.label || row.title || id}</span><span className="mt-1 block text-xs text-slate-600">{id}</span></button>; })}{rows.length === 0 && <p className="p-4 text-center text-xs text-slate-600">No records yet.</p>}</div>
         </div>
         <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-950/35 p-4">
-          <div><h3 className="text-sm uppercase tracking-[0.2em] text-cyan-200">{selectedSystem.label}</h3><p className="mt-1 text-xs leading-5 text-slate-500">Every field is validated by the authoritative module. Null removes an optional requirement.</p></div>
-          <textarea className={`${inputClass} min-h-[28rem] font-mono text-xs leading-5`} spellCheck="false" value={payloadText} onChange={(event) => setPayloadText(event.target.value)} />
+          <div><h3 className="text-sm uppercase tracking-[0.2em] text-cyan-200">{selectedSystem.label}</h3><p className="mt-1 text-xs leading-5 text-slate-500">Every field is validated by the authoritative module. Optional fields may be left blank. Relationship fields use the stable id shown elsewhere in the studio.</p></div>
+          {parsedPayload ? <div className="grid gap-3 sm:grid-cols-2">{Object.entries(parsedPayload).filter(([field]) => !['created_at', 'updated_at', 'last_restock_at_micros'].includes(field)).map(([field, value]) => <ConfigField key={field} field={field} value={value} options={optionsForField(field)} disabled={Boolean(selectedId) && field === selectedSystem.key} onChange={(nextValue) => updatePayloadField(field, nextValue)} />)}</div> : <p className="rounded-lg border border-rose-400/40 bg-rose-500/10 p-3 text-xs text-rose-100">The expert JSON below is invalid. Correct it to restore the visual fields.</p>}
+          <details className="rounded-lg border border-slate-800 bg-slate-950/40 p-3"><summary className="cursor-pointer text-xs uppercase tracking-[0.16em] text-slate-400">Expert JSON</summary><textarea className={`${inputClass} mt-3 min-h-64 font-mono text-xs leading-5`} spellCheck="false" value={payloadText} onChange={(event) => setPayloadText(event.target.value)} /></details>
           <div className="flex justify-end gap-2">{selectedId && <button disabled={busy} type="button" onClick={removeRecord} className="rounded-md border border-rose-400/40 px-4 py-2 text-xs uppercase text-rose-200">Delete</button>}<button disabled={busy} type="button" onClick={saveRecord} className={buttonClass}>Save record</button></div>
         </div>
       </div>}

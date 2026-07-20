@@ -23,4 +23,7 @@ export default __t.row({
   active: __t.bool(),
   createdAt: __t.timestamp().name("created_at"),
   updatedAt: __t.timestamp().name("updated_at"),
+  stationDefinitionId: __t.option(__t.string()).name("station_definition_id"),
+  processSeconds: __t.u32().name("process_seconds"),
+  requiresActiveStation: __t.bool().name("requires_active_station"),
 });

@@ -843,6 +843,17 @@ pub struct CraftingRecipe {
     pub active: bool,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
+    /// Exact object definition used as the container for a timed recipe.
+    /// `None` keeps legacy, command-driven recipes working as before.
+    #[default(None::<String>)]
+    pub station_definition_id: Option<String>,
+    /// Zero makes the recipe immediate. Positive values require ingredients to
+    /// be placed inside `station_definition_id` and processed over real time.
+    #[default(0)]
+    pub process_seconds: u32,
+    /// When enabled, elapsed time only counts while the station object is active.
+    #[default(false)]
+    pub requires_active_station: bool,
 }
 
 #[spacetimedb::table(accessor = crafting_ingredient, public)]
@@ -854,6 +865,23 @@ pub struct CraftingIngredient {
     pub definition_id: String,
     pub quantity: u32,
     pub consumed: bool,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+/// One timed recipe currently running inside a concrete station object. The
+/// batch progresses lazily against authoritative timestamps whenever the world
+/// advances, so it does not depend on a browser timer remaining connected.
+#[spacetimedb::table(accessor = crafting_batch, public)]
+#[derive(Clone)]
+pub struct CraftingBatch {
+    #[primary_key]
+    pub station_object_id: String,
+    pub recipe_id: String,
+    pub actor_id: String,
+    pub remaining_micros: i64,
+    pub last_progress_at_micros: i64,
+    pub succeeds: bool,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -1106,6 +1134,66 @@ fn actor_exists(ctx: &ReducerContext, actor_id: &str) -> bool {
         || ctx.db.profile().id().find(&actor_id).is_some()
 }
 
+fn validate_world_object_location(
+    ctx: &ReducerContext,
+    object_id: &str,
+    location_kind: &str,
+    location_id: &str,
+) -> Result<(), String> {
+    if location_id.trim().is_empty() {
+        return Err("World objects require a location.".to_string());
+    }
+    match location_kind {
+        "room" => {
+            if ctx.db.room().id().find(&location_id.to_string()).is_none() {
+                return Err("World object room does not exist.".to_string());
+            }
+        }
+        "inventory" | "equipped" => {
+            if !actor_exists(ctx, location_id) {
+                return Err("World object actor does not exist.".to_string());
+            }
+        }
+        "container" => {
+            if location_id == object_id {
+                return Err("An object cannot contain itself.".to_string());
+            }
+            let container = ctx.db.world_object().id().find(&location_id.to_string())
+                .ok_or_else(|| "World object container does not exist.".to_string())?;
+            let definition = ctx.db.object_definition().id().find(&container.definition_id)
+                .ok_or_else(|| "World object container definition does not exist.".to_string())?;
+            if definition.capacity == 0 {
+                return Err("The selected world object is not a container.".to_string());
+            }
+            let occupied = ctx.db.world_object().iter()
+                .filter(|object| object.location_kind == "container"
+                    && object.location_id == location_id
+                    && object.id != object_id)
+                .count() as u32;
+            if occupied >= definition.capacity {
+                return Err("The selected container has no free slots.".to_string());
+            }
+            let mut ancestor_id = location_id.to_string();
+            let mut visited = Vec::new();
+            while let Some(ancestor) = ctx.db.world_object().id().find(&ancestor_id) {
+                if ancestor.id == object_id {
+                    return Err("Object containment cannot form a cycle.".to_string());
+                }
+                if visited.contains(&ancestor.id) {
+                    return Err("The selected container is already part of a containment cycle.".to_string());
+                }
+                visited.push(ancestor.id.clone());
+                if ancestor.location_kind != "container" {
+                    break;
+                }
+                ancestor_id = ancestor.location_id;
+            }
+        }
+        _ => return Err("Object location must be room, inventory, equipped, or container.".to_string()),
+    }
+    Ok(())
+}
+
 fn parse_rows(payload_json: &str) -> Result<Vec<Value>, String> {
     let value: Value = serde_json::from_str(payload_json).map_err(|error| error.to_string())?;
     match value {
@@ -1213,7 +1301,7 @@ fn seed_rpg_definitions(ctx: &ReducerContext) {
         ObjectDefinition {
             id: "campfire".to_string(), name: "Campfire".to_string(), description: "A stone-ringed fire that burns while it has fuel.".to_string(),
             primitive_kind: "fixture".to_string(), icon: "🔥".to_string(), image_url: None, tags: r#"["fire","light"]"#.to_string(),
-            portable: false, stackable: false, max_stack: 1, capacity: 0, equipment_slot: None,
+            portable: false, stackable: false, max_stack: 1, capacity: 4, equipment_slot: None,
             weapon_damage: 0, armor_value: 0, scales_with_stat: None, fuel_value: 0, burn_rate: 1,
             accepted_fuel_tags: r#"["fuel"]"#.to_string(), stat_modifiers: "{}".to_string(), on_use: "{}".to_string(),
             created_at: ctx.timestamp, updated_at: ctx.timestamp,
@@ -2052,7 +2140,31 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                 if id.is_empty() || ctx.db.crafting_recipe().id().find(&id).is_some() || ctx.db.object_definition().id().find(&output_definition_id).is_none() { return Err("Recipe requires a unique id and output object.".to_string()); }
                 let currency_id = optional_string(&row, "currency_id").filter(|value| !value.trim().is_empty());
                 if currency_id.as_ref().map(|value| value != "gold" && ctx.db.currency_definition().id().find(value).is_none()).unwrap_or(false) { return Err("Recipe currency does not exist.".to_string()); }
-                ctx.db.crafting_recipe().insert(CraftingRecipe { id, name: string(&row, "name", "Recipe"), description: string(&row, "description", ""), output_definition_id, output_quantity: u32_value(&row, "output_quantity", 1).max(1), station_tag: optional_string(&row, "station_tag").filter(|value| !value.trim().is_empty()), required_level: u32_value(&row, "required_level", 1).max(1), currency_id, currency_cost: i64_value(&row, "currency_cost", 0).max(0), active: bool_value(&row, "active", true), created_at: ctx.timestamp, updated_at: ctx.timestamp });
+                let station_definition_id = optional_string(&row, "station_definition_id").filter(|value| !value.trim().is_empty());
+                if station_definition_id.as_ref().map(|value| ctx.db.object_definition().id().find(value).map(|definition| definition.capacity == 0).unwrap_or(true)).unwrap_or(false) {
+                    return Err("A timed recipe station must be an existing container object definition.".to_string());
+                }
+                let process_seconds = u32_value(&row, "process_seconds", 0);
+                if process_seconds > 0 && station_definition_id.is_none() {
+                    return Err("Timed recipes require a station container.".to_string());
+                }
+                ctx.db.crafting_recipe().insert(CraftingRecipe {
+                    id,
+                    name: string(&row, "name", "Recipe"),
+                    description: string(&row, "description", ""),
+                    output_definition_id,
+                    output_quantity: u32_value(&row, "output_quantity", 1).max(1),
+                    station_tag: optional_string(&row, "station_tag").filter(|value| !value.trim().is_empty()),
+                    required_level: u32_value(&row, "required_level", 1).max(1),
+                    currency_id,
+                    currency_cost: i64_value(&row, "currency_cost", 0).max(0),
+                    active: bool_value(&row, "active", true),
+                    created_at: ctx.timestamp,
+                    updated_at: ctx.timestamp,
+                    station_definition_id,
+                    process_seconds,
+                    requires_active_station: bool_value(&row, "requires_active_station", false),
+                });
             }
         }
         "crafting_ingredients" => {
@@ -2145,12 +2257,7 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                 if ctx.db.object_definition().id().find(&definition_id).is_none() {
                     return Err("World object definition does not exist.".to_string());
                 }
-                if !matches!(location_kind.as_str(), "room" | "inventory" | "equipped" | "container") {
-                    return Err("Object location must be room, inventory, equipped, or container.".to_string());
-                }
-                if location_id.is_empty() {
-                    return Err("World objects require a location.".to_string());
-                }
+                validate_world_object_location(ctx, &id, &location_kind, &location_id)?;
                 ctx.db.world_object().insert(WorldObject {
                     id,
                     definition_id,
@@ -2248,12 +2355,27 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                 if faction.as_ref().map(|faction_id| ctx.db.faction_definition().id().find(faction_id).is_none()).unwrap_or(false) {
                     return Err("NPC faction does not exist.".to_string());
                 }
+                let current_room = optional_string(&row, "current_room").filter(|value| !value.trim().is_empty());
+                let spawn_room = optional_string(&row, "spawn_room").filter(|value| !value.trim().is_empty()).or_else(|| current_room.clone());
+                for room_id in [current_room.as_ref(), spawn_room.as_ref()].into_iter().flatten() {
+                    if ctx.db.room().id().find(room_id).is_none() {
+                        return Err(format!("NPC references missing room: {room_id}"));
+                    }
+                }
+                let patrol_route = json_string(row.get("patrol_route"), "[]");
+                let patrol_rooms = serde_json::from_str::<Vec<String>>(&patrol_route)
+                    .map_err(|_| "NPC patrol route must be an array of room ids.".to_string())?;
+                for room_id in patrol_rooms {
+                    if ctx.db.room().id().find(&room_id).is_none() {
+                        return Err(format!("NPC patrol route references missing room: {room_id}"));
+                    }
+                }
                 let authored_reply = optional_string(&row, "authored_reply").map(|value| value.trim().to_string()).filter(|value| !value.is_empty());
                 ctx.db.npc().insert(Npc {
                     id: id.clone(),
                     name: string(&row, "name", "Unnamed NPC"),
                     description: optional_string(&row, "description"),
-                    current_room: optional_string(&row, "current_room"),
+                    current_room,
                     dialogue_tree: row.get("dialogue_tree").filter(|value| !value.is_null()).map(|value| json_string(Some(value), "{}")),
                     faction,
                     behavior_type: string(&row, "behavior_type", "static"),
@@ -2263,14 +2385,14 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                     portrait_url: optional_string(&row, "portrait_url"),
                     disposition: Some(string(&row, "disposition", "neutral")),
                     attack_on_sight: bool_value(&row, "attack_on_sight", false),
-                    patrol_route: Some(json_string(row.get("patrol_route"), "[]")),
+                    patrol_route: Some(patrol_route),
                     patrol_interval_seconds: u32_value(&row, "patrol_interval_seconds", 20).max(1),
                     patrol_index: 0,
                     last_patrol_at: None,
                     attack_interval_seconds: u32_value(&row, "attack_interval_seconds", 6).max(1),
                     last_attack_at: None,
                     respawn_seconds: u32_value(&row, "respawn_seconds", 60),
-                    spawn_room: optional_string(&row, "spawn_room").or_else(|| optional_string(&row, "current_room")),
+                    spawn_room,
                     defeated_at: None,
                     xp_reward: u32_value(&row, "xp_reward", 25),
                     is_guard: bool_value(&row, "is_guard", false),
@@ -2419,7 +2541,6 @@ pub fn update_rows(
         "object_definitions" => {
             require_admin(ctx)?;
             for id in ids {
-                if ctx.db.vendor_stock().iter().any(|stock| stock.definition_id == id) || ctx.db.crafting_recipe().iter().any(|recipe| recipe.output_definition_id == id) || ctx.db.crafting_ingredient().iter().any(|ingredient| ingredient.definition_id == id) || ctx.db.character_option_grant().iter().any(|grant| grant.grant_kind == "item" && grant.reference_id == id) { return Err("This item is used by an option, vendor, or recipe.".to_string()); }
                 let Some(existing) = ctx.db.object_definition().id().find(&id) else { continue };
                 ctx.db.object_definition().id().update(ObjectDefinition {
                     name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(),
@@ -2457,13 +2578,12 @@ pub fn update_rows(
                     return Err("World object definition does not exist.".to_string());
                 }
                 let location_kind = payload.get("location_kind").and_then(Value::as_str).unwrap_or(&existing.location_kind).to_string();
-                if !matches!(location_kind.as_str(), "room" | "inventory" | "equipped" | "container") {
-                    return Err("Object location must be room, inventory, equipped, or container.".to_string());
-                }
+                let location_id = payload.get("location_id").and_then(Value::as_str).unwrap_or(&existing.location_id).to_string();
+                validate_world_object_location(ctx, &id, &location_kind, &location_id)?;
                 ctx.db.world_object().id().update(WorldObject {
                     definition_id,
                     location_kind,
-                    location_id: payload.get("location_id").and_then(Value::as_str).unwrap_or(&existing.location_id).to_string(),
+                    location_id,
                     quantity: payload.get("quantity").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.quantity).max(1),
                     equipped_slot: payload.get("equipped_slot").map(|_| optional_string(&payload, "equipped_slot").filter(|slot| !slot.trim().is_empty())).unwrap_or(existing.equipped_slot),
                     durability: payload.get("durability").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.durability).max(0),
@@ -2668,7 +2788,6 @@ pub fn update_rows(
         "rooms" => {
             require_admin(ctx)?;
             for id in ids {
-                if ctx.db.character_option_definition().iter().any(|option| option.starting_room_id.as_deref() == Some(id.as_str())) { return Err("This room is a character option starting room.".to_string()); }
                 let Some(existing) = ctx.db.room().id().find(&id) else { continue };
                 ctx.db.room().id().update(Room {
                     name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(),
@@ -2684,16 +2803,30 @@ pub fn update_rows(
         "npcs" => {
             require_admin(ctx)?;
             for id in ids {
-                if ctx.db.vendor_definition().iter().any(|vendor| vendor.npc_id == id) { return Err("This NPC operates a vendor. Delete the vendor first.".to_string()); }
                 let Some(existing) = ctx.db.npc().id().find(&id) else { continue };
                 let faction = payload.get("faction").map(|_| optional_string(&payload, "faction").filter(|value| !value.trim().is_empty())).unwrap_or(existing.faction.clone());
                 if payload.get("faction").is_some() && faction != existing.faction && faction.as_ref().map(|faction_id| ctx.db.faction_definition().id().find(faction_id).is_none()).unwrap_or(false) {
                     return Err("NPC faction does not exist.".to_string());
                 }
+                let current_room = payload.get("current_room").map(|_| optional_string(&payload, "current_room").filter(|value| !value.trim().is_empty())).unwrap_or(existing.current_room.clone());
+                let spawn_room = payload.get("spawn_room").map(|_| optional_string(&payload, "spawn_room").filter(|value| !value.trim().is_empty())).unwrap_or(existing.spawn_room.clone());
+                for room_id in [current_room.as_ref(), spawn_room.as_ref()].into_iter().flatten() {
+                    if ctx.db.room().id().find(room_id).is_none() {
+                        return Err(format!("NPC references missing room: {room_id}"));
+                    }
+                }
+                let patrol_route = payload.get("patrol_route").map(|value| json_string(Some(value), "[]")).unwrap_or_else(|| existing.patrol_route.clone().unwrap_or_else(|| "[]".to_string()));
+                let patrol_rooms = serde_json::from_str::<Vec<String>>(&patrol_route)
+                    .map_err(|_| "NPC patrol route must be an array of room ids.".to_string())?;
+                for room_id in patrol_rooms {
+                    if ctx.db.room().id().find(&room_id).is_none() {
+                        return Err(format!("NPC patrol route references missing room: {room_id}"));
+                    }
+                }
                 ctx.db.npc().id().update(Npc {
                     name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(),
                     description: payload.get("description").map(|_| optional_string(&payload, "description")).unwrap_or(existing.description),
-                    current_room: payload.get("current_room").map(|_| optional_string(&payload, "current_room")).unwrap_or(existing.current_room),
+                    current_room,
                     dialogue_tree: payload.get("dialogue_tree").map(|value| if value.is_null() { None } else { Some(json_string(Some(value), "{}")) }).unwrap_or(existing.dialogue_tree),
                     faction,
                     behavior_type: payload.get("behavior_type").and_then(Value::as_str).unwrap_or(&existing.behavior_type).to_string(),
@@ -2702,11 +2835,11 @@ pub fn update_rows(
                     portrait_url: payload.get("portrait_url").map(|_| optional_string(&payload, "portrait_url")).unwrap_or(existing.portrait_url),
                     disposition: payload.get("disposition").map(|_| optional_string(&payload, "disposition")).unwrap_or(existing.disposition),
                     attack_on_sight: payload.get("attack_on_sight").and_then(Value::as_bool).unwrap_or(existing.attack_on_sight),
-                    patrol_route: payload.get("patrol_route").map(|value| Some(json_string(Some(value), "[]"))).unwrap_or(existing.patrol_route),
+                    patrol_route: Some(patrol_route),
                     patrol_interval_seconds: payload.get("patrol_interval_seconds").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.patrol_interval_seconds).max(1),
                     attack_interval_seconds: payload.get("attack_interval_seconds").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.attack_interval_seconds).max(1),
                     respawn_seconds: payload.get("respawn_seconds").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.respawn_seconds),
-                    spawn_room: payload.get("spawn_room").map(|_| optional_string(&payload, "spawn_room")).unwrap_or(existing.spawn_room),
+                    spawn_room,
                     xp_reward: payload.get("xp_reward").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.xp_reward),
                     is_guard: payload.get("is_guard").and_then(Value::as_bool).unwrap_or(existing.is_guard),
                     guard_greeting: payload.get("guard_greeting").map(|_| optional_string(&payload, "guard_greeting")).unwrap_or(existing.guard_greeting),
@@ -2764,10 +2897,6 @@ pub fn update_rows(
         "quest_definitions" => {
             require_admin(ctx)?;
             for id in ids {
-                if ctx.db.quest_rule().iter().any(|rule| rule.quest_id != id && (rule.prerequisite_quest_id.as_deref() == Some(id.as_str()) || rule.next_quest_id.as_deref() == Some(id.as_str())))
-                    || ctx.db.quest_choice().iter().any(|choice| choice.next_quest_id.as_deref() == Some(id.as_str())) {
-                    return Err("This quest is referenced as a prerequisite or branch destination. Reassign that reference first.".to_string());
-                }
                 let Some(existing) = ctx.db.quest_definition().id().find(&id) else { continue };
                 let quest_giver_npc_id = payload.get("quest_giver_npc_id").and_then(Value::as_str).unwrap_or(&existing.quest_giver_npc_id).to_string();
                 let turn_in_npc_id = payload.get("turn_in_npc_id").and_then(Value::as_str).unwrap_or(&existing.turn_in_npc_id).to_string();
@@ -2866,6 +2995,12 @@ pub fn update_rows(
                 let Some(existing) = ctx.db.quest_choice().id().find(&id) else { continue };
                 let next_quest_id = payload.get("next_quest_id").map(|_| optional_string(&payload, "next_quest_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.next_quest_id.clone());
                 let reputation_faction_id = payload.get("reputation_faction_id").map(|_| optional_string(&payload, "reputation_faction_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.reputation_faction_id.clone());
+                if next_quest_id.as_ref().map(|value| ctx.db.quest_definition().id().find(value).is_none()).unwrap_or(false) {
+                    return Err("Choice follow-up quest does not exist.".to_string());
+                }
+                if reputation_faction_id.as_ref().map(|value| ctx.db.faction_definition().id().find(value).is_none()).unwrap_or(false) {
+                    return Err("Choice reputation faction does not exist.".to_string());
+                }
                 ctx.db.quest_choice().id().update(QuestChoice { label: payload.get("label").and_then(Value::as_str).unwrap_or(&existing.label).to_string(), description: payload.get("description").and_then(Value::as_str).unwrap_or(&existing.description).to_string(), next_quest_id, gold_reward: payload.get("gold_reward").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.gold_reward), reputation_faction_id, reputation_reward: payload.get("reputation_reward").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.reputation_reward), sort_order: payload.get("sort_order").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.sort_order), updated_at: ctx.timestamp, ..existing });
             }
         }
@@ -2876,6 +3011,9 @@ pub fn update_rows(
                 let option_kind = payload.get("option_kind").and_then(Value::as_str).unwrap_or(&existing.option_kind).to_lowercase();
                 if !matches!(option_kind.as_str(), "race" | "class" | "background") { return Err("Character option kind must be race, class, or background.".to_string()); }
                 let starting_room_id = payload.get("starting_room_id").map(|_| optional_string(&payload, "starting_room_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.starting_room_id.clone());
+                if starting_room_id.as_ref().map(|value| ctx.db.room().id().find(value).is_none()).unwrap_or(false) {
+                    return Err("Character option starting room does not exist.".to_string());
+                }
                 ctx.db.character_option_definition().id().update(CharacterOptionDefinition { option_kind, name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(), description: payload.get("description").and_then(Value::as_str).unwrap_or(&existing.description).to_string(), icon: payload.get("icon").and_then(Value::as_str).unwrap_or(&existing.icon).to_string(), starting_room_id, starting_gold: payload.get("starting_gold").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.starting_gold).max(0), active: payload.get("active").and_then(Value::as_bool).unwrap_or(existing.active), sort_order: payload.get("sort_order").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.sort_order), updated_at: ctx.timestamp, ..existing });
             }
         }
@@ -2903,19 +3041,117 @@ pub fn update_rows(
         }
         "vendor_definitions" => {
             require_admin(ctx)?;
-            for id in ids { if let Some(existing) = ctx.db.vendor_definition().id().find(&id) { ctx.db.vendor_definition().id().update(VendorDefinition { name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(), buys_from_players: payload.get("buys_from_players").and_then(Value::as_bool).unwrap_or(existing.buys_from_players), sell_price_percent: payload.get("sell_price_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.sell_price_percent), required_faction_id: payload.get("required_faction_id").map(|_| optional_string(&payload, "required_faction_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.required_faction_id.clone()), required_reputation: payload.get("required_reputation").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.required_reputation), updated_at: ctx.timestamp, ..existing }); } }
+            for id in ids {
+                if let Some(existing) = ctx.db.vendor_definition().id().find(&id) {
+                    let npc_id = payload.get("npc_id").and_then(Value::as_str).unwrap_or(&existing.npc_id).to_string();
+                    let currency_id = payload.get("currency_id").and_then(Value::as_str).unwrap_or(&existing.currency_id).to_string();
+                    let required_faction_id = payload.get("required_faction_id").map(|_| optional_string(&payload, "required_faction_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.required_faction_id.clone());
+                    if ctx.db.npc().id().find(&npc_id).is_none() {
+                        return Err("Vendor NPC does not exist.".to_string());
+                    }
+                    if currency_id != "gold" && ctx.db.currency_definition().id().find(&currency_id).is_none() {
+                        return Err("Vendor currency does not exist.".to_string());
+                    }
+                    if required_faction_id.as_ref().map(|value| ctx.db.faction_definition().id().find(value).is_none()).unwrap_or(false) {
+                        return Err("Vendor faction does not exist.".to_string());
+                    }
+                    ctx.db.vendor_definition().id().update(VendorDefinition {
+                        npc_id,
+                        name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(),
+                        currency_id,
+                        buys_from_players: payload.get("buys_from_players").and_then(Value::as_bool).unwrap_or(existing.buys_from_players),
+                        sell_price_percent: payload.get("sell_price_percent").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.sell_price_percent),
+                        required_faction_id,
+                        required_reputation: payload.get("required_reputation").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.required_reputation),
+                        updated_at: ctx.timestamp,
+                        ..existing
+                    });
+                }
+            }
         }
         "vendor_stocks" => {
             require_admin(ctx)?;
-            for id in ids { if let Some(existing) = ctx.db.vendor_stock().id().find(&id) { ctx.db.vendor_stock().id().update(VendorStock { price: payload.get("price").and_then(Value::as_i64).unwrap_or(existing.price).max(0), stock: payload.get("stock").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.stock).max(-1), maximum_per_purchase: payload.get("maximum_per_purchase").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.maximum_per_purchase).max(1), updated_at: ctx.timestamp, ..existing }); } }
+            for id in ids {
+                if let Some(existing) = ctx.db.vendor_stock().id().find(&id) {
+                    let vendor_id = payload.get("vendor_id").and_then(Value::as_str).unwrap_or(&existing.vendor_id).to_string();
+                    let definition_id = payload.get("definition_id").and_then(Value::as_str).unwrap_or(&existing.definition_id).to_string();
+                    if ctx.db.vendor_definition().id().find(&vendor_id).is_none() || ctx.db.object_definition().id().find(&definition_id).is_none() {
+                        return Err("Vendor stock requires an existing vendor and object.".to_string());
+                    }
+                    ctx.db.vendor_stock().id().update(VendorStock {
+                        vendor_id,
+                        definition_id,
+                        price: payload.get("price").and_then(Value::as_i64).unwrap_or(existing.price).max(0),
+                        stock: payload.get("stock").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.stock).max(-1),
+                        maximum_per_purchase: payload.get("maximum_per_purchase").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.maximum_per_purchase).max(1),
+                        updated_at: ctx.timestamp,
+                        ..existing
+                    });
+                }
+            }
         }
         "crafting_recipes" => {
             require_admin(ctx)?;
-            for id in ids { if let Some(existing) = ctx.db.crafting_recipe().id().find(&id) { ctx.db.crafting_recipe().id().update(CraftingRecipe { name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(), description: payload.get("description").and_then(Value::as_str).unwrap_or(&existing.description).to_string(), output_quantity: payload.get("output_quantity").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.output_quantity).max(1), station_tag: payload.get("station_tag").map(|_| optional_string(&payload, "station_tag").filter(|value| !value.trim().is_empty())).unwrap_or(existing.station_tag.clone()), required_level: payload.get("required_level").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.required_level).max(1), currency_id: payload.get("currency_id").map(|_| optional_string(&payload, "currency_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.currency_id.clone()), currency_cost: payload.get("currency_cost").and_then(Value::as_i64).unwrap_or(existing.currency_cost).max(0), active: payload.get("active").and_then(Value::as_bool).unwrap_or(existing.active), updated_at: ctx.timestamp, ..existing }); } }
+            for id in ids {
+                if let Some(existing) = ctx.db.crafting_recipe().id().find(&id) {
+                    let output_definition_id = payload.get("output_definition_id").and_then(Value::as_str).unwrap_or(&existing.output_definition_id).to_string();
+                    if ctx.db.object_definition().id().find(&output_definition_id).is_none() {
+                        return Err("Recipe output object does not exist.".to_string());
+                    }
+                    let station_definition_id = payload.get("station_definition_id")
+                        .map(|_| optional_string(&payload, "station_definition_id").filter(|value| !value.trim().is_empty()))
+                        .unwrap_or(existing.station_definition_id.clone());
+                    if station_definition_id.as_ref().map(|value| ctx.db.object_definition().id().find(value).map(|definition| definition.capacity == 0).unwrap_or(true)).unwrap_or(false) {
+                        return Err("A timed recipe station must be an existing container object definition.".to_string());
+                    }
+                    let process_seconds = payload.get("process_seconds").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.process_seconds);
+                    if process_seconds > 0 && station_definition_id.is_none() {
+                        return Err("Timed recipes require a station container.".to_string());
+                    }
+                    let currency_id = payload.get("currency_id")
+                        .map(|_| optional_string(&payload, "currency_id").filter(|value| !value.trim().is_empty()))
+                        .unwrap_or(existing.currency_id.clone());
+                    if currency_id.as_ref().map(|value| value != "gold" && ctx.db.currency_definition().id().find(value).is_none()).unwrap_or(false) {
+                        return Err("Recipe currency does not exist.".to_string());
+                    }
+                    ctx.db.crafting_recipe().id().update(CraftingRecipe {
+                        name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(),
+                        description: payload.get("description").and_then(Value::as_str).unwrap_or(&existing.description).to_string(),
+                        output_definition_id,
+                        output_quantity: payload.get("output_quantity").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.output_quantity).max(1),
+                        station_tag: payload.get("station_tag").map(|_| optional_string(&payload, "station_tag").filter(|value| !value.trim().is_empty())).unwrap_or(existing.station_tag.clone()),
+                        required_level: payload.get("required_level").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.required_level).max(1),
+                        currency_id,
+                        currency_cost: payload.get("currency_cost").and_then(Value::as_i64).unwrap_or(existing.currency_cost).max(0),
+                        active: payload.get("active").and_then(Value::as_bool).unwrap_or(existing.active),
+                        station_definition_id,
+                        process_seconds,
+                        requires_active_station: payload.get("requires_active_station").and_then(Value::as_bool).unwrap_or(existing.requires_active_station),
+                        updated_at: ctx.timestamp,
+                        ..existing
+                    });
+                }
+            }
         }
         "crafting_ingredients" => {
             require_admin(ctx)?;
-            for id in ids { if let Some(existing) = ctx.db.crafting_ingredient().id().find(&id) { ctx.db.crafting_ingredient().id().update(CraftingIngredient { quantity: payload.get("quantity").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.quantity).max(1), consumed: payload.get("consumed").and_then(Value::as_bool).unwrap_or(existing.consumed), updated_at: ctx.timestamp, ..existing }); } }
+            for id in ids {
+                if let Some(existing) = ctx.db.crafting_ingredient().id().find(&id) {
+                    let recipe_id = payload.get("recipe_id").and_then(Value::as_str).unwrap_or(&existing.recipe_id).to_string();
+                    let definition_id = payload.get("definition_id").and_then(Value::as_str).unwrap_or(&existing.definition_id).to_string();
+                    if ctx.db.crafting_recipe().id().find(&recipe_id).is_none() || ctx.db.object_definition().id().find(&definition_id).is_none() {
+                        return Err("Ingredient requires an existing recipe and object.".to_string());
+                    }
+                    ctx.db.crafting_ingredient().id().update(CraftingIngredient {
+                        recipe_id,
+                        definition_id,
+                        quantity: payload.get("quantity").and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok()).unwrap_or(existing.quantity).max(1),
+                        consumed: payload.get("consumed").and_then(Value::as_bool).unwrap_or(existing.consumed),
+                        updated_at: ctx.timestamp,
+                        ..existing
+                    });
+                }
+            }
         }
         "spawn_points" => {
             require_admin(ctx)?;
@@ -2923,6 +3159,12 @@ pub fn update_rows(
                 let Some(existing) = ctx.db.spawn_point().id().find(&id) else { continue };
                 let room_id = payload.get("room_id").and_then(Value::as_str).unwrap_or(&existing.room_id).to_string();
                 if ctx.db.room().id().find(&room_id).is_none() { return Err("Spawn point room does not exist.".to_string()); }
+                let required_option_id = payload.get("required_option_id").map(|_| optional_string(&payload, "required_option_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.required_option_id.clone());
+                let required_faction_id = payload.get("required_faction_id").map(|_| optional_string(&payload, "required_faction_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.required_faction_id.clone());
+                let death_region_id = payload.get("death_region_id").map(|_| optional_string(&payload, "death_region_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.death_region_id.clone());
+                if required_option_id.as_ref().map(|value| ctx.db.character_option_definition().id().find(value).is_none()).unwrap_or(false) { return Err("Spawn option requirement does not exist.".to_string()); }
+                if required_faction_id.as_ref().map(|value| ctx.db.faction_definition().id().find(value).is_none()).unwrap_or(false) { return Err("Spawn faction requirement does not exist.".to_string()); }
+                if death_region_id.as_ref().map(|value| ctx.db.region().name().find(value).is_none()).unwrap_or(false) { return Err("Spawn death-region override does not exist.".to_string()); }
                 ctx.db.spawn_point().id().update(SpawnPoint {
                     name: payload.get("name").and_then(Value::as_str).unwrap_or(&existing.name).to_string(),
                     description: payload.get("description").and_then(Value::as_str).unwrap_or(&existing.description).to_string(),
@@ -2931,10 +3173,10 @@ pub fn update_rows(
                     allows_respawn: payload.get("allows_respawn").and_then(Value::as_bool).unwrap_or(existing.allows_respawn),
                     active: payload.get("active").and_then(Value::as_bool).unwrap_or(existing.active),
                     priority: payload.get("priority").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.priority),
-                    required_option_id: payload.get("required_option_id").map(|_| optional_string(&payload, "required_option_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.required_option_id.clone()),
-                    required_faction_id: payload.get("required_faction_id").map(|_| optional_string(&payload, "required_faction_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.required_faction_id.clone()),
+                    required_option_id,
+                    required_faction_id,
                     required_reputation: payload.get("required_reputation").and_then(Value::as_i64).map(|value| value as i32).unwrap_or(existing.required_reputation),
-                    death_region_id: payload.get("death_region_id").map(|_| optional_string(&payload, "death_region_id").filter(|value| !value.trim().is_empty())).unwrap_or(existing.death_region_id.clone()),
+                    death_region_id,
                     updated_at: ctx.timestamp,
                     ..existing
                 });
@@ -2985,6 +3227,7 @@ pub fn update_rows(
 }
 
 fn delete_world_object_tree(ctx: &ReducerContext, id: &String) {
+    ctx.db.crafting_batch().station_object_id().delete(id);
     let child_ids = ctx.db.world_object().iter()
         .filter(|object| object.location_kind == "container" && object.location_id == *id)
         .map(|object| object.id)
@@ -3049,6 +3292,23 @@ fn delete_actor_rpg_state(ctx: &ReducerContext, actor_id: &String) {
     ctx.db.actor_progression().id().delete(actor_id);
 }
 
+fn trigger_condition_references(trigger: &WorldTrigger, field: &str, id: &str) -> bool {
+    serde_json::from_str::<Value>(&trigger.conditions_json)
+        .ok()
+        .and_then(|conditions| conditions.get(field).and_then(Value::as_str).map(|value| value == id))
+        .unwrap_or(false)
+}
+
+fn trigger_action_references(trigger: &WorldTrigger, action_kind: &str, field: &str, id: &str) -> bool {
+    serde_json::from_str::<Vec<Value>>(&trigger.actions_json)
+        .ok()
+        .map(|actions| actions.iter().any(|action| {
+            action.get("kind").and_then(Value::as_str) == Some(action_kind)
+                && action.get(field).and_then(Value::as_str) == Some(id)
+        }))
+        .unwrap_or(false)
+}
+
 #[reducer]
 pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -> Result<(), String> {
     ensure_profile(ctx);
@@ -3108,12 +3368,23 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
                 if ctx.db.quest_objective().iter().any(|objective| objective.objective_type == "acquire_item" && objective.target_id == id) {
                     return Err("This item is used by a quest objective. Reassign or delete that objective first.".to_string());
                 }
+                if ctx.db.vendor_stock().iter().any(|stock| stock.definition_id == id)
+                    || ctx.db.crafting_recipe().iter().any(|recipe| recipe.output_definition_id == id || recipe.station_definition_id.as_deref() == Some(id.as_str()))
+                    || ctx.db.crafting_ingredient().iter().any(|ingredient| ingredient.definition_id == id)
+                    || ctx.db.character_option_grant().iter().any(|grant| grant.grant_kind == "item" && grant.reference_id == id)
+                    || ctx.db.exit_rule().iter().any(|rule| rule.key_definition_id.as_deref() == Some(id.as_str()))
+                    || ctx.db.dialogue_choice().iter().any(|choice| choice.action_kind == "give_item" && choice.action_reference_id.as_deref() == Some(id.as_str()))
+                    || ctx.db.world_trigger().iter().any(|trigger| trigger_action_references(&trigger, "item", "definition_id", &id))
+                {
+                    return Err("This item is used by an option, vendor, recipe, door, dialogue, or trigger. Reassign it first.".to_string());
+                }
                 let reward_ids = ctx.db.quest_item_reward().iter().filter(|reward| reward.definition_id == id).map(|reward| reward.id).collect::<Vec<_>>();
                 for reward_id in reward_ids { ctx.db.quest_item_reward().id().delete(&reward_id); }
                 let loot_ids = ctx.db.loot_table_entry().iter().filter(|entry| entry.definition_id == id).map(|entry| entry.id).collect::<Vec<_>>();
                 for loot_id in loot_ids { ctx.db.loot_table_entry().id().delete(&loot_id); }
                 let object_ids = ctx.db.world_object().iter().filter(|object| object.definition_id == id).map(|object| object.id).collect::<Vec<_>>();
                 for object_id in object_ids { delete_world_object_tree(ctx, &object_id); }
+                ctx.db.object_rule().definition_id().delete(&id);
                 ctx.db.object_definition().id().delete(&id);
             }
         }
@@ -3144,6 +3415,9 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
         "ability_definitions" => {
             require_admin(ctx)?;
             for id in ids {
+                if ctx.db.ability_unlock_rule().iter().any(|rule| rule.prerequisite_ability_id.as_deref() == Some(id.as_str())) {
+                    return Err("This ability is a prerequisite for another unlock rule. Reassign that rule first.".to_string());
+                }
                 let effect_ids = ctx.db.ability_effect_definition().iter().filter(|effect| effect.ability_id == id).map(|effect| effect.id).collect::<Vec<_>>();
                 for effect_id in effect_ids { delete_ability_effect(ctx, &effect_id); }
                 let grants = ctx.db.actor_ability().iter().filter(|grant| grant.ability_id == id).map(|grant| grant.id).collect::<Vec<_>>();
@@ -3151,6 +3425,7 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
                 let action_id = format!("ability:{id}");
                 let cooldowns = ctx.db.actor_cooldown().iter().filter(|cooldown| cooldown.action_id == action_id).map(|cooldown| cooldown.id).collect::<Vec<_>>();
                 for cooldown in cooldowns { ctx.db.actor_cooldown().id().delete(&cooldown); }
+                ctx.db.ability_unlock_rule().ability_id().delete(&id);
                 ctx.db.ability_definition().id().delete(&id);
             }
         }
@@ -3175,8 +3450,11 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
                 if ctx.db.quest_objective().iter().any(|objective| objective.objective_type == "explore_room" && objective.target_id == id) {
                     return Err("This room is used by a quest objective. Reassign or delete that objective first.".to_string());
                 }
+                if ctx.db.world_trigger().iter().any(|trigger| trigger.source_id.as_deref() == Some(id.as_str())) {
+                    return Err("This room is used by a world trigger. Reassign or delete that trigger first.".to_string());
+                }
                 let exits = ctx.db.exit().iter().filter(|exit| exit.from_room.as_deref() == Some(id.as_str()) || exit.to_room.as_deref() == Some(id.as_str())).map(|exit| exit.id).collect::<Vec<_>>();
-                for exit_id in exits { ctx.db.exit().id().delete(&exit_id); }
+                for exit_id in exits { ctx.db.exit_rule().exit_id().delete(&exit_id); ctx.db.exit().id().delete(&exit_id); }
                 let object_ids = ctx.db.world_object().iter().filter(|object| object.location_kind == "room" && object.location_id == id).map(|object| object.id).collect::<Vec<_>>();
                 for object_id in object_ids { delete_world_object_tree(ctx, &object_id); }
                 let npcs = ctx.db.npc().iter().filter(|npc| npc.current_room.as_deref() == Some(id.as_str()) || npc.spawn_room.as_deref() == Some(id.as_str())).collect::<Vec<_>>();
@@ -3207,8 +3485,10 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
             require_admin(ctx)?;
             for id in ids {
                 if ctx.db.quest_definition().iter().any(|quest| quest.quest_giver_npc_id == id || quest.turn_in_npc_id == id)
-                    || ctx.db.quest_objective().iter().any(|objective| matches!(objective.objective_type.as_str(), "kill_npc" | "talk_npc") && objective.target_id == id) {
-                    return Err("This NPC is used by a quest. Reassign or delete that quest content first.".to_string());
+                    || ctx.db.quest_objective().iter().any(|objective| matches!(objective.objective_type.as_str(), "kill_npc" | "talk_npc" | "escort_npc") && objective.target_id == id)
+                    || ctx.db.vendor_definition().iter().any(|vendor| vendor.npc_id == id)
+                    || ctx.db.bank_config().iter().any(|config| config.required_npc_id.as_deref() == Some(id.as_str())) {
+                    return Err("This NPC is used by a quest, vendor, or bank. Reassign that content first.".to_string());
                 }
                 let loot_ids = ctx.db.loot_table_entry().iter().filter(|entry| entry.npc_id == id).map(|entry| entry.id).collect::<Vec<_>>();
                 for loot_id in loot_ids { ctx.db.loot_table_entry().id().delete(&loot_id); }
@@ -3232,8 +3512,13 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
             for id in ids {
                 if ctx.db.npc().iter().any(|npc| npc.faction.as_deref() == Some(id.as_str()))
                     || ctx.db.quest_definition().iter().any(|quest| quest.required_faction_id.as_deref() == Some(id.as_str()) || quest.reputation_faction_id.as_deref() == Some(id.as_str()))
-                    || ctx.db.quest_objective().iter().any(|objective| objective.objective_type == "kill_faction" && objective.target_id == id) {
-                    return Err("This faction is used by an NPC or quest. Reassign those references first.".to_string());
+                    || ctx.db.quest_objective().iter().any(|objective| objective.objective_type == "kill_faction" && objective.target_id == id)
+                    || ctx.db.vendor_definition().iter().any(|vendor| vendor.required_faction_id.as_deref() == Some(id.as_str()))
+                    || ctx.db.ability_unlock_rule().iter().any(|rule| rule.required_faction_id.as_deref() == Some(id.as_str()))
+                    || ctx.db.dialogue_node().iter().any(|node| node.required_faction_id.as_deref() == Some(id.as_str()))
+                    || ctx.db.dialogue_choice().iter().any(|choice| choice.action_kind == "reputation" && choice.action_reference_id.as_deref() == Some(id.as_str()))
+                    || ctx.db.world_trigger().iter().any(|trigger| trigger_action_references(&trigger, "reputation", "faction_id", &id)) {
+                    return Err("This faction is used by an NPC, quest, vendor, talent, dialogue, or trigger. Reassign those references first.".to_string());
                 }
                 let standings = ctx.db.actor_faction_reputation().iter().filter(|row| row.faction_id == id).map(|row| row.id).collect::<Vec<_>>();
                 for standing in standings { ctx.db.actor_faction_reputation().id().delete(&standing); }
@@ -3249,6 +3534,15 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
         "quest_definitions" => {
             require_admin(ctx)?;
             for id in ids {
+                if ctx.db.quest_rule().iter().any(|rule| rule.quest_id != id && (rule.prerequisite_quest_id.as_deref() == Some(id.as_str()) || rule.next_quest_id.as_deref() == Some(id.as_str())))
+                    || ctx.db.quest_choice().iter().any(|choice| choice.quest_id != id && choice.next_quest_id.as_deref() == Some(id.as_str()))
+                    || ctx.db.ability_unlock_rule().iter().any(|rule| rule.required_quest_id.as_deref() == Some(id.as_str()))
+                    || ctx.db.dialogue_node().iter().any(|node| node.required_quest_id.as_deref() == Some(id.as_str()))
+                    || ctx.db.dialogue_choice().iter().any(|choice| choice.action_kind == "start_quest" && choice.action_reference_id.as_deref() == Some(id.as_str()))
+                    || ctx.db.exit_rule().iter().any(|rule| rule.required_quest_id.as_deref() == Some(id.as_str()))
+                    || ctx.db.world_trigger().iter().any(|trigger| trigger_condition_references(&trigger, "required_quest_id", &id)) {
+                    return Err("This quest is referenced by another quest, talent, dialogue, exit rule, or trigger.".to_string());
+                }
                 let objective_ids = ctx.db.quest_objective().iter().filter(|row| row.quest_id == id).map(|row| row.id).collect::<Vec<_>>();
                 for objective_id in objective_ids {
                     let progress_ids = ctx.db.actor_quest_progress().iter().filter(|row| row.objective_id == objective_id).map(|row| row.id).collect::<Vec<_>>();
@@ -3300,6 +3594,13 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
         "character_option_definitions" => {
             require_admin(ctx)?;
             for id in ids {
+                if ctx.db.spawn_point().iter().any(|row| row.required_option_id.as_deref() == Some(id.as_str()))
+                    || ctx.db.ability_unlock_rule().iter().any(|row| row.required_option_id.as_deref() == Some(id.as_str()))
+                    || ctx.db.object_rule().iter().any(|row| row.required_option_id.as_deref() == Some(id.as_str()))
+                    || ctx.db.exit_rule().iter().any(|row| row.required_option_id.as_deref() == Some(id.as_str()))
+                    || ctx.db.world_trigger().iter().any(|trigger| trigger_condition_references(&trigger, "required_option_id", &id)) {
+                    return Err("This character option is used by spawn, talent, item, exit, or trigger rules.".to_string());
+                }
                 let grants = ctx.db.character_option_grant().iter().filter(|row| row.option_id == id).map(|row| row.id).collect::<Vec<_>>();
                 for grant in grants { ctx.db.character_option_grant().id().delete(&grant); }
                 let selections = ctx.db.actor_character_option().iter().filter(|row| row.option_id == id).map(|row| row.id).collect::<Vec<_>>();
@@ -3331,12 +3632,28 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
         }
         "vendor_definitions" => {
             require_admin(ctx)?;
-            for id in ids { let stocks = ctx.db.vendor_stock().iter().filter(|row| row.vendor_id == id).map(|row| row.id).collect::<Vec<_>>(); for stock in stocks { ctx.db.vendor_stock().id().delete(&stock); } ctx.db.vendor_definition().id().delete(&id); }
+            for id in ids {
+                let stocks = ctx.db.vendor_stock().iter().filter(|row| row.vendor_id == id).map(|row| row.id).collect::<Vec<_>>();
+                for stock in stocks { ctx.db.vendor_restock_rule().vendor_stock_id().delete(&stock); ctx.db.vendor_stock().id().delete(&stock); }
+                ctx.db.vendor_definition().id().delete(&id);
+            }
         }
-        "vendor_stocks" => { require_admin(ctx)?; for id in ids { ctx.db.vendor_stock().id().delete(&id); } }
+        "vendor_stocks" => { require_admin(ctx)?; for id in ids { ctx.db.vendor_restock_rule().vendor_stock_id().delete(&id); ctx.db.vendor_stock().id().delete(&id); } }
         "crafting_recipes" => {
             require_admin(ctx)?;
-            for id in ids { let ingredients = ctx.db.crafting_ingredient().iter().filter(|row| row.recipe_id == id).map(|row| row.id).collect::<Vec<_>>(); for ingredient in ingredients { ctx.db.crafting_ingredient().id().delete(&ingredient); } ctx.db.crafting_recipe().id().delete(&id); }
+            for id in ids {
+                if ctx.db.dialogue_choice().iter().any(|choice| choice.action_kind == "learn_recipe" && choice.action_reference_id.as_deref() == Some(id.as_str())) {
+                    return Err("This recipe is granted by authored dialogue. Reassign that response first.".to_string());
+                }
+                let ingredients = ctx.db.crafting_ingredient().iter().filter(|row| row.recipe_id == id).map(|row| row.id).collect::<Vec<_>>();
+                for ingredient in ingredients { ctx.db.crafting_ingredient().id().delete(&ingredient); }
+                let batches = ctx.db.crafting_batch().iter().filter(|row| row.recipe_id == id).map(|row| row.station_object_id).collect::<Vec<_>>();
+                for station_id in batches { ctx.db.crafting_batch().station_object_id().delete(&station_id); }
+                ctx.db.recipe_rule().recipe_id().delete(&id);
+                let learned_ids = ctx.db.actor_learned_recipe().iter().filter(|row| row.recipe_id == id).map(|row| row.id).collect::<Vec<_>>();
+                for learned_id in learned_ids { ctx.db.actor_learned_recipe().id().delete(&learned_id); }
+                ctx.db.crafting_recipe().id().delete(&id);
+            }
         }
         "crafting_ingredients" => { require_admin(ctx)?; for id in ids { ctx.db.crafting_ingredient().id().delete(&id); } }
         "actor_cooldowns" => {
@@ -3390,7 +3707,7 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
         }
         "exits" => {
             require_admin(ctx)?;
-            for id in ids { ctx.db.exit().id().delete(&id); }
+            for id in ids { ctx.db.exit_rule().exit_id().delete(&id); ctx.db.exit().id().delete(&id); }
         }
         "room_messages" => {
             require_admin(ctx)?;
@@ -4147,6 +4464,11 @@ fn describe_object(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &
         rpg_message(ctx, room_id, actor_id, "error", format!("There is no \"{query}\" here."));
         return;
     };
+    let batch_actor_id = ctx.db.crafting_batch().station_object_id().find(&object.id).map(|batch| batch.actor_id);
+    if let Some(message) = reconcile_crafting_station(ctx, object.clone()) {
+        notify_crafting_result(ctx, &object, batch_actor_id.as_deref().unwrap_or(actor_id), message);
+    }
+    let object = ctx.db.world_object().id().find(&object.id).unwrap_or(object);
     let object = reconcile_fuel(ctx, object, &definition);
     let mut lines = vec![format!("[{} {}]", definition.icon, definition.name.to_uppercase()), definition.description.clone()];
     if definition.burn_rate > 0 {
@@ -4160,6 +4482,18 @@ fn describe_object(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &
         lines.push(if object.durability == 0 { "It is broken and provides no equipment benefits.".to_string() } else { format!("Durability: {}.", object.durability) });
     }
     if definition.capacity > 0 {
+        if let Some(batch) = ctx.db.crafting_batch().station_object_id().find(&object.id) {
+            let recipe_name = ctx.db.crafting_recipe().id().find(&batch.recipe_id).map(|recipe| recipe.name).unwrap_or_else(|| batch.recipe_id.clone());
+            let remaining_seconds = batch.remaining_micros.saturating_add(999_999).saturating_div(1_000_000);
+            let paused = ctx.db.crafting_recipe().id().find(&batch.recipe_id).map(|recipe| recipe.requires_active_station && !object.is_active).unwrap_or(false);
+            lines.push(if batch.remaining_micros == 0 {
+                format!("[PROCESSING]\n{recipe_name} is finished but needs room for its output.")
+            } else if paused {
+                format!("[PROCESSING]\n{recipe_name} is paused with {remaining_seconds}s remaining. Activate the station to continue.")
+            } else {
+                format!("[PROCESSING]\n{recipe_name} · {remaining_seconds}s remaining.")
+            });
+        }
         let contents = ctx.db.world_object().iter()
             .filter(|child| child.location_kind == "container" && child.location_id == object.id)
             .filter_map(|child| object_definition_for(ctx, &child).map(|child_definition| format!("• {} {} ×{}", child_definition.icon, child_definition.name, child.quantity)))
@@ -4371,7 +4705,16 @@ fn sell_to_vendor(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &s
     let (item_query, vendor_query) = query.split_once(" to ").unwrap_or((query, ""));
     let Some(vendor) = vendor_matches(ctx, room_id, vendor_query).filter(|vendor| vendor.buys_from_players) else { rpg_message(ctx, room_id, actor_id, "error", "There is no vendor here buying items.".to_string()); return };
     let Some((object, definition)) = find_carried_object(ctx, actor_id, item_query.trim()).filter(|(object, _)| object.location_kind == "inventory") else { rpg_message(ctx, room_id, actor_id, "error", "You are not carrying that item loose in your inventory.".to_string()); return };
-    let base = ctx.db.vendor_stock().iter().find(|stock| stock.vendor_id == vendor.id && stock.definition_id == definition.id).map(|stock| stock.price).unwrap_or(0);
+    if !expansion::object_transfer_allowed(ctx, &object) {
+        rpg_message(ctx, room_id, actor_id, "error", "That item cannot be traded.".to_string());
+        return;
+    }
+    let base = ctx.db.vendor_stock().iter()
+        .find(|stock| stock.vendor_id == vendor.id && stock.definition_id == definition.id)
+        .map(|stock| stock.price)
+        .filter(|price| *price > 0)
+        .or_else(|| ctx.db.object_rule().definition_id().find(&definition.id).map(|rule| rule.base_value).filter(|price| *price > 0))
+        .unwrap_or(0);
     if base <= 0 { rpg_message(ctx, room_id, actor_id, "error", "The vendor is not interested in that item.".to_string()); return; }
     let value = base.saturating_mul(i64::from(vendor.sell_price_percent)).saturating_div(100).max(1);
     consume_object_quantity(ctx, object, 1);
@@ -4399,7 +4742,281 @@ fn repair_at_vendor(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: 
     rpg_message(ctx, room_id, actor_id, "system", format!("{} repairs {} for {cost} {}.", vendor.name, definition.name, vendor.currency_id));
 }
 
+fn container_item_quantity(ctx: &ReducerContext, container_id: &str, definition_id: &str) -> u32 {
+    ctx.db.world_object().iter()
+        .filter(|object| object.location_kind == "container" && object.location_id == container_id && object.definition_id == definition_id)
+        .map(|object| object.quantity)
+        .fold(0u32, u32::saturating_add)
+}
+
+fn consume_container_items(ctx: &ReducerContext, container_id: &str, definition_id: &str, mut quantity: u32) -> bool {
+    if container_item_quantity(ctx, container_id, definition_id) < quantity { return false; }
+    let objects = ctx.db.world_object().iter()
+        .filter(|object| object.location_kind == "container" && object.location_id == container_id && object.definition_id == definition_id)
+        .collect::<Vec<_>>();
+    for object in objects {
+        if quantity == 0 { break; }
+        let consumed = object.quantity.min(quantity);
+        quantity -= consumed;
+        consume_object_quantity(ctx, object, consumed);
+    }
+    quantity == 0
+}
+
+fn place_processed_output(
+    ctx: &ReducerContext,
+    station: &WorldObject,
+    station_definition: &ObjectDefinition,
+    recipe: &CraftingRecipe,
+) -> Result<String, String> {
+    let output = ctx.db.object_definition().id().find(&recipe.output_definition_id)
+        .ok_or_else(|| "The recipe output definition no longer exists.".to_string())?;
+    let existing = ctx.db.world_object().iter()
+        .filter(|object| object.location_kind == "container" && object.location_id == station.id && object.definition_id == output.id)
+        .collect::<Vec<_>>();
+    let stack_size = if output.stackable { output.max_stack.max(1) } else { 1 };
+    let available_in_stacks = if output.stackable {
+        existing.iter().map(|object| stack_size.saturating_sub(object.quantity.min(stack_size))).fold(0u32, u32::saturating_add)
+    } else {
+        0
+    };
+    let remaining_after_merge = recipe.output_quantity.saturating_sub(available_in_stacks);
+    let required_slots = remaining_after_merge.saturating_add(stack_size - 1) / stack_size;
+    let occupied = ctx.db.world_object().iter()
+        .filter(|object| object.location_kind == "container" && object.location_id == station.id)
+        .count() as u32;
+    if occupied.saturating_add(required_slots) > station_definition.capacity {
+        return Err(format!("{} has no room for the finished {}.", station_definition.name, output.name));
+    }
+
+    let mut remaining = recipe.output_quantity;
+    if output.stackable {
+        for object in existing {
+            if remaining == 0 { break; }
+            let added = remaining.min(stack_size.saturating_sub(object.quantity.min(stack_size)));
+            if added == 0 { continue; }
+            remaining -= added;
+            ctx.db.world_object().id().update(WorldObject {
+                quantity: object.quantity.saturating_add(added),
+                updated_at: ctx.timestamp,
+                ..object
+            });
+        }
+    }
+    let timestamp = ctx.timestamp.to_micros_since_unix_epoch();
+    let mut index = 0u32;
+    while remaining > 0 {
+        let quantity = remaining.min(stack_size);
+        remaining -= quantity;
+        ctx.db.world_object().insert(WorldObject {
+            id: format!("processed-{}-{}-{timestamp}-{index}", station.id, recipe.id),
+            definition_id: output.id.clone(),
+            location_kind: "container".to_string(),
+            location_id: station.id.clone(),
+            quantity,
+            equipped_slot: None,
+            durability: expansion::object_maximum_durability(ctx, &output.id),
+            fuel_remaining: 0,
+            is_active: false,
+            state_json: serde_json::json!({ "source": "timed_recipe", "recipe_id": recipe.id }).to_string(),
+            created_at: ctx.timestamp,
+            updated_at: ctx.timestamp,
+        });
+        index = index.saturating_add(1);
+    }
+    Ok(output.name)
+}
+
+fn object_room(ctx: &ReducerContext, object: &WorldObject) -> Option<String> {
+    let mut current = object.clone();
+    let mut visited = Vec::new();
+    loop {
+        match current.location_kind.as_str() {
+            "room" => return Some(current.location_id),
+            "inventory" | "equipped" => return actor_current_room(ctx, &current.location_id),
+            "container" => {
+                if visited.contains(&current.id) { return None; }
+                visited.push(current.id.clone());
+                current = ctx.db.world_object().id().find(&current.location_id)?;
+            }
+            _ => return None,
+        }
+    }
+}
+
+fn reconcile_crafting_station(ctx: &ReducerContext, station: WorldObject) -> Option<String> {
+    let mut batch = ctx.db.crafting_batch().station_object_id().find(&station.id)?;
+    let Some(recipe) = ctx.db.crafting_recipe().id().find(&batch.recipe_id) else {
+        ctx.db.crafting_batch().station_object_id().delete(&station.id);
+        return Some("The unfinished batch was discarded because its recipe no longer exists.".to_string());
+    };
+    let Some(station_definition) = object_definition_for(ctx, &station) else {
+        ctx.db.crafting_batch().station_object_id().delete(&station.id);
+        return None;
+    };
+    let now = ctx.timestamp.to_micros_since_unix_epoch();
+    let elapsed = now.saturating_sub(batch.last_progress_at_micros).max(0);
+    let station_was_active = station.is_active && (station_definition.burn_rate <= 0 || station.fuel_remaining > 0);
+    let active_window = if recipe.requires_active_station && station_was_active && station_definition.burn_rate > 0 {
+        let fuel_seconds = i64::from(station.fuel_remaining)
+            .saturating_add(i64::from(station_definition.burn_rate) - 1)
+            .saturating_div(i64::from(station_definition.burn_rate));
+        let elapsed_on_fuel_clock = batch.last_progress_at_micros
+            .saturating_sub(station.updated_at.to_micros_since_unix_epoch())
+            .max(0);
+        let remaining_active_micros = fuel_seconds.saturating_mul(1_000_000).saturating_sub(elapsed_on_fuel_clock);
+        elapsed.min(remaining_active_micros)
+    } else if recipe.requires_active_station && !station_was_active {
+        0
+    } else {
+        elapsed
+    };
+    let station = reconcile_fuel(ctx, station, &station_definition);
+    batch.remaining_micros = batch.remaining_micros.saturating_sub(active_window).max(0);
+    batch.last_progress_at_micros = now;
+    batch.updated_at = ctx.timestamp;
+    if batch.remaining_micros > 0 {
+        ctx.db.crafting_batch().station_object_id().update(batch);
+        return None;
+    }
+
+    if !batch.succeeds {
+        ctx.db.crafting_batch().station_object_id().delete(&station.id);
+        expansion::finish_recipe_attempt(ctx, &batch.actor_id, &recipe.id);
+        return Some(format!("{} finishes unsuccessfully in {}.", recipe.name, station_definition.name));
+    }
+    match place_processed_output(ctx, &station, &station_definition, &recipe) {
+        Ok(output_name) => {
+            ctx.db.crafting_batch().station_object_id().delete(&station.id);
+            expansion::finish_recipe_attempt(ctx, &batch.actor_id, &recipe.id);
+            refresh_actor_acquire_quests(ctx, &batch.actor_id);
+            Some(format!("{output_name} finishes processing in {}.", station_definition.name))
+        }
+        Err(error) => {
+            ctx.db.crafting_batch().station_object_id().update(batch);
+            Some(format!("{error} Remove an item, then inspect the station to collect the result."))
+        }
+    }
+}
+
+fn notify_crafting_result(ctx: &ReducerContext, station: &WorldObject, actor_id: &str, message: String) {
+    let room_id = object_room(ctx, station).or_else(|| actor_current_room(ctx, actor_id));
+    if let Some(room_id) = room_id {
+        rpg_message(ctx, &room_id, actor_id, "system", message);
+    }
+}
+
+fn reconcile_all_crafting_batches(ctx: &ReducerContext) {
+    let station_ids = ctx.db.crafting_batch().iter().map(|batch| batch.station_object_id).collect::<Vec<_>>();
+    for station_id in station_ids {
+        let Some(station) = ctx.db.world_object().id().find(&station_id) else {
+            ctx.db.crafting_batch().station_object_id().delete(&station_id);
+            continue;
+        };
+        let actor_id = ctx.db.crafting_batch().station_object_id().find(&station_id).map(|batch| batch.actor_id);
+        if let (Some(actor_id), Some(message)) = (actor_id, reconcile_crafting_station(ctx, station.clone())) {
+            notify_crafting_result(ctx, &station, &actor_id, message);
+        }
+    }
+}
+
+fn start_timed_recipe(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &str) {
+    let Some((recipe_query, station_query)) = query.rsplit_once(" in ") else {
+        rpg_message(ctx, room_id, actor_id, "error", "Use `cook <recipe> in <station>` after placing the ingredients inside the station.".to_string());
+        return;
+    };
+    let Some(recipe) = ctx.db.crafting_recipe().iter().find(|recipe| {
+        recipe.active
+            && recipe.process_seconds > 0
+            && (recipe.id.eq_ignore_ascii_case(recipe_query.trim())
+                || recipe.name.eq_ignore_ascii_case(recipe_query.trim())
+                || recipe.name.to_lowercase().starts_with(&recipe_query.trim().to_lowercase()))
+    }) else {
+        rpg_message(ctx, room_id, actor_id, "error", "No active timed recipe matches that name.".to_string());
+        return;
+    };
+    let station = find_object_at(ctx, "room", room_id, station_query.trim())
+        .or_else(|| find_carried_object(ctx, actor_id, station_query.trim()));
+    let Some((station, station_definition)) = station else {
+        rpg_message(ctx, room_id, actor_id, "error", "That processing station is not here.".to_string());
+        return;
+    };
+    if recipe.station_definition_id.as_deref() != Some(station.definition_id.as_str()) {
+        let required = recipe.station_definition_id.as_ref()
+            .and_then(|id| ctx.db.object_definition().id().find(id))
+            .map(|definition| definition.name)
+            .unwrap_or_else(|| "configured station".to_string());
+        rpg_message(ctx, room_id, actor_id, "error", format!("{} must be processed in {}.", recipe.name, required));
+        return;
+    }
+    if let Some(message) = reconcile_crafting_station(ctx, station.clone()) {
+        notify_crafting_result(ctx, &station, actor_id, message);
+    }
+    if ctx.db.crafting_batch().station_object_id().find(&station.id).is_some() {
+        rpg_message(ctx, room_id, actor_id, "error", format!("{} is already processing another recipe.", station_definition.name));
+        return;
+    }
+    if ensure_actor_progression(ctx, actor_id).level < recipe.required_level {
+        rpg_message(ctx, room_id, actor_id, "error", format!("{} requires level {}.", recipe.name, recipe.required_level));
+        return;
+    }
+    if let Some(error) = expansion::recipe_rule_error(ctx, actor_id, &recipe.id) {
+        rpg_message(ctx, room_id, actor_id, "error", error);
+        return;
+    }
+    let station = ctx.db.world_object().id().find(&station.id).unwrap_or(station);
+    let station = reconcile_fuel(ctx, station, &station_definition);
+    if recipe.requires_active_station && !station.is_active {
+        rpg_message(ctx, room_id, actor_id, "error", format!("{} must be active before cooking can begin.", station_definition.name));
+        return;
+    }
+    let ingredients = ctx.db.crafting_ingredient().iter().filter(|ingredient| ingredient.recipe_id == recipe.id).collect::<Vec<_>>();
+    if ingredients.is_empty() {
+        rpg_message(ctx, room_id, actor_id, "error", "This timed recipe has no ingredients configured.".to_string());
+        return;
+    }
+    let mut required = BTreeMap::<String, u32>::new();
+    for ingredient in &ingredients {
+        required.entry(ingredient.definition_id.clone()).and_modify(|quantity| *quantity = quantity.saturating_add(ingredient.quantity)).or_insert(ingredient.quantity);
+    }
+    if required.iter().any(|(definition_id, quantity)| container_item_quantity(ctx, &station.id, definition_id) < *quantity) {
+        rpg_message(ctx, room_id, actor_id, "error", format!("Place all ingredients for {} inside {} first.", recipe.name, station_definition.name));
+        return;
+    }
+    if let Some(currency) = recipe.currency_id.as_ref() {
+        if currency_balance(ctx, actor_id, currency) < recipe.currency_cost {
+            rpg_message(ctx, room_id, actor_id, "error", "You cannot afford the processing cost.".to_string());
+            return;
+        }
+    }
+    for ingredient in ingredients.into_iter().filter(|ingredient| ingredient.consumed) {
+        consume_container_items(ctx, &station.id, &ingredient.definition_id, ingredient.quantity);
+    }
+    if let Some(currency) = recipe.currency_id.as_ref() {
+        let _ = change_currency(ctx, actor_id, currency, -recipe.currency_cost);
+    }
+    let now = ctx.timestamp.to_micros_since_unix_epoch();
+    ctx.db.crafting_batch().insert(CraftingBatch {
+        station_object_id: station.id.clone(),
+        recipe_id: recipe.id.clone(),
+        actor_id: actor_id.to_string(),
+        remaining_micros: i64::from(recipe.process_seconds).saturating_mul(1_000_000),
+        last_progress_at_micros: now,
+        succeeds: expansion::recipe_attempt_succeeds(ctx, actor_id, &recipe.id),
+        created_at: ctx.timestamp,
+        updated_at: ctx.timestamp,
+    });
+    rpg_message(ctx, room_id, actor_id, "system", format!("You start {} in {}. It will take {} second{}{}.", recipe.name, station_definition.name, recipe.process_seconds, if recipe.process_seconds == 1 { "" } else { "s" }, if recipe.requires_active_station { " while the station remains active" } else { "" }));
+}
+
 fn recipe_station_available(ctx: &ReducerContext, room_id: &str, recipe: &CraftingRecipe) -> bool {
+    if let Some(station_definition_id) = recipe.station_definition_id.as_ref() {
+        return ctx.db.world_object().iter().any(|object| {
+            object.location_kind == "room"
+                && object.location_id == room_id
+                && object.definition_id == *station_definition_id
+        });
+    }
     let Some(required) = recipe.station_tag.as_ref() else { return true };
     ctx.db.world_object().iter().filter(|object| object.location_kind == "room" && object.location_id == room_id).filter_map(|object| object_definition_for(ctx, &object)).any(|definition| serde_json::from_str::<Vec<String>>(&definition.tags).unwrap_or_default().iter().any(|tag| tag.eq_ignore_ascii_case(required)))
 }
@@ -4407,12 +5024,21 @@ fn recipe_station_available(ctx: &ReducerContext, room_id: &str, recipe: &Crafti
 fn list_recipes(ctx: &ReducerContext, room_id: &str, actor_id: &str) {
     let level = ensure_actor_progression(ctx, actor_id).level;
     let mut recipes = ctx.db.crafting_recipe().iter().filter(|recipe| recipe.active).collect::<Vec<_>>(); recipes.sort_by(|left, right| left.name.cmp(&right.name));
-    let lines = recipes.into_iter().map(|recipe| { let output = ctx.db.object_definition().id().find(&recipe.output_definition_id).map(|item| item.name).unwrap_or(recipe.output_definition_id.clone()); let station = if recipe_station_available(ctx, room_id, &recipe) { "ready" } else { "station missing" }; format!("• {} → {} x{} · level {} · {station}", recipe.name, output, recipe.output_quantity, recipe.required_level) }).collect::<Vec<_>>();
-    rpg_message(ctx, room_id, actor_id, "system", format!("[CRAFTING · LEVEL {level}]\n{}\n\nUse `craft <recipe>`.", if lines.is_empty() { "• No recipes authored".to_string() } else { lines.join("\n") }));
+    let lines = recipes.into_iter().map(|recipe| {
+        let output = ctx.db.object_definition().id().find(&recipe.output_definition_id).map(|item| item.name).unwrap_or(recipe.output_definition_id.clone());
+        let station = if recipe_station_available(ctx, room_id, &recipe) { "ready" } else { "station missing" };
+        let method = if recipe.process_seconds > 0 { format!("{}s timed", recipe.process_seconds) } else { "instant".to_string() };
+        format!("• {} → {} x{} · level {} · {method} · {station}", recipe.name, output, recipe.output_quantity, recipe.required_level)
+    }).collect::<Vec<_>>();
+    rpg_message(ctx, room_id, actor_id, "system", format!("[CRAFTING · LEVEL {level}]\n{}\n\nUse `craft <recipe>` for instant recipes, or place ingredients in a station and use `cook <recipe> in <station>`.", if lines.is_empty() { "• No recipes authored".to_string() } else { lines.join("\n") }));
 }
 
 fn craft_recipe(ctx: &ReducerContext, room_id: &str, actor_id: &str, query: &str) {
     let Some(recipe) = ctx.db.crafting_recipe().iter().find(|recipe| recipe.active && (recipe.id.eq_ignore_ascii_case(query) || recipe.name.eq_ignore_ascii_case(query) || recipe.name.to_lowercase().starts_with(&query.to_lowercase()))) else { rpg_message(ctx, room_id, actor_id, "error", "No active recipe matches that name.".to_string()); return };
+    if recipe.process_seconds > 0 {
+        rpg_message(ctx, room_id, actor_id, "error", "This is a timed recipe. Place its ingredients inside the configured station, then use `cook <recipe> in <station>`.".to_string());
+        return;
+    }
     if ensure_actor_progression(ctx, actor_id).level < recipe.required_level { rpg_message(ctx, room_id, actor_id, "error", format!("{} requires level {}.", recipe.name, recipe.required_level)); return; }
     if let Some(error) = expansion::recipe_rule_error(ctx, actor_id, &recipe.id) { rpg_message(ctx, room_id, actor_id, "error", error); return; }
     if !recipe_station_available(ctx, room_id, &recipe) { rpg_message(ctx, room_id, actor_id, "error", format!("{} requires a nearby {} station.", recipe.name, recipe.station_tag.unwrap_or_default())); return; }
@@ -5750,6 +6376,7 @@ fn action_is_due(ctx: &ReducerContext, last_at: Option<Timestamp>, interval_seco
 }
 
 fn advance_world(ctx: &ReducerContext, actor_id: &str, actor_name: &str) {
+    reconcile_all_crafting_batches(ctx);
     let now = ctx.timestamp.to_micros_since_unix_epoch();
     let defeated = ctx.db.npc().iter().filter(|npc| npc.defeated_at.is_some()).collect::<Vec<_>>();
     for npc in defeated {
@@ -5915,6 +6542,7 @@ fn handle_rpg_command(
     if let Some(query) = lower.strip_prefix("repair ") { repair_at_vendor(ctx, room_id, actor_id, query.trim()); return Ok(true); }
     if matches!(lower.as_str(), "recipes" | "crafting") { list_recipes(ctx, room_id, actor_id); return Ok(true); }
     if let Some(query) = lower.strip_prefix("craft ") { craft_recipe(ctx, room_id, actor_id, query.trim()); return Ok(true); }
+    if let Some(query) = lower.strip_prefix("cook ").or_else(|| lower.strip_prefix("process ")) { start_timed_recipe(ctx, room_id, actor_id, query.trim()); return Ok(true); }
     if matches!(lower.as_str(), "bank" | "bank inventory") {
         let items = ctx.db.world_object().iter().filter(|object| object.location_kind == "bank" && object.location_id == actor_id).filter_map(|object| object_definition_for(ctx, &object).map(|definition| format!("• {} {} x{}", definition.icon, definition.name, object.quantity))).collect::<Vec<_>>();
         rpg_message(ctx, room_id, actor_id, "system", format!("[BANK]\n{}\n\nUse `bank deposit <item>` or `bank withdraw <item>`.", if items.is_empty() { "• Empty".to_string() } else { items.join("\n") })); return Ok(true);
@@ -6037,6 +6665,10 @@ fn handle_rpg_command(
                 rpg_message(ctx, room_id, actor_id, "error", format!("{} is not a container.", container_definition.name));
                 return Ok(true);
             }
+            let batch_actor_id = ctx.db.crafting_batch().station_object_id().find(&container.id).map(|batch| batch.actor_id);
+            if let Some(message) = reconcile_crafting_station(ctx, container.clone()) {
+                notify_crafting_result(ctx, &container, batch_actor_id.as_deref().unwrap_or(actor_id), message);
+            }
             if item_query.trim() == "all" {
                 let contents = ctx.db.world_object().iter()
                     .filter(|object| object.location_kind == "container" && object.location_id == container.id)
@@ -6157,11 +6789,12 @@ fn handle_rpg_command(
             rpg_message(ctx, room_id, actor_id, "error", "That would create an impossible container loop.".to_string());
             return Ok(true);
         }
-        if container_definition.burn_rate > 0 {
-            if !fuel_is_accepted(&item_definition, &container_definition) {
-                rpg_message(ctx, room_id, actor_id, "error", format!("{} cannot fuel {}.", item_definition.name, container_definition.name));
-                return Ok(true);
-            }
+        let batch_actor_id = ctx.db.crafting_batch().station_object_id().find(&container.id).map(|batch| batch.actor_id);
+        if let Some(message) = reconcile_crafting_station(ctx, container.clone()) {
+            notify_crafting_result(ctx, &container, batch_actor_id.as_deref().unwrap_or(actor_id), message);
+        }
+        let container = ctx.db.world_object().id().find(&container.id).unwrap_or(container);
+        if container_definition.burn_rate > 0 && fuel_is_accepted(&item_definition, &container_definition) {
             let added = item_definition.fuel_value.saturating_mul(item.quantity as i32);
             let reconciled = reconcile_fuel(ctx, container, &container_definition);
             ctx.db.world_object().id().update(WorldObject {
@@ -6174,7 +6807,11 @@ fn handle_rpg_command(
             return Ok(true);
         }
         if container_definition.capacity == 0 {
-            rpg_message(ctx, room_id, actor_id, "error", format!("{} cannot hold items.", container_definition.name));
+            rpg_message(ctx, room_id, actor_id, "error", if container_definition.burn_rate > 0 {
+                format!("{} cannot fuel {}.", item_definition.name, container_definition.name)
+            } else {
+                format!("{} cannot hold items.", container_definition.name)
+            });
             return Ok(true);
         }
         let occupied = ctx.db.world_object().iter().filter(|child| child.location_kind == "container" && child.location_id == container.id).count() as u32;
@@ -6260,6 +6897,11 @@ fn handle_rpg_command(
             rpg_message(ctx, room_id, actor_id, "error", format!("{} is not a fuel-burning object.", definition.name));
             return Ok(true);
         }
+        let batch_actor_id = ctx.db.crafting_batch().station_object_id().find(&object.id).map(|batch| batch.actor_id);
+        if let Some(message) = reconcile_crafting_station(ctx, object.clone()) {
+            notify_crafting_result(ctx, &object, batch_actor_id.as_deref().unwrap_or(actor_id), message);
+        }
+        let object = ctx.db.world_object().id().find(&object.id).unwrap_or(object);
         let object = reconcile_fuel(ctx, object, &definition);
         if object.fuel_remaining <= 0 {
             rpg_message(ctx, room_id, actor_id, "error", format!("{} needs fuel first.", definition.name));
@@ -6276,6 +6918,11 @@ fn handle_rpg_command(
             rpg_message(ctx, room_id, actor_id, "error", format!("There is no \"{}\" here.", query.trim()));
             return Ok(true);
         };
+        let batch_actor_id = ctx.db.crafting_batch().station_object_id().find(&object.id).map(|batch| batch.actor_id);
+        if let Some(message) = reconcile_crafting_station(ctx, object.clone()) {
+            notify_crafting_result(ctx, &object, batch_actor_id.as_deref().unwrap_or(actor_id), message);
+        }
+        let object = ctx.db.world_object().id().find(&object.id).unwrap_or(object);
         let object = reconcile_fuel(ctx, object, &definition);
         ctx.db.world_object().id().update(WorldObject { is_active: false, updated_at: ctx.timestamp, ..object });
         rpg_message(ctx, room_id, actor_id, "system", format!("You extinguish {}.", definition.name));
@@ -6442,7 +7089,7 @@ pub fn submit_command(
     }
 
     if raw == "help" {
-        add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", "[AVAILABLE COMMANDS]\n\n• say <message> - Speak to everyone in the room\n• whisper <name> <message> - Send a private message\n• party / guild - Create, invite, chat, manage members, and set party loot\n• friends / friend add / block / unblock - Manage private social relationships\n• trade <player> / trade add / review / confirm / cancel - Exchange items and currencies securely\n• report <player> <reason> - File a private moderation report\n• look / who - Examine the room and nearby actors\n• talk <npc> / respond <choice> - Use AI or authored NPC dialogue\n• inspect <name> - Inspect a character\n• origins - Review the world's races, classes, and backgrounds\n• inventory / equipment / stats - View capacity, level, XP, resources, and gear\n• train <stat> [ranks] - Spend earned stat points\n• abilities / talents / learn <ability> / respec talents - Manage learned powers\n• cast <ability> at <target> - Use magic, techniques, or utility powers\n• quests / quest <npc> - Review your journal or a nearby NPC's quests\n• accept <quest> / choose <choice> / turn in <quest> - Progress authored quests\n• reputation - View faction standings\n• shop / buy / sell / repair - Trade with a nearby vendor\n• recipes / craft <recipe> - Review and make authored recipes\n• bank / bank deposit / bank withdraw - Manage banked items\n• give <item> to <player> / pay <amount> <currency> to <player> - Trade directly\n• take / drop / examine <item> - Interact with objects\n• open / close / lock / unlock <direction> - Operate authored doors\n• loot <container> / take all from <container> - Manage container contents\n• put <item> in <container> - Store an item or add fuel\n• equip / unequip / use <item> - Use gear and consumables\n• light / extinguish <object> - Control fuel-burning objects\n• combat / attack <target> - Check rules or make a weapon-speed-limited attack\n• rest / wait - Recover safely or let the world advance\n• flee <direction> - Escape through an exit\n• respawn - Return after the configured death delay\n• set handle <name> - Set your saved-world handle\n• <direction> - Move through an exit".to_string(), None, None);
+        add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", "[AVAILABLE COMMANDS]\n\n• say <message> - Speak to everyone in the room\n• whisper <name> <message> - Send a private message\n• party / guild - Create, invite, chat, manage members, and set party loot\n• friends / friend add / block / unblock - Manage private social relationships\n• trade <player> / trade add / review / confirm / cancel - Exchange items and currencies securely\n• report <player> <reason> - File a private moderation report\n• look / who - Examine the room and nearby actors\n• talk <npc> / respond <choice> - Use AI or authored NPC dialogue\n• inspect <name> - Inspect a character\n• origins - Review the world's races, classes, and backgrounds\n• inventory / equipment / stats - View capacity, level, XP, resources, and gear\n• train <stat> [ranks] - Spend earned stat points\n• abilities / talents / learn <ability> / respec talents - Manage learned powers\n• cast <ability> at <target> - Use magic, techniques, or utility powers\n• quests / quest <npc> - Review your journal or a nearby NPC's quests\n• accept <quest> / choose <choice> / turn in <quest> - Progress authored quests\n• reputation - View faction standings\n• shop / buy / sell / repair - Trade with a nearby vendor\n• recipes / craft <recipe> - Review and make immediate authored recipes\n• cook <recipe> in <station> - Process placed ingredients over real time\n• bank / bank deposit / bank withdraw - Manage banked items\n• give <item> to <player> / pay <amount> <currency> to <player> - Trade directly\n• take / drop / examine <item> - Interact with objects\n• open / close / lock / unlock <direction> - Operate authored doors\n• loot <container> / take all from <container> - Manage container contents\n• put <item> in <container> - Store an item or add fuel\n• equip / unequip / use <item> - Use gear and consumables\n• light / extinguish <object> - Control fuel-burning objects\n• combat / attack <target> - Check rules or make a weapon-speed-limited attack\n• rest / wait - Recover safely or let the world advance\n• flee <direction> - Escape through an exit\n• respawn - Return after the configured death delay\n• set handle <name> - Set your saved-world handle\n• <direction> - Move through an exit".to_string(), None, None);
     } else if let Some(handle) = raw.strip_prefix("set handle ") {
         let handle = handle.trim();
         if !is_profile || handle.is_empty() || handle.len() > 30 {

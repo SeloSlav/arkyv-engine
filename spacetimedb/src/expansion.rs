@@ -1160,16 +1160,34 @@ pub fn configure_engine_record(ctx: &ReducerContext, table_name: String, payload
     match table_name.as_str() {
         "ability_unlock_rules" => {
             if ctx.db.ability_definition().id().find(&record_id).is_none() { return Err("Ability does not exist.".to_string()); }
-            let value = AbilityUnlockRule { ability_id: record_id.clone(), required_option_id: clean_optional(&row, "required_option_id"), prerequisite_ability_id: clean_optional(&row, "prerequisite_ability_id"), required_quest_id: clean_optional(&row, "required_quest_id"), required_faction_id: clean_optional(&row, "required_faction_id"), required_reputation: i32_value(&row, "required_reputation", 0), talent_cost: u32_value(&row, "talent_cost", 0), exclusive_group: clean_optional(&row, "exclusive_group"), created_at: ctx.db.ability_unlock_rule().ability_id().find(&record_id).map(|old| old.created_at).unwrap_or(ctx.timestamp), updated_at: ctx.timestamp };
+            let required_option_id = clean_optional(&row, "required_option_id");
+            let prerequisite_ability_id = clean_optional(&row, "prerequisite_ability_id");
+            let required_quest_id = clean_optional(&row, "required_quest_id");
+            let required_faction_id = clean_optional(&row, "required_faction_id");
+            if required_option_id.as_ref().map(|id| ctx.db.character_option_definition().id().find(id).is_none()).unwrap_or(false) { return Err("Ability unlock option does not exist.".to_string()); }
+            if prerequisite_ability_id.as_ref().map(|id| id == &record_id || ctx.db.ability_definition().id().find(id).is_none()).unwrap_or(false) { return Err("Ability prerequisite is missing or self-referential.".to_string()); }
+            if required_quest_id.as_ref().map(|id| ctx.db.quest_definition().id().find(id).is_none()).unwrap_or(false) { return Err("Ability unlock quest does not exist.".to_string()); }
+            if required_faction_id.as_ref().map(|id| ctx.db.faction_definition().id().find(id).is_none()).unwrap_or(false) { return Err("Ability unlock faction does not exist.".to_string()); }
+            let value = AbilityUnlockRule { ability_id: record_id.clone(), required_option_id, prerequisite_ability_id, required_quest_id, required_faction_id, required_reputation: i32_value(&row, "required_reputation", 0), talent_cost: u32_value(&row, "talent_cost", 0), exclusive_group: clean_optional(&row, "exclusive_group"), created_at: ctx.db.ability_unlock_rule().ability_id().find(&record_id).map(|old| old.created_at).unwrap_or(ctx.timestamp), updated_at: ctx.timestamp };
             if ctx.db.ability_unlock_rule().ability_id().find(&record_id).is_some() { ctx.db.ability_unlock_rule().ability_id().update(value); } else { ctx.db.ability_unlock_rule().insert(value); }
         }
         "object_rules" => {
             if ctx.db.object_definition().id().find(&record_id).is_none() { return Err("Object definition does not exist.".to_string()); }
-            let value = ObjectRule { definition_id: record_id.clone(), rarity: string(&row, "rarity", "common"), item_level: u32_value(&row, "item_level", 1).max(1), required_level: u32_value(&row, "required_level", 1).max(1), required_option_id: clean_optional(&row, "required_option_id"), maximum_durability: i32_value(&row, "maximum_durability", 100).max(0), base_value: i64_value(&row, "base_value", 0).max(0), repairable: bool_value(&row, "repairable", true), two_handed: bool_value(&row, "two_handed", false), weapon_type: clean_optional(&row, "weapon_type"), damage_school: clean_optional(&row, "damage_school"), bind_rule: string(&row, "bind_rule", "none"), tradeable: bool_value(&row, "tradeable", true), updated_at: ctx.timestamp };
+            let required_option_id = clean_optional(&row, "required_option_id");
+            if required_option_id.as_ref().map(|id| ctx.db.character_option_definition().id().find(id).is_none()).unwrap_or(false) { return Err("Item option requirement does not exist.".to_string()); }
+            let bind_rule = string(&row, "bind_rule", "none");
+            if !matches!(bind_rule.as_str(), "none" | "bound" | "bind_on_equip") { return Err("Item bind rule must be none, bound, or bind_on_equip.".to_string()); }
+            let value = ObjectRule { definition_id: record_id.clone(), rarity: string(&row, "rarity", "common"), item_level: u32_value(&row, "item_level", 1).max(1), required_level: u32_value(&row, "required_level", 1).max(1), required_option_id, maximum_durability: i32_value(&row, "maximum_durability", 100).max(0), base_value: i64_value(&row, "base_value", 0).max(0), repairable: bool_value(&row, "repairable", true), two_handed: bool_value(&row, "two_handed", false), weapon_type: clean_optional(&row, "weapon_type"), damage_school: clean_optional(&row, "damage_school"), bind_rule, tradeable: bool_value(&row, "tradeable", true), updated_at: ctx.timestamp };
             if ctx.db.object_rule().definition_id().find(&record_id).is_some() { ctx.db.object_rule().definition_id().update(value); } else { ctx.db.object_rule().insert(value); }
         }
         "bank_configs" => {
-            let value = BankConfig { id: record_id.clone(), access_mode: string(&row, "access_mode", "anywhere"), required_room_tag: clean_optional(&row, "required_room_tag"), required_npc_id: clean_optional(&row, "required_npc_id"), slot_limit: u32_value(&row, "slot_limit", 0), deposit_fee: i64_value(&row, "deposit_fee", 0).max(0), withdrawal_fee: i64_value(&row, "withdrawal_fee", 0).max(0), shared_by_identity: bool_value(&row, "shared_by_identity", false), protects_from_death: bool_value(&row, "protects_from_death", true), updated_at: ctx.timestamp };
+            let access_mode = string(&row, "access_mode", "anywhere");
+            if !matches!(access_mode.as_str(), "anywhere" | "fixture_or_npc") { return Err("Bank access mode must be anywhere or fixture_or_npc.".to_string()); }
+            let required_room_tag = clean_optional(&row, "required_room_tag");
+            let required_npc_id = clean_optional(&row, "required_npc_id");
+            if required_npc_id.as_ref().map(|id| ctx.db.npc().id().find(id).is_none()).unwrap_or(false) { return Err("Bank NPC does not exist.".to_string()); }
+            if access_mode == "fixture_or_npc" && required_room_tag.is_none() && required_npc_id.is_none() { return Err("A fixture_or_npc bank needs a room fixture tag or NPC.".to_string()); }
+            let value = BankConfig { id: record_id.clone(), access_mode, required_room_tag, required_npc_id, slot_limit: u32_value(&row, "slot_limit", 0), deposit_fee: i64_value(&row, "deposit_fee", 0).max(0), withdrawal_fee: i64_value(&row, "withdrawal_fee", 0).max(0), shared_by_identity: bool_value(&row, "shared_by_identity", false), protects_from_death: bool_value(&row, "protects_from_death", true), updated_at: ctx.timestamp };
             if ctx.db.bank_config().id().find(&record_id).is_some() { ctx.db.bank_config().id().update(value); } else { ctx.db.bank_config().insert(value); }
         }
         "vendor_restock_rules" => {
@@ -1183,13 +1201,19 @@ pub fn configure_engine_record(ctx: &ReducerContext, table_name: String, payload
         }
         "recipe_rules" => {
             if ctx.db.crafting_recipe().id().find(&record_id).is_none() { return Err("Recipe does not exist.".to_string()); }
-            let value = RecipeRule { recipe_id: record_id.clone(), profession_id: clean_optional(&row, "profession_id"), required_profession_rank: u32_value(&row, "required_profession_rank", 0), must_be_learned: bool_value(&row, "must_be_learned", false), success_percent: u32_value(&row, "success_percent", 100).min(100), cooldown_seconds: u32_value(&row, "cooldown_seconds", 0), updated_at: ctx.timestamp };
+            let profession_id = clean_optional(&row, "profession_id");
+            if profession_id.as_ref().map(|id| ctx.db.profession_definition().id().find(id).is_none()).unwrap_or(false) { return Err("Recipe profession does not exist.".to_string()); }
+            let value = RecipeRule { recipe_id: record_id.clone(), profession_id, required_profession_rank: u32_value(&row, "required_profession_rank", 0), must_be_learned: bool_value(&row, "must_be_learned", false), success_percent: u32_value(&row, "success_percent", 100).min(100), cooldown_seconds: u32_value(&row, "cooldown_seconds", 0), updated_at: ctx.timestamp };
             if ctx.db.recipe_rule().recipe_id().find(&record_id).is_some() { ctx.db.recipe_rule().recipe_id().update(value); } else { ctx.db.recipe_rule().insert(value); }
         }
         "dialogue_nodes" => {
             let npc_id = string(&row, "npc_id", ""); if ctx.db.npc().id().find(&npc_id).is_none() { return Err("Dialogue NPC does not exist.".to_string()); }
             let text = string(&row, "text", "").trim().to_string(); if text.is_empty() { return Err("Dialogue text is required.".to_string()); }
-            let value = DialogueNode { id: record_id.clone(), npc_id, text, entry_node: bool_value(&row, "entry_node", false), required_quest_id: clean_optional(&row, "required_quest_id"), required_faction_id: clean_optional(&row, "required_faction_id"), required_reputation: i32_value(&row, "required_reputation", 0), sort_order: u32_value(&row, "sort_order", 100), created_at: ctx.db.dialogue_node().id().find(&record_id).map(|old| old.created_at).unwrap_or(ctx.timestamp), updated_at: ctx.timestamp };
+            let required_quest_id = clean_optional(&row, "required_quest_id");
+            let required_faction_id = clean_optional(&row, "required_faction_id");
+            if required_quest_id.as_ref().map(|id| ctx.db.quest_definition().id().find(id).is_none()).unwrap_or(false) { return Err("Dialogue quest requirement does not exist.".to_string()); }
+            if required_faction_id.as_ref().map(|id| ctx.db.faction_definition().id().find(id).is_none()).unwrap_or(false) { return Err("Dialogue faction requirement does not exist.".to_string()); }
+            let value = DialogueNode { id: record_id.clone(), npc_id, text, entry_node: bool_value(&row, "entry_node", false), required_quest_id, required_faction_id, required_reputation: i32_value(&row, "required_reputation", 0), sort_order: u32_value(&row, "sort_order", 100), created_at: ctx.db.dialogue_node().id().find(&record_id).map(|old| old.created_at).unwrap_or(ctx.timestamp), updated_at: ctx.timestamp };
             if ctx.db.dialogue_node().id().find(&record_id).is_some() { ctx.db.dialogue_node().id().update(value); } else { ctx.db.dialogue_node().insert(value); }
         }
         "dialogue_choices" => {
@@ -1201,22 +1225,63 @@ pub fn configure_engine_record(ctx: &ReducerContext, table_name: String, payload
                 let next_node = ctx.db.dialogue_node().id().find(next_id).ok_or_else(|| "The next dialogue node does not exist.".to_string())?;
                 if next_node.npc_id != source_npc_id { return Err("A dialogue response cannot lead to another NPC's dialogue.".to_string()); }
             }
-            let value = DialogueChoice { id: record_id.clone(), node_id, label, next_node_id, action_kind: string(&row, "action_kind", "none"), action_reference_id: clean_optional(&row, "action_reference_id"), action_value: i32_value(&row, "action_value", 0), sort_order: u32_value(&row, "sort_order", 100), created_at: ctx.db.dialogue_choice().id().find(&record_id).map(|old| old.created_at).unwrap_or(ctx.timestamp), updated_at: ctx.timestamp };
+            let action_kind = string(&row, "action_kind", "none");
+            let action_reference_id = clean_optional(&row, "action_reference_id");
+            let action_reference_exists = match action_kind.as_str() {
+                "none" | "gold" => true,
+                "start_quest" => action_reference_id.as_ref().map(|id| ctx.db.quest_definition().id().find(id).is_some()).unwrap_or(false),
+                "reputation" => action_reference_id.as_ref().map(|id| ctx.db.faction_definition().id().find(id).is_some()).unwrap_or(false),
+                "give_item" => action_reference_id.as_ref().map(|id| ctx.db.object_definition().id().find(id).is_some()).unwrap_or(false),
+                "learn_recipe" => action_reference_id.as_ref().map(|id| ctx.db.crafting_recipe().id().find(id).is_some()).unwrap_or(false),
+                "learn_profession" => action_reference_id.as_ref().map(|id| ctx.db.profession_definition().id().find(id).is_some()).unwrap_or(false),
+                _ => return Err("Unsupported dialogue action.".to_string()),
+            };
+            if !action_reference_exists { return Err("Dialogue action reference does not exist.".to_string()); }
+            let value = DialogueChoice { id: record_id.clone(), node_id, label, next_node_id, action_kind, action_reference_id, action_value: i32_value(&row, "action_value", 0), sort_order: u32_value(&row, "sort_order", 100), created_at: ctx.db.dialogue_choice().id().find(&record_id).map(|old| old.created_at).unwrap_or(ctx.timestamp), updated_at: ctx.timestamp };
             if ctx.db.dialogue_choice().id().find(&record_id).is_some() { ctx.db.dialogue_choice().id().update(value); } else { ctx.db.dialogue_choice().insert(value); }
         }
         "exit_rules" => {
             if ctx.db.exit().id().find(&record_id).is_none() { return Err("Exit does not exist.".to_string()); }
-            let value = ExitRule { exit_id: record_id.clone(), is_door: bool_value(&row, "is_door", true), closed: bool_value(&row, "closed", false), locked: bool_value(&row, "locked", false), key_definition_id: clean_optional(&row, "key_definition_id"), hidden: bool_value(&row, "hidden", false), trap_damage: i32_value(&row, "trap_damage", 0).max(0), required_quest_id: clean_optional(&row, "required_quest_id"), required_option_id: clean_optional(&row, "required_option_id"), updated_at: ctx.timestamp };
+            let key_definition_id = clean_optional(&row, "key_definition_id");
+            let required_quest_id = clean_optional(&row, "required_quest_id");
+            let required_option_id = clean_optional(&row, "required_option_id");
+            if key_definition_id.as_ref().map(|id| ctx.db.object_definition().id().find(id).is_none()).unwrap_or(false) { return Err("Door key object does not exist.".to_string()); }
+            if required_quest_id.as_ref().map(|id| ctx.db.quest_definition().id().find(id).is_none()).unwrap_or(false) { return Err("Door quest requirement does not exist.".to_string()); }
+            if required_option_id.as_ref().map(|id| ctx.db.character_option_definition().id().find(id).is_none()).unwrap_or(false) { return Err("Door option requirement does not exist.".to_string()); }
+            let is_door = bool_value(&row, "is_door", true);
+            let closed = bool_value(&row, "closed", false);
+            let locked = bool_value(&row, "locked", false);
+            if !is_door && (closed || locked || key_definition_id.is_some()) { return Err("Closed, locked, and keyed exit rules must be doors.".to_string()); }
+            let value = ExitRule { exit_id: record_id.clone(), is_door, closed, locked, key_definition_id, hidden: bool_value(&row, "hidden", false), trap_damage: i32_value(&row, "trap_damage", 0).max(0), required_quest_id, required_option_id, updated_at: ctx.timestamp };
             if ctx.db.exit_rule().exit_id().find(&record_id).is_some() { ctx.db.exit_rule().exit_id().update(value); } else { ctx.db.exit_rule().insert(value); }
         }
         "world_triggers" => {
             let conditions_json = json_string(row.get("conditions_json"), "{}"); let actions_json = json_string(row.get("actions_json"), "[]");
-            serde_json::from_str::<Value>(&conditions_json).map_err(|_| "Trigger conditions are invalid JSON.".to_string())?; serde_json::from_str::<Vec<Value>>(&actions_json).map_err(|_| "Trigger actions must be a JSON array.".to_string())?;
-            let value = WorldTrigger { id: record_id.clone(), event_kind: string(&row, "event_kind", "room_enter"), source_id: clean_optional(&row, "source_id"), conditions_json, actions_json, once_per_actor: bool_value(&row, "once_per_actor", false), active: bool_value(&row, "active", true), created_at: ctx.db.world_trigger().id().find(&record_id).map(|old| old.created_at).unwrap_or(ctx.timestamp), updated_at: ctx.timestamp };
+            let conditions = serde_json::from_str::<Value>(&conditions_json).map_err(|_| "Trigger conditions are invalid JSON.".to_string())?;
+            let actions = serde_json::from_str::<Vec<Value>>(&actions_json).map_err(|_| "Trigger actions must be a JSON array.".to_string())?;
+            let event_kind = string(&row, "event_kind", "room_enter");
+            if event_kind != "room_enter" { return Err("The supported trigger event is room_enter.".to_string()); }
+            let source_id = clean_optional(&row, "source_id");
+            if source_id.as_ref().map(|id| ctx.db.room().id().find(id).is_none()).unwrap_or(false) { return Err("Room-entry trigger source room does not exist.".to_string()); }
+            if conditions.get("required_quest_id").and_then(Value::as_str).map(|id| ctx.db.quest_definition().id().find(&id.to_string()).is_none()).unwrap_or(false) { return Err("Trigger condition quest does not exist.".to_string()); }
+            if conditions.get("required_option_id").and_then(Value::as_str).map(|id| ctx.db.character_option_definition().id().find(&id.to_string()).is_none()).unwrap_or(false) { return Err("Trigger condition option does not exist.".to_string()); }
+            for action in &actions {
+                let valid = match action.get("kind").and_then(Value::as_str).unwrap_or("") {
+                    "message" => action.get("text").and_then(Value::as_str).map(|text| !text.trim().is_empty()).unwrap_or(false),
+                    "gold" => true,
+                    "item" => action.get("definition_id").and_then(Value::as_str).map(|id| ctx.db.object_definition().id().find(&id.to_string()).is_some()).unwrap_or(false),
+                    "reputation" => action.get("faction_id").and_then(Value::as_str).map(|id| ctx.db.faction_definition().id().find(&id.to_string()).is_some()).unwrap_or(false),
+                    _ => false,
+                };
+                if !valid { return Err("Trigger contains an unsupported action or missing reference.".to_string()); }
+            }
+            let value = WorldTrigger { id: record_id.clone(), event_kind, source_id, conditions_json, actions_json, once_per_actor: bool_value(&row, "once_per_actor", false), active: bool_value(&row, "active", true), created_at: ctx.db.world_trigger().id().find(&record_id).map(|old| old.created_at).unwrap_or(ctx.timestamp), updated_at: ctx.timestamp };
             if ctx.db.world_trigger().id().find(&record_id).is_some() { ctx.db.world_trigger().id().update(value); } else { ctx.db.world_trigger().insert(value); }
         }
         "world_simulation_configs" => {
-            let value = WorldSimulationConfig { id: record_id.clone(), mode: string(&row, "mode", "turn_driven"), tick_seconds: u32_value(&row, "tick_seconds", 5).max(1), day_length_minutes: u32_value(&row, "day_length_minutes", 60).max(1), weather_enabled: bool_value(&row, "weather_enabled", false), active: bool_value(&row, "active", false), updated_at: ctx.timestamp };
+            let mode = string(&row, "mode", "turn_driven");
+            if !matches!(mode.as_str(), "turn_driven" | "scheduled") { return Err("World simulation mode must be turn_driven or scheduled.".to_string()); }
+            let value = WorldSimulationConfig { id: record_id.clone(), mode, tick_seconds: u32_value(&row, "tick_seconds", 5).max(1), day_length_minutes: u32_value(&row, "day_length_minutes", 60).max(1), weather_enabled: bool_value(&row, "weather_enabled", false), active: bool_value(&row, "active", false), updated_at: ctx.timestamp };
             let should_schedule = value.active && value.mode == "scheduled" && ctx.db.scheduled_world_tick().iter().next().is_none();
             if ctx.db.world_simulation_config().id().find(&record_id).is_some() { ctx.db.world_simulation_config().id().update(value.clone()); } else { ctx.db.world_simulation_config().insert(value.clone()); }
             if should_schedule { let at = ctx.timestamp + TimeDuration::from_micros(i64::from(value.tick_seconds).saturating_mul(1_000_000)); ctx.db.scheduled_world_tick().insert(ScheduledWorldTick { scheduled_id: 0, scheduled_at: at.into() }); }
@@ -1235,7 +1300,14 @@ pub fn delete_engine_record(ctx: &ReducerContext, table_name: String, record_id:
         "object_rules" => { ctx.db.object_rule().definition_id().delete(&record_id); }
         "bank_configs" => { ctx.db.bank_config().id().delete(&record_id); }
         "vendor_restock_rules" => { ctx.db.vendor_restock_rule().vendor_stock_id().delete(&record_id); }
-        "profession_definitions" => { if ctx.db.recipe_rule().iter().any(|row| row.profession_id.as_deref() == Some(&record_id)) { return Err("Profession is used by a recipe rule.".to_string()); } ctx.db.profession_definition().id().delete(&record_id); }
+        "profession_definitions" => {
+            if ctx.db.recipe_rule().iter().any(|row| row.profession_id.as_deref() == Some(&record_id))
+                || ctx.db.dialogue_choice().iter().any(|row| row.action_kind == "learn_profession" && row.action_reference_id.as_deref() == Some(record_id.as_str()))
+            {
+                return Err("Profession is used by a recipe rule or dialogue response.".to_string());
+            }
+            ctx.db.profession_definition().id().delete(&record_id);
+        }
         "recipe_rules" => { ctx.db.recipe_rule().recipe_id().delete(&record_id); }
         "dialogue_nodes" => {
             let ids = ctx.db.dialogue_choice().iter().filter(|row| row.node_id == record_id || row.next_node_id.as_deref() == Some(record_id.as_str())).map(|row| row.id).collect::<Vec<_>>();
@@ -1294,7 +1366,28 @@ pub fn validate_world_content(ctx: &ReducerContext) -> Result<(), String> {
     for quest in ctx.db.quest_definition().iter() { if ctx.db.npc().id().find(&quest.quest_giver_npc_id).is_none() || ctx.db.npc().id().find(&quest.turn_in_npc_id).is_none() { add_issue(ctx, "error", "quest", &quest.id, "Quest giver or turn-in NPC is missing.".to_string()); } if ctx.db.quest_objective().iter().all(|row| row.quest_id != quest.id) { add_issue(ctx, "warning", "quest", &quest.id, "Quest has no objectives.".to_string()); } }
     for choice in ctx.db.quest_choice().iter() { if choice.next_quest_id.as_ref().map(|id| ctx.db.quest_definition().id().find(id).is_none()).unwrap_or(false) { add_issue(ctx, "error", "quest_choice", &choice.id, "Choice points to a missing follow-up quest.".to_string()); } }
     for stock in ctx.db.vendor_stock().iter() { if ctx.db.vendor_definition().id().find(&stock.vendor_id).is_none() || ctx.db.object_definition().id().find(&stock.definition_id).is_none() { add_issue(ctx, "error", "vendor_stock", &stock.id, "Vendor stock has a missing vendor or object.".to_string()); } }
-    for recipe in ctx.db.crafting_recipe().iter() { if ctx.db.object_definition().id().find(&recipe.output_definition_id).is_none() { add_issue(ctx, "error", "recipe", &recipe.id, "Recipe output is missing.".to_string()); } }
+    for recipe in ctx.db.crafting_recipe().iter() {
+        if ctx.db.object_definition().id().find(&recipe.output_definition_id).is_none() {
+            add_issue(ctx, "error", "recipe", &recipe.id, "Recipe output is missing.".to_string());
+        }
+        if recipe.process_seconds > 0 {
+            let station_valid = recipe.station_definition_id.as_ref()
+                .and_then(|id| ctx.db.object_definition().id().find(id))
+                .map(|definition| definition.capacity > 0)
+                .unwrap_or(false);
+            if !station_valid {
+                add_issue(ctx, "error", "recipe", &recipe.id, "Timed recipe requires a valid container station.".to_string());
+            }
+            if ctx.db.crafting_ingredient().iter().all(|ingredient| ingredient.recipe_id != recipe.id) {
+                add_issue(ctx, "error", "recipe", &recipe.id, "Timed recipe has no ingredients.".to_string());
+            }
+        }
+    }
+    for batch in ctx.db.crafting_batch().iter() {
+        if ctx.db.crafting_recipe().id().find(&batch.recipe_id).is_none() || ctx.db.world_object().id().find(&batch.station_object_id).is_none() {
+            add_issue(ctx, "error", "crafting_batch", &batch.station_object_id, "Timed recipe batch has a missing recipe or station.".to_string());
+        }
+    }
     if let Some(start) = ctx.db.room().iter().next() { let reachable = room_distances(ctx, &start.id); for room in ctx.db.room().iter() { if !reachable.contains_key(&room.id) { add_issue(ctx, "warning", "room", &room.id, format!("Room is unreachable from {} when exits are treated bidirectionally.", start.name)); } } }
     audit(ctx, "content.validate", "world", "{}"); Ok(())
 }

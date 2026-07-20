@@ -385,6 +385,18 @@ export const ContentIssue = __t.object("ContentIssue", {
 });
 export type ContentIssue = __Infer<typeof ContentIssue>;
 
+export const CraftingBatch = __t.object("CraftingBatch", {
+  stationObjectId: __t.string(),
+  recipeId: __t.string(),
+  actorId: __t.string(),
+  remainingMicros: __t.i64(),
+  lastProgressAtMicros: __t.i64(),
+  succeeds: __t.bool(),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type CraftingBatch = __Infer<typeof CraftingBatch>;
+
 export const CraftingIngredient = __t.object("CraftingIngredient", {
   id: __t.string(),
   recipeId: __t.string(),
@@ -409,6 +421,9 @@ export const CraftingRecipe = __t.object("CraftingRecipe", {
   active: __t.bool(),
   createdAt: __t.timestamp(),
   updatedAt: __t.timestamp(),
+  stationDefinitionId: __t.option(__t.string()),
+  processSeconds: __t.u32(),
+  requiresActiveStation: __t.bool(),
 });
 export type CraftingRecipe = __Infer<typeof CraftingRecipe>;
 
