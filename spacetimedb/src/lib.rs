@@ -11,7 +11,8 @@ mod expansion;
 pub use expansion::*;
 
 const CREATION_ROOM_ID: &str = "e58caed0-8268-419e-abe8-faa3833a1de6";
-const STARTING_ROOM_ID: &str = "a1b2c3d4-5678-90ab-cdef-123456789abc";
+const STARTING_ROOM_ID: &str = "emberfall-lantern-square";
+const DEFAULT_WORLD_JSON: &str = include_str!("emberfall-world.json");
 
 #[spacetimedb::table(accessor = region, public)]
 #[derive(Clone)]
@@ -1441,13 +1442,13 @@ fn seed_rpg_definitions(ctx: &ReducerContext) {
 fn seed_lifecycle_definitions(ctx: &ReducerContext) {
     let config_id = "world".to_string();
     if ctx.db.world_lifecycle_config().id().find(&config_id).is_some() { return; }
-    let starter_point_id = "starter-town-square".to_string();
+    let starter_point_id = "lantern-square-arrival".to_string();
     if ctx.db.spawn_point().id().find(&starter_point_id).is_none()
         && ctx.db.room().id().find(&STARTING_ROOM_ID.to_string()).is_some() {
         ctx.db.spawn_point().insert(SpawnPoint {
             id: starter_point_id.clone(),
-            name: "Town Square".to_string(),
-            description: "Default arrival and recovery point for new worlds.".to_string(),
+            name: "Lantern Square Arrival".to_string(),
+            description: "New Lanternbound awaken beside the seven undying lamps.".to_string(),
             room_id: STARTING_ROOM_ID.to_string(),
             allows_initial_spawn: true,
             allows_respawn: true,
@@ -1465,128 +1466,84 @@ fn seed_lifecycle_definitions(ctx: &ReducerContext) {
         respawn_policy: "nearest".to_string(),
         fixed_respawn_point_id: Some(starter_point_id),
         death_mode: "respawn".to_string(),
-        respawn_delay_seconds: 0,
+        respawn_delay_seconds: 4,
         inventory_loss_mode: "keep".to_string(),
         inventory_loss_percent: 0,
         include_equipped_in_loss: false,
-        gold_loss_percent: 0,
-        experience_loss_percent: 0,
-        respawn_health_percent: 100,
-        respawn_resource_percent: 100,
-        spawn_protection_seconds: 0,
+        gold_loss_percent: 10,
+        experience_loss_percent: 5,
+        respawn_health_percent: 60,
+        respawn_resource_percent: 40,
+        spawn_protection_seconds: 6,
         reset_quests_on_death: false,
-        clear_wanted_on_respawn: false,
+        clear_wanted_on_respawn: true,
         maximum_lives: 0, create_lootable_corpse: false, allow_ability_revive: true,
         created_at: ctx.timestamp,
         updated_at: ctx.timestamp,
     });
 }
 
-fn seed_world(ctx: &ReducerContext) {
-    seed_rpg_definitions(ctx);
-    let arkyv_region = "arkyv".to_string();
-    let creation_region = "character-creation".to_string();
-    let starting_region = "starting-zone".to_string();
-    let creation_room_id = CREATION_ROOM_ID.to_string();
-    let starting_room_id = STARTING_ROOM_ID.to_string();
-    if ctx.db.region().name().find(&arkyv_region).is_none() {
-        ctx.db.region().insert(Region {
-            name: "arkyv".to_string(),
-            display_name: Some("Arkyv".to_string()),
-            description: Some("A liminal space where new personas are instantiated and prepared for their journey.".to_string()),
-            created_at: ctx.timestamp,
-            updated_at: ctx.timestamp,
-            color_scheme: r##"{"accent":"rgba(137, 207, 240, 0.14)","fontColor":"#e0f2fe","borderColor":"#89CFF0"}"##.to_string(),
-            pvp_enabled: false,
-            respawn_room_id: Some(CREATION_ROOM_ID.to_string()),
-        });
+fn seed_default_world(ctx: &ReducerContext) -> Result<(), String> {
+    let bundle: Value = serde_json::from_str(DEFAULT_WORLD_JSON)
+        .map_err(|error| format!("Default Emberfall world is invalid JSON: {error}"))?;
+    let tables = bundle.get("tables").and_then(Value::as_object)
+        .ok_or_else(|| "Default Emberfall world has no tables object.".to_string())?;
+    let import_order = [
+        "regions", "rooms", "stat_definitions", "object_definitions",
+        "equipment_slot_definitions", "progression_configs", "world_combat_configs",
+        "faction_definitions", "npcs", "actor_stats", "exits", "world_objects",
+        "loot_table_entries", "ability_definitions", "ability_effect_definitions",
+        "quest_definitions", "quest_objectives", "quest_item_rewards", "quest_rules",
+        "quest_choices", "character_option_definitions", "character_option_grants",
+        "currency_definitions", "vendor_definitions", "vendor_stocks",
+        "crafting_recipes", "crafting_ingredients", "spawn_points",
+        "world_lifecycle_configs", "admin_role_definitions", "ability_unlock_rules",
+        "object_rules", "bank_configs", "vendor_restock_rules",
+        "profession_definitions", "recipe_rules", "dialogue_nodes",
+        "dialogue_choices", "exit_rules", "world_triggers",
+        "world_simulation_configs",
+    ];
+    let engine_tables = [
+        "ability_unlock_rules", "object_rules", "bank_configs",
+        "vendor_restock_rules", "profession_definitions", "recipe_rules",
+        "dialogue_nodes", "dialogue_choices", "exit_rules", "world_triggers",
+        "world_simulation_configs",
+    ];
+
+    // The ordinary admin mutation contract performs the same validation here
+    // that it performs for visual-editor imports. A temporary bootstrap profile
+    // supplies authorization during init and is removed before the first player
+    // connects, preserving first-identity world ownership.
+    for table_name in import_order {
+        let Some(rows) = tables.get(table_name).and_then(Value::as_array) else {
+            return Err(format!("Default Emberfall world is missing table: {table_name}"));
+        };
+        if rows.is_empty() { continue; }
+        if engine_tables.contains(&table_name) {
+            for row in rows {
+                configure_engine_record(ctx, table_name.to_string(), row.to_string())
+                    .map_err(|error| format!("{table_name}: {error}"))?;
+            }
+        } else {
+            insert_rows(ctx, table_name.to_string(), Value::Array(rows.clone()).to_string())
+                .map_err(|error| format!("{table_name}: {error}"))?;
+        }
     }
-    if ctx.db.region().name().find(&creation_region).is_none() {
-        ctx.db.region().insert(Region {
-            name: "character-creation".to_string(),
-            display_name: Some("Character Creation".to_string()),
-            description: Some("The chamber where saved-world identities manage their characters.".to_string()),
-            created_at: ctx.timestamp,
-            updated_at: ctx.timestamp,
-            color_scheme: r##"{"accent":"rgba(137, 207, 240, 0.14)","fontColor":"#e0f2fe","borderColor":"#89CFF0"}"##.to_string(),
-            pvp_enabled: false,
-            respawn_room_id: Some(CREATION_ROOM_ID.to_string()),
-        });
+    if let Some(profile) = profile_for(ctx, ctx.sender()) {
+        let audit_ids = ctx.db.admin_audit().iter()
+            .filter(|row| row.profile_id == profile.id)
+            .map(|row| row.id)
+            .collect::<Vec<_>>();
+        for id in audit_ids { ctx.db.admin_audit().id().delete(id); }
     }
-    if ctx.db.region().name().find(&starting_region).is_none() {
-        ctx.db.region().insert(Region {
-            name: "starting-zone".to_string(),
-            display_name: Some("Whispering Woods".to_string()),
-            description: Some("A welcoming area where new adventurers begin their journey.".to_string()),
-            created_at: ctx.timestamp,
-            updated_at: ctx.timestamp,
-            color_scheme: r##"{"accent":"rgba(34, 197, 94, 0.14)","fontColor":"#dcfce7","borderColor":"#22c55e"}"##.to_string(),
-            pvp_enabled: false,
-            respawn_room_id: Some(STARTING_ROOM_ID.to_string()),
-        });
-    }
-    if ctx.db.room().id().find(&creation_room_id).is_none() {
-        ctx.db.room().insert(Room {
-            id: CREATION_ROOM_ID.to_string(),
-            name: "Character Creation Chamber".to_string(),
-            description: "Soft cyan light bathes the minimalist chamber. Holographic interfaces flicker along the walls, ready to instantiate new personas.".to_string(),
-            region: "Character Creation".to_string(),
-            region_name: Some("character-creation".to_string()),
-            height: 0,
-            image_url: Some("/starter-images/character-creation-chamber.png".to_string()),
-        });
-    }
-    if ctx.db.room().id().find(&starting_room_id).is_none() {
-        ctx.db.room().insert(Room {
-            id: STARTING_ROOM_ID.to_string(),
-            name: "Town Square".to_string(),
-            description: "A bustling town square paved with smooth cobblestones. Market stalls line the edges and several paths branch into the world.".to_string(),
-            region: "Starting Zone".to_string(),
-            region_name: Some("starting-zone".to_string()),
-            height: 0,
-            image_url: Some("/starter-images/town-square.png".to_string()),
-        });
-    }
-    const ARCHIE_ID: &str = "b8c640a0-7fdc-43d3-948d-69d8e2da8a48";
-    let archie_id = ARCHIE_ID.to_string();
-    if ctx.db.npc().id().find(&archie_id).is_none() {
-        ctx.db.npc().insert(Npc {
-            id: ARCHIE_ID.to_string(),
-            name: "Archie the Archivist".to_string(),
-            description: Some("A sleek humanoid welcome robot with a polished chrome chassis and glowing azure circuits.".to_string()),
-            current_room: Some(CREATION_ROOM_ID.to_string()),
-            dialogue_tree: Some(r#"{"personality":"You are Archie the Archivist, a welcoming guide. Speak with warm, measured optimism and keep responses under 50 words."}"#.to_string()),
-            faction: None,
-            behavior_type: "static".to_string(),
-            created_at: ctx.timestamp,
-            alias: Some("archie".to_string()),
-            greeting_behavior: "public".to_string(),
-            portrait_url: Some("/starter-images/archie-portrait.png".to_string()),
-            disposition: Some("friendly".to_string()),
-            attack_on_sight: false,
-            patrol_route: Some("[]".to_string()),
-            patrol_interval_seconds: 20,
-            patrol_index: 0,
-            last_patrol_at: None,
-            attack_interval_seconds: 6,
-            last_attack_at: None,
-            respawn_seconds: 60,
-            spawn_room: Some(CREATION_ROOM_ID.to_string()),
-            defeated_at: None,
-            xp_reward: 0,
-            is_guard: false,
-            guard_greeting: None,
-            protect_players: true,
-            protect_faction_members: true,
-            guard_wanted_seconds: 120,
-        });
-    }
-    seed_lifecycle_definitions(ctx);
+    delete_current_account(ctx)
 }
 
 #[reducer(init)]
 pub fn init(ctx: &ReducerContext) {
-    seed_world(ctx);
+    if let Err(error) = seed_default_world(ctx) {
+        panic!("Failed to install the default Emberfall world: {error}");
+    }
 }
 
 #[reducer(client_connected)]
@@ -4521,7 +4478,7 @@ fn target_actor_in_room(ctx: &ReducerContext, room_id: &str, actor_id: &str, que
 
 fn npc_disposition(npc: &Npc) -> &str {
     npc.disposition.as_deref().filter(|value| !value.trim().is_empty()).unwrap_or_else(|| {
-        if npc.alias.as_deref().map(|alias| alias.eq_ignore_ascii_case("archie")).unwrap_or(false) { "friendly" } else { "neutral" }
+        "neutral"
     })
 }
 

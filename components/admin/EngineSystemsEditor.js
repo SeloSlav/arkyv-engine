@@ -5,6 +5,7 @@ import {
   WORLD_CONTENT_PRIMARY_KEYS,
   WORLD_CONTENT_TABLES,
   orderWorldObjectsForRestore,
+  selectExportableNpcStats,
   selectExportableWorldObjects,
 } from '@/lib/worldContentBundle';
 
@@ -134,6 +135,7 @@ export default function EngineSystemsEditor({ enabled, permissions, actors = [] 
     const results = await Promise.all(portableContentTables.map((table) => spacetime.from(table).select('*')));
     const tables = {};
     portableContentTables.forEach((table, index) => { if (results[index].error) throw results[index].error; tables[table] = results[index].data || []; });
+    tables.actor_stats = selectExportableNpcStats(tables.actor_stats, tables.npcs);
     tables.world_objects = selectExportableWorldObjects(tables.world_objects);
     return { format: 'arkyv-world', version: 1, exported_at: new Date().toISOString(), tables };
   };

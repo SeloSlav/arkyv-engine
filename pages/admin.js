@@ -1599,10 +1599,10 @@ export default function ArkyvAdminPanel() {
     const handleDeleteRoom = useCallback(async () => {
         if (!editRoom?.id || !editRoom?.name) return;
         
-        // Prevent deletion of default system rooms
+        // The creation chamber anchors identity/character switching. Campaign
+        // rooms, including Emberfall's default arrival room, remain editable.
         const PROTECTED_ROOMS = [
             'e58caed0-8268-419e-abe8-faa3833a1de6', // Character Creation Chamber
-            'a1b2c3d4-5678-90ab-cdef-123456789abc'  // Town Square
         ];
         
         if (PROTECTED_ROOMS.includes(editRoom.id)) {

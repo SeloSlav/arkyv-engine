@@ -1403,7 +1403,7 @@ export default function ArkyvTerminal({ disabled = false, autoFocusTrigger = 0, 
         if (new Set(selections.map((selection) => selection.option_kind)).size !== selections.length) { appendLine(createErrorLine('Choose at most one race, one class, and one background.')); return; }
 
         // Default starting room for new characters
-        const STARTING_ROOM_ID = 'a1b2c3d4-5678-90ab-cdef-123456789abc';
+        const STARTING_ROOM_ID = 'emberfall-lantern-square';
 
         const insertPayload = {
             name: trimmedName,

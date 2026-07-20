@@ -24,7 +24,7 @@ function cleanTargetName(value = '') {
 
 function npcDisposition(npc) {
     if (npc?.disposition) return npc.disposition;
-    return npc?.alias?.toLowerCase() === 'archie' ? 'friendly' : 'neutral';
+    return 'neutral';
 }
 
 function ItemArt({ definition, size = 'md' }) {

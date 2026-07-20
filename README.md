@@ -2,12 +2,13 @@
 
 ![Arkyv Engine](./public/arkyv_social_card.jpg)
 
-Arkyv Engine is an open-source text-based multi-user dungeon built with Next.js, SpacetimeDB, and AI. Players explore connected regions, create multiple characters, chat in real time, and converse with AI-driven NPCs. Administrators build the world through a visual room editor.
+Arkyv Engine is an open-source text-based multi-user dungeon built with Next.js and SpacetimeDB, with optional AI dialogue and art integrations. Players explore connected regions, create multiple characters, chat in real time, and converse through authored dialogue trees or AI-driven NPC replies. Administrators build the world through a visual room editor.
 
 This repository uses **SpacetimeDB 2.0.1** for its authoritative backend. The previous hosted database, authentication, storage, and edge-function dependencies have been removed.
 
 ## Features
 
+- A complete default campaign, **Emberfall: The Moon That Sank**, ready on every fresh database
 - Realtime multiplayer room and region chat
 - Rust reducers for commands, movement, profiles, characters, and world editing
 - AI-powered NPC conversations with OpenAI, Grok, or a local OpenAI-compatible model server
@@ -266,7 +267,9 @@ The frontend consumes generated bindings in `generated/`. The client data layer 
 
 ## RPG systems studio
 
-Administrators can open `/admin` and use **RPG Systems Studio** to create game rules from reusable primitives. The built-in starter kit is optional and contains Health, Mana, Energy, Focus, Strength, Defense, starter abilities, wearable slots, firewood, a wooden box, a fuel-burning campfire, a sword, armor, and a healing potion. It can be installed repeatedly without overwriting edited definitions.
+Every fresh database installs **Emberfall: The Moon That Sank**, a playable campaign with character origins, authored dialogue, quests, combat encounters, factions, vendors, banking, doors, triggers, loot, professions, and timed campfire/furnace recipes. The first browser identity to connect remains the unrestricted world owner, so the included campaign can be edited, extended, or replaced immediately.
+
+Administrators can open `/admin` and use **RPG Systems Studio** to create game rules from reusable primitives. The optional starter-kit action restores any missing core primitives—Health, Mana, Energy, Focus, Strength, Defense, starter abilities, wearable slots, firewood, a wooden box, a fuel-burning campfire, a sword, armor, and a healing potion—without overwriting edited definitions.
 
 The studio includes these authoring surfaces:
 
@@ -293,7 +296,7 @@ Region dialogs define whether player-versus-player combat is allowed throughout 
 
 Friendly NPCs cannot be damaged, but attempting to attack them still counts as a negative action. Neutral NPCs can be attacked and retaliate. Hostile NPCs may attack automatically when configured. In safe regions, attempted player attacks and attacks on protected NPCs create a timed wanted state; a present guard responds immediately, and guards in the same region remain hostile until that state expires. Attacking or killing a non-hostile faction NPC also applies the faction's authored reputation penalty. A faction guard attacks actors whose standing is at or below its hostile threshold. Basic attacks use the equipped weapon's server-enforced cooldown. Abilities apply the same law and reputation rules before enforcing learning, valid targets, costs, cooldown/cast pacing, scaling, and mitigation. Defeated NPCs leave authored drops in the room and either remain defeated or return to their spawn room after their configured delay.
 
-Player defeat is a server-authoritative lifecycle. The default policy remains forgiving: immediate recovery, full health/resources, and no item, gold, or XP loss. Administrators can instead delay recovery and require `respawn`, select a specific or random point, choose highest priority, or find the physically nearest eligible point by breadth-first distance across the room/exit graph. Same-region-nearest prefers the death region and falls back to world-wide nearest. Ties favor higher point priority and then stable name/id order. Spawn protection blocks NPC and player attacks and ends early when the protected player attacks.
+Player defeat is a server-authoritative lifecycle. Emberfall uses a short recovery delay, keeps inventory, restores partial health/resources, applies modest gold/XP loss, and grants brief spawn protection. Administrators can instead choose immediate recovery or hardcore death, select a specific or random point, choose highest priority, or find the physically nearest eligible point by breadth-first distance across the room/exit graph. Same-region-nearest prefers the death region and falls back to world-wide nearest. Ties favor higher point priority and then stable name/id order. Spawn protection blocks NPC and player attacks and ends early when the protected player attacks.
 
 Inventory consequences can keep everything; drop or destroy inventory only; drop or destroy inventory plus equipment; or independently roll an authored percentage for each eligible stack. Equipment can be included in percentage loss. Definitions tagged `soulbound` or `keep-on-death` ignore ordinary death-loss rules. Gold loss and XP loss are separate percentages; XP loss applies only to progress within the current level and never removes a level. Health and mana/energy/focus-style resources restore by separate percentages. Administrators may optionally reset unfinished quests and clear wanted states.
 
