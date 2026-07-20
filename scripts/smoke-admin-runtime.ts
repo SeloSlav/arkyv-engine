@@ -35,6 +35,7 @@ async function main() {
 
     const insert = (tableName: string, payload: unknown) => connection.reducers.insertRows({ tableName, payloadJson: JSON.stringify(payload) });
     const update = (tableName: string, ids: string[], payload: unknown) => connection.reducers.updateRows({ tableName, idsJson: JSON.stringify(ids), payloadJson: JSON.stringify(payload) });
+    const remove = (tableName: string, ids: string[]) => connection.reducers.deleteRows({ tableName, idsJson: JSON.stringify(ids) });
     const configure = (tableName: string, payload: unknown) => connection.reducers.configureEngineRecord({ tableName, payloadJson: JSON.stringify(payload) });
     const expectRejected = async (operation: () => Promise<unknown>, label: string) => {
         let rejected = false;
@@ -158,8 +159,14 @@ async function main() {
         assert([...connection.db.exit_rule.iter()].some((row: any) => row.exitId === 'admin-smoke-exit' && row.closed), 'Exit rule was not saved.');
         assert([...connection.db.world_trigger.iter()].some((row: any) => row.id === 'admin-smoke-trigger'), 'World trigger was not saved.');
         assert([...connection.db.world_simulation_config.iter()].some((row: any) => row.id === 'world' && row.dayLengthMinutes === 90), 'Simulation configuration was not saved.');
+        await expectRejected(() => remove('rooms', ['admin-smoke-room']), 'Trigger source deletion');
+        await connection.reducers.deleteEngineRecord({ tableName: 'recipe_rules', recordId: 'admin-smoke-recipe' });
+        await expectRejected(
+            () => connection.reducers.deleteEngineRecord({ tableName: 'profession_definitions', recordId: 'admin-smoke-profession' }),
+            'Dialogue profession deletion',
+        );
 
-        console.log('Admin runtime smoke test passed: placement integrity, relationship edits, and all advanced configurable systems persisted with authoritative validation.');
+        console.log('Admin runtime smoke test passed: placement integrity, relationship edits, advanced systems, and dependency-safe deletion all passed authoritative validation.');
     } finally {
         connection?.disconnect();
     }

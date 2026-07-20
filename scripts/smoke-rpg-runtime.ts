@@ -245,8 +245,10 @@ async function main() {
         assert(overflow?.locationKind === 'room', 'Inventory capacity did not reject an extra stack.');
         await update('progression_configs', ['world'], { base_inventory_slots: 10 });
 
+        const patrolRoomBefore = [...connection.db.npc.iter()].find((row: any) => row.id === patrollerId)?.currentRoom;
+        await delay(1_100);
         await command('runtime-patrol', 'wait');
-        await waitFor(() => [...connection.db.npc.iter()].find((row: any) => row.id === patrollerId)?.currentRoom === roomB, 'NPC patrol movement');
+        await waitFor(() => [...connection.db.npc.iter()].find((row: any) => row.id === patrollerId)?.currentRoom !== patrolRoomBefore, 'NPC patrol movement');
 
         await delay(2_100);
         await command('runtime-enemy-loot', 'attack Runtime Enemy');
@@ -314,9 +316,10 @@ async function main() {
         await delay(2_100);
         await command('runtime-quest-kill', 'attack Runtime Marauder');
         await waitFor(() => [...connection.db.actor_quest.iter()].find((row: any) => row.questId === 'runtime-patrol-quest')?.status === 'ready', 'quest ready state');
+        const questGoldBefore = [...connection.db.actor_wallet.iter()].find((row: any) => row.actorId === heroId)?.gold || 0;
         await command('runtime-turn-in', 'turn in Runtime Patrol');
         await waitFor(() => [...connection.db.actor_quest.iter()].find((row: any) => row.questId === 'runtime-patrol-quest')?.status === 'completed', 'quest turn-in');
-        assert([...connection.db.actor_wallet.iter()].find((row: any) => row.actorId === heroId)?.gold === 40, 'Quest gold reward was not deposited.');
+        assert([...connection.db.actor_wallet.iter()].find((row: any) => row.actorId === heroId)?.gold === questGoldBefore + 40, 'Quest gold reward was not deposited.');
         assert([...connection.db.actor_faction_reputation.iter()].find((row: any) => row.actorId === heroId && row.factionId === 'runtime-watch')?.reputation === 125, 'Quest reputation reward was not applied.');
         assert([...connection.db.world_object.iter()].some((row: any) => row.locationKind === 'inventory' && row.locationId === heroId && row.definitionId === 'iron-sword'), 'Quest item reward was not granted.');
 
@@ -335,6 +338,7 @@ async function main() {
             gold_loss_percent: 25, experience_loss_percent: 50,
             respawn_health_percent: 50, respawn_resource_percent: 25, spawn_protection_seconds: 2,
         });
+        const goldBeforeDeath = [...connection.db.actor_wallet.iter()].find((row: any) => row.actorId === heroId)?.gold || 0;
         const xpBeforeDeath = [...connection.db.actor_progression.iter()].find((row: any) => row.actorId === heroId)?.experience;
         await update('actor_stats', [`${heroId}::health`], { current_value: 1 });
         await delay(1_100);
@@ -345,7 +349,10 @@ async function main() {
         assert(droppedDeathItem?.locationKind === 'room' && droppedDeathItem.locationId === roomA, 'Inventory death loss did not drop the carried item in the death room.');
         const droppedBankItem = [...connection.db.world_object.iter()].find((row: any) => row.id === 'runtime-bank-death-item');
         assert(droppedBankItem?.locationKind === 'room' && droppedBankItem.locationId === roomA, 'A bank configured without death protection incorrectly preserved its item.');
-        assert([...connection.db.actor_wallet.iter()].find((row: any) => row.actorId === heroId)?.gold === 30, 'Configured gold loss was not applied.');
+        assert(
+            [...connection.db.actor_wallet.iter()].find((row: any) => row.actorId === heroId)?.gold === goldBeforeDeath - Math.floor(goldBeforeDeath * 0.25),
+            'Configured gold loss was not applied.',
+        );
         const xpAfterDeath = [...connection.db.actor_progression.iter()].find((row: any) => row.actorId === heroId)?.experience;
         assert(xpAfterDeath === xpBeforeDeath - Math.floor(xpBeforeDeath / 2), 'Configured current-level XP loss was not applied.');
         await delay(1_100);

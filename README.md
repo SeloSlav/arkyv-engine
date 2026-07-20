@@ -379,11 +379,14 @@ npm run lint                      # ESLint
 npm run spacetime:check           # Check the Rust module
 npm run spacetime:deploy          # Publish and regenerate bindings
 npm run spacetime:deploy:clean    # Wipe, publish, and regenerate bindings
+npm run audit:admin               # Verify authored-system editor/reducer/export coverage
 npm run smoke:rpg:compile         # Compile the isolated RPG reducer smoke test
 npm run smoke:rpg                 # Run it against arkyv-engine-runtime-test
+npm run smoke:cooking             # Run the focused timed-cooking contract test
+npm run smoke:admin               # Run admin CRUD, placement, and dependency checks
 ```
 
-The smoke test expects a fresh local database named `arkyv-engine-runtime-test`. Publish the module to that name before running it, then delete the test database afterward. It verifies authoritative room and door checks, private messages, parties and enforced loot ownership, bilateral trade, authored dialogue and recipe learning, safe/open PvP, attack cooldowns, inventory overflow, patrol movement, XP/levels/talents, ability costs, resource regeneration, equipment capacity, hostile attacks, graph-nearest delayed recovery, bank/death policies, enemy drops, guards/crimes, faction reputation, quest paths and rewards, validation, and hardcore character deletion without touching the main `arkyv-engine` world.
+The runtime smoke tests expect a fresh disposable local database. Publish the module to that name before running them, then delete the test database afterward. The broad RPG suite verifies authoritative room and door checks, private messages, parties and enforced loot ownership, bilateral trade, authored dialogue and recipe learning, timed cooking and merchant value, safe/open PvP, attack cooldowns, inventory overflow, patrol movement, XP/levels/talents, ability costs, resource regeneration, equipment capacity, hostile attacks, graph-nearest delayed recovery, bank/death policies, enemy drops, guards/crimes, faction reputation, quest paths and rewards, validation, and hardcore character deletion without touching the main `arkyv-engine` world. The focused admin suite verifies referenced-record editing, all advanced systems, nested placement integrity, and dependency-safe deletion.
 
 The PowerShell deploy scripts invoke the installed Windows CLI at `SpacetimeDB/bin/2.0.1`. On macOS or Linux, run the equivalent commands directly:
 
