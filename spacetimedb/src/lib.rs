@@ -3677,6 +3677,202 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
     Ok(())
 }
 
+fn archie_content_table(table_name: &str) -> bool {
+    matches!(
+        table_name,
+        "regions"
+            | "rooms"
+            | "stat_definitions"
+            | "object_definitions"
+            | "equipment_slot_definitions"
+            | "progression_configs"
+            | "world_combat_configs"
+            | "faction_definitions"
+            | "npcs"
+            | "actor_stats"
+            | "exits"
+            | "world_objects"
+            | "loot_table_entries"
+            | "ability_definitions"
+            | "ability_effect_definitions"
+            | "quest_definitions"
+            | "quest_objectives"
+            | "quest_item_rewards"
+            | "quest_rules"
+            | "quest_choices"
+            | "character_option_definitions"
+            | "character_option_grants"
+            | "currency_definitions"
+            | "vendor_definitions"
+            | "vendor_stocks"
+            | "crafting_recipes"
+            | "crafting_ingredients"
+            | "spawn_points"
+            | "world_lifecycle_configs"
+            | "ability_unlock_rules"
+            | "object_rules"
+            | "bank_configs"
+            | "vendor_restock_rules"
+            | "profession_definitions"
+            | "recipe_rules"
+            | "dialogue_nodes"
+            | "dialogue_choices"
+            | "exit_rules"
+            | "world_triggers"
+            | "world_simulation_configs"
+    )
+}
+
+/// Applies one Archie-authored world patch as a single transaction. The
+/// reducer reuses the same table-specific validation and permission gates as
+/// the visual editors; any failed operation rolls back the entire patch.
+#[reducer]
+pub fn apply_admin_patch(
+    ctx: &ReducerContext,
+    run_id: String,
+    operations_json: String,
+    summary: String,
+) -> Result<(), String> {
+    ensure_profile(ctx);
+    require_admin(ctx)?;
+    let run_id = run_id.trim().to_string();
+    if run_id.is_empty()
+        || run_id.len() > 96
+        || !run_id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+    {
+        return Err("Archie run id is invalid.".to_string());
+    }
+    if ctx
+        .db
+        .admin_audit()
+        .iter()
+        .any(|row| row.action == "archie.apply" && row.target == run_id)
+    {
+        return Ok(());
+    }
+    if operations_json.len() > 2_000_000 {
+        return Err("Archie patch is too large.".to_string());
+    }
+    let operations: Vec<Value> = serde_json::from_str(&operations_json)
+        .map_err(|error| format!("Invalid Archie patch: {error}"))?;
+    if operations.is_empty() {
+        return Err("Archie patch has no operations.".to_string());
+    }
+    if operations.len() > 220 {
+        return Err("Archie patch has too many operations.".to_string());
+    }
+
+    let mut record_count = 0usize;
+    for operation in &operations {
+        let action = operation
+            .get("action")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Archie patch operation is missing an action.".to_string())?;
+        let table_name = operation
+            .get("table")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Archie patch operation is missing a table.".to_string())?;
+        if !archie_content_table(table_name) {
+            return Err(format!("Archie cannot modify table: {table_name}"));
+        }
+        let count = match action {
+            "insert" => operation
+                .get("records")
+                .and_then(Value::as_array)
+                .map(Vec::len)
+                .filter(|count| *count > 0)
+                .ok_or_else(|| "Archie insert operation has no records.".to_string())?,
+            "update" | "delete" | "delete_engine" => operation
+                .get("ids")
+                .and_then(Value::as_array)
+                .map(Vec::len)
+                .filter(|count| *count > 0)
+                .ok_or_else(|| format!("Archie {action} operation has no ids."))?,
+            "configure" => {
+                if !operation.get("record").is_some_and(Value::is_object) {
+                    return Err("Archie configure operation has no record.".to_string());
+                }
+                1
+            }
+            _ => return Err(format!("Unsupported Archie patch action: {action}")),
+        };
+        record_count = record_count.saturating_add(count);
+        if record_count > 220 {
+            return Err("Archie patch changes more than 220 records.".to_string());
+        }
+    }
+
+    for operation in &operations {
+        let action = operation.get("action").and_then(Value::as_str).unwrap_or_default();
+        let table_name = operation.get("table").and_then(Value::as_str).unwrap_or_default().to_string();
+        match action {
+            "insert" => {
+                insert_rows(
+                    ctx,
+                    table_name,
+                    operation.get("records").cloned().unwrap_or(Value::Array(Vec::new())).to_string(),
+                )?;
+            }
+            "update" => {
+                let changes = operation
+                    .get("changes")
+                    .filter(|value| value.is_object())
+                    .ok_or_else(|| "Archie update operation has no changes object.".to_string())?;
+                update_rows(
+                    ctx,
+                    table_name,
+                    operation.get("ids").cloned().unwrap_or(Value::Array(Vec::new())).to_string(),
+                    changes.to_string(),
+                )?;
+            }
+            "delete" => {
+                delete_rows(
+                    ctx,
+                    table_name,
+                    operation.get("ids").cloned().unwrap_or(Value::Array(Vec::new())).to_string(),
+                )?;
+            }
+            "configure" => {
+                configure_engine_record(
+                    ctx,
+                    table_name,
+                    operation.get("record").cloned().unwrap_or(Value::Null).to_string(),
+                )?;
+            }
+            "delete_engine" => {
+                let ids = operation.get("ids").and_then(Value::as_array).cloned().unwrap_or_default();
+                for id in ids {
+                    let record_id = id
+                        .as_str()
+                        .ok_or_else(|| "Archie engine record id must be a string.".to_string())?;
+                    delete_engine_record(ctx, table_name.clone(), record_id.to_string())?;
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    let profile_id = require_profile(ctx)?.id;
+    let details = serde_json::json!({
+        "summary": summary.chars().take(1_000).collect::<String>(),
+        "operation_count": operations.len(),
+        "record_count": record_count,
+    })
+    .to_string();
+    ctx.db.admin_audit().insert(AdminAudit {
+        id: 0,
+        scope: "world".to_string(),
+        profile_id,
+        action: "archie.apply".to_string(),
+        target: run_id,
+        details,
+        created_at: ctx.timestamp,
+    });
+    Ok(())
+}
+
 /// Focused moderation operations that need more invariants than generic row
 /// editing can provide. The payload is a JSON object whose fields depend on
 /// the action; all branches are administrator-only and server validated.

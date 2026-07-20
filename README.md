@@ -28,6 +28,7 @@ This repository uses **SpacetimeDB 2.0.1** for its authoritative backend. The pr
 - Parties with shared kill credit, assist XP, leader/round-robin/free-for-all loot, guilds, friends, blocks, private party/guild chat, and bilateral server-validated player trade
 - Private whispers, player reports, mutes, bans, kicks, administrator audits, content validation, server snapshots, and portable world export/import
 - Permissioned administrator roles for world, systems, quests, economy, lifecycle, moderation, and role management
+- Archie, an admin-only worldbuilding agent that can inspect, stage, validate, snapshot, and atomically apply visual-editor content
 - Local saved worlds backed by persistent SpacetimeDB identity tokens
 - Explicit identity backup and restore through a local JSON file (the file contains tokens and must be kept secret)
 - Multiple characters per saved world
@@ -40,7 +41,7 @@ This repository uses **SpacetimeDB 2.0.1** for its authoritative backend. The pr
 - Backend: SpacetimeDB 2.0.1 and a Rust WASM module
 - Realtime: generated SpacetimeDB TypeScript bindings
 - Identity: SpacetimeDB signed tokens stored in browser localStorage
-- AI: OpenAI, Grok, or a local OpenAI-compatible server such as Ollama
+- AI: OpenAI Agents SDK with OpenAI, Grok, local, or custom OpenAI-compatible model providers
 - Images: direct room uploads or optional generation through RetroDiffusion or a local Stable Diffusion WebUI/Forge API, with data URLs stored in SpacetimeDB
 
 ## Prerequisites
@@ -181,6 +182,38 @@ LOCAL_IMAGE_MODEL=
 Arkyv calls the WebUI-compatible `POST /sdapi/v1/txt2img` endpoint and continues storing the returned PNG as a SpacetimeDB data URL. `LOCAL_IMAGE_STEPS`, `LOCAL_IMAGE_CFG_SCALE`, `LOCAL_IMAGE_SAMPLER`, `LOCAL_IMAGE_PROMPT_PREFIX`, and `LOCAL_IMAGE_NEGATIVE_PROMPT` are optional quality/style controls. If the image API uses `--api-auth`, set `LOCAL_IMAGE_API_AUTH=username:password`.
 
 Keep local model servers bound to a trusted interface. They normally do not need to be reachable by players or by the public internet; only the Arkyv Next.js server needs access.
+
+### Archie admin world agent
+
+World owners and administrators with world-management permission can open **Archie** from the right side of `/admin` and describe a bounded worldbuilding task in ordinary language. Archie can inspect the current authored world and schema, find rooms by name or ID, stage inserts, updates, and deletions, validate references, and report exactly what it changed. This uses the OpenAI Agents SDK directly; Arkyv does not require LangChain or LangGraph.
+
+Archie uses the server-side `AI_PROVIDER` setting. OpenAI defaults to the Responses API and `gpt-5.6-sol`; Grok can use its compatible API; `local` and `custom` use OpenAI-compatible Chat Completions by default. A local or custom model must support function/tool calling. Provider-specific overrides are available:
+
+```env
+# OpenAI
+OPENAI_AGENT_MODEL=gpt-5.6-sol
+OPENAI_AGENT_API=responses
+OPENAI_AGENT_REASONING_EFFORT=low
+
+# Grok
+GROK_AGENT_MODEL=grok-4.5
+GROK_AGENT_API=responses
+
+# Ollama, llama.cpp, LM Studio, vLLM, or LocalAI
+LOCAL_AI_AGENT_MODEL=qwen2.5:7b
+LOCAL_AI_AGENT_API=chat_completions
+
+# Another OpenAI-compatible provider
+AI_PROVIDER=custom
+CUSTOM_AI_BASE_URL=https://provider.example/v1
+CUSTOM_AI_MODEL=provider-model-name
+CUSTOM_AI_API_KEY=
+CUSTOM_AI_AGENT_API=chat_completions
+```
+
+Provider keys, SpacetimeDB identity tokens, and the administrator identity are never included in Archie prompts. The authenticated API middleware checks the caller against the authoritative database before a run. Archie receives authored world content, uses a bounded tool/turn/change budget, and never writes directly from the model. Safe additions and updates can auto-apply when enabled. Deletions always require explicit administrator approval. Every applied run first creates a server snapshot, then passes one patch to the `apply_admin_patch` reducer; that reducer rechecks permissions and commits the whole patch transactionally or rolls it back. The admin then runs authoritative content validation and refreshes the visual editor.
+
+Set `ARCHIE_TRACING=true` only when the operator intentionally wants SDK tracing. It is disabled by default to avoid sending authored world content to an external tracing service.
 
 ### Clean local reset
 

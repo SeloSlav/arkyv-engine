@@ -39,7 +39,7 @@ export default function SetupPage({ cameFromHostedRuntime }) {
               <Code>npm run setup:local -- --image=local</Code>
               <p className="mt-2 text-slate-400">You can skip image generation setup entirely and upload your own PNG, JPEG, or WebP room images from the admin room editor. Uploading requires no model or API key.</p>
             </div>
-            <p>To preset both local providers at once, run <code className="text-cyan-300">npm run setup:local -- --text=local --image=local</code>. For hosted text, use <code className="text-cyan-300">--text=openai</code> or <code className="text-cyan-300">--text=grok</code>, then add the corresponding key to <code className="text-cyan-300">.env.local</code>.</p>
+            <p>To preset both local providers at once, run <code className="text-cyan-300">npm run setup:local -- --text=local --image=local</code>. For hosted text, use <code className="text-cyan-300">--text=openai</code> or <code className="text-cyan-300">--text=grok</code>, then add the corresponding key to <code className="text-cyan-300">.env.local</code>. An additional OpenAI-compatible service can use <code className="text-cyan-300">--text=custom</code> plus the <code className="text-cyan-300">CUSTOM_AI_*</code> variables from <code className="text-cyan-300">.env.example</code>.</p>
           </section>
 
           <section className="space-y-4">
@@ -75,7 +75,7 @@ export default function SetupPage({ cameFromHostedRuntime }) {
               <li>Schema mismatch: rerun <code>npm run spacetime:deploy</code> with CLI 2.0.1.</li>
               <li>Prerequisite uncertainty: run <code>npm run setup:check</code> for an actionable status list.</li>
               <li>Admin page redirects: only the first identity in a fresh database is admin.</li>
-              <li>Local text errors: verify the model is installed and <code>LOCAL_AI_BASE_URL</code> ends in <code>/v1</code>.</li>
+              <li>Local/custom text errors: verify the model supports tool calls and the configured base URL ends in <code>/v1</code>.</li>
               <li>Local image errors: start Stable Diffusion WebUI/Forge with <code>--api</code> and verify <code>LOCAL_IMAGE_BASE_URL</code>.</li>
             </ul>
           </section>

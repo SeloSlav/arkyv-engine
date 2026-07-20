@@ -16,11 +16,11 @@ const valueFor = (name) => args.find((argument) => argument.startsWith(`--${name
 const textProvider = valueFor('text');
 const imageProvider = valueFor('image');
 
-const validTextProviders = new Set(['openai', 'grok', 'local']);
+const validTextProviders = new Set(['openai', 'grok', 'local', 'custom']);
 const validImageProviders = new Set(['retrodiffusion', 'local']);
 
 if (textProvider && !validTextProviders.has(textProvider)) {
-    console.error('Invalid --text value. Use openai, grok, or local.');
+    console.error('Invalid --text value. Use openai, grok, local, or custom.');
     process.exit(1);
 }
 if (imageProvider && !validImageProviders.has(imageProvider)) {
@@ -102,6 +102,22 @@ if ((env.AI_PROVIDER || 'openai').toLowerCase() === 'local') {
             : ollama.ok
                 ? `Ollama installed but not running; dev:all will start it. Pull ${env.LOCAL_AI_MODEL || 'qwen2.5:7b'} first`
                 : `not running at ${baseUrl}; install Ollama and pull ${env.LOCAL_AI_MODEL || 'qwen2.5:7b'}`,
+    );
+} else if ((env.AI_PROVIDER || 'openai').toLowerCase() === 'custom') {
+    const baseUrl = String(env.CUSTOM_AI_BASE_URL || '').replace(/\/+$/, '');
+    const headers = env.CUSTOM_AI_API_KEY
+        ? { Authorization: `Bearer ${env.CUSTOM_AI_API_KEY}` }
+        : {};
+    const reachable = baseUrl ? await probeUrl(`${baseUrl}/models`, 1500, { headers }) : false;
+    const configured = Boolean(baseUrl && env.CUSTOM_AI_MODEL && env.CUSTOM_AI_API_KEY);
+    addCheck(
+        'Custom text provider',
+        configured && reachable,
+        !configured
+            ? 'set CUSTOM_AI_BASE_URL, CUSTOM_AI_MODEL, and CUSTOM_AI_API_KEY'
+            : reachable
+                ? `${env.CUSTOM_AI_MODEL} at ${baseUrl}`
+                : `configured but not reachable at ${baseUrl}`,
     );
 } else {
     const provider = (env.AI_PROVIDER || 'openai').toLowerCase();

@@ -35,6 +35,7 @@ import {
 
 // Import all reducer arg schemas
 import AdminActorActionReducer from "./admin_actor_action_reducer";
+import ApplyAdminPatchReducer from "./apply_admin_patch_reducer";
 import AuthorizeProviderRequestReducer from "./authorize_provider_request_reducer";
 import CompleteNpcCommandReducer from "./complete_npc_command_reducer";
 import ConfigureEngineRecordReducer from "./configure_engine_record_reducer";
@@ -1191,6 +1192,7 @@ const tablesSchema = __schema({
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
   __reducerSchema("admin_actor_action", AdminActorActionReducer),
+  __reducerSchema("apply_admin_patch", ApplyAdminPatchReducer),
   __reducerSchema("authorize_provider_request", AuthorizeProviderRequestReducer),
   __reducerSchema("complete_npc_command", CompleteNpcCommandReducer),
   __reducerSchema("configure_engine_record", ConfigureEngineRecordReducer),

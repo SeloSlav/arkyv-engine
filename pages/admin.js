@@ -9,6 +9,7 @@ import Tooltip from '@/components/ui/Tooltip';
 import HamburgerIcon from '@/components/HamburgerIcon';
 import RpgSystemsEditor from '@/components/admin/RpgSystemsEditor';
 import NpcDialogueEditor from '@/components/admin/NpcDialogueEditor';
+import ArchieAgentSidebar from '@/components/admin/ArchieAgentSidebar';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCircleInfo, faGamepad } from '@fortawesome/free-solid-svg-icons';
 import '@xyflow/react/dist/style.css';
@@ -523,6 +524,7 @@ export default function ArkyvAdminPanel() {
     const [saveSuccess, setSaveSuccess] = useState(false);
     const [saveError, setSaveError] = useState('');
     const [reloadCounter, setReloadCounter] = useState(0);
+    const [archieRevision, setArchieRevision] = useState(0);
     const [regionsList, setRegionsList] = useState([]);
     const [lastComputedRegionKey, setLastComputedRegionKey] = useState(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -4512,7 +4514,7 @@ export default function ArkyvAdminPanel() {
                         </div>
                     </section>
 
-                    <RpgSystemsEditor enabled={Boolean(session)} currentProfile={savedWorldProfile} />
+                    <RpgSystemsEditor key={`rpg-${archieRevision}`} enabled={Boolean(session)} currentProfile={savedWorldProfile} />
 
                     <section id="regions" className={`${canManageWorld ? '' : 'hidden '}scroll-mt-16 bg-slate-900/70 border border-cyan-400/30 rounded-xl shadow-xl shadow-cyan-400/10`}>
                         <div className="p-4 sm:p-6 border-b border-cyan-400/20 flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-start">
@@ -7259,6 +7261,16 @@ export default function ArkyvAdminPanel() {
                 `}</style>
                 
                 {/* Help Dialog */}
+                {canManageWorld && (
+                    <ArchieAgentSidebar
+                        currentProfile={savedWorldProfile}
+                        onWorldChanged={() => {
+                            setReloadCounter((value) => value + 1);
+                            setArchieRevision((value) => value + 1);
+                        }}
+                    />
+                )}
+
                 {showHelpDialog && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm" onMouseDown={(e) => {
                         if (e.currentTarget === e.target) {
@@ -7420,7 +7432,7 @@ export default function ArkyvAdminPanel() {
                                         <div>
                                             <p className="text-cyan-300 font-semibold mb-1">Environment Variables (.env.local):</p>
                                             <code className="block text-[0.65rem] bg-slate-900/80 p-3 rounded border border-slate-700 font-mono text-slate-300 leading-relaxed">
-                                                # Text provider: openai, grok, or local<br />
+                                                # Text provider: openai, grok, local, or custom<br />
                                                 AI_PROVIDER=local<br />
                                                 LOCAL_AI_BASE_URL=http://127.0.0.1:11434/v1<br />
                                                 LOCAL_AI_MODEL=qwen2.5:7b<br />
@@ -7428,6 +7440,9 @@ export default function ArkyvAdminPanel() {
                                                 # Hosted text alternatives<br />
                                                 OPENAI_API_KEY=<br />
                                                 GROK_API_KEY=<br />
+                                                # CUSTOM_AI_BASE_URL=https://provider.example/v1<br />
+                                                # CUSTOM_AI_MODEL=provider-model-name<br />
+                                                # CUSTOM_AI_API_KEY=<br />
                                                 <br />
                                                 # Image provider: retrodiffusion or local<br />
                                                 IMAGE_PROVIDER=local<br />
@@ -7450,6 +7465,9 @@ export default function ArkyvAdminPanel() {
                                         </div>
                                         <div>
                                             <p><strong className="text-pink-300">Grok API Key:</strong> Required if using Grok as your provider. Get yours at <a href="https://x.ai/api" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300 underline">x.ai/api</a>.</p>
+                                        </div>
+                                        <div>
+                                            <p><strong className="text-pink-300">Archie:</strong> The right-side admin agent uses the same provider. Local and custom models must support OpenAI-compatible function/tool calls. Archie stages validated world changes; deletions always wait for explicit approval.</p>
                                         </div>
                                         <div>
                                             <p><strong className="text-purple-300">Local Images:</strong> Set <code className="text-xs bg-slate-900 px-1.5 py-0.5 rounded">IMAGE_PROVIDER=local</code> and start Stable Diffusion WebUI or Forge with <code className="text-xs bg-slate-900 px-1.5 py-0.5 rounded">--api</code>. The optional model setting selects a checkpoint for each request.</p>

@@ -7,6 +7,7 @@ import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
 import AdminActorActionReducer from "../admin_actor_action_reducer";
+import ApplyAdminPatchReducer from "../apply_admin_patch_reducer";
 import AuthorizeProviderRequestReducer from "../authorize_provider_request_reducer";
 import ClientConnectedReducer from "../client_connected_reducer";
 import CompleteNpcCommandReducer from "../complete_npc_command_reducer";
@@ -29,6 +30,7 @@ import UpdateRowsReducer from "../update_rows_reducer";
 import ValidateWorldContentReducer from "../validate_world_content_reducer";
 
 export type AdminActorActionParams = __Infer<typeof AdminActorActionReducer>;
+export type ApplyAdminPatchParams = __Infer<typeof ApplyAdminPatchReducer>;
 export type AuthorizeProviderRequestParams = __Infer<typeof AuthorizeProviderRequestReducer>;
 export type ClientConnectedParams = __Infer<typeof ClientConnectedReducer>;
 export type CompleteNpcCommandParams = __Infer<typeof CompleteNpcCommandReducer>;

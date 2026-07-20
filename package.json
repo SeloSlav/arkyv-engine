@@ -24,12 +24,14 @@
     "@fortawesome/free-brands-svg-icons": "^7.1.0",
     "@fortawesome/free-solid-svg-icons": "^7.1.0",
     "@fortawesome/react-fontawesome": "^3.1.0",
+    "@openai/agents": "^0.13.5",
     "@xyflow/react": "^12.8.6",
     "next": "15.5.9",
     "openai": "^6.3.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "spacetimedb": "2.0.1"
+    "spacetimedb": "2.0.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
