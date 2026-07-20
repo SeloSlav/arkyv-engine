@@ -521,6 +521,7 @@ export default function ArkyvAdminPanel() {
     const [roomImageSuccesses, setRoomImageSuccesses] = useState({}); // Track per-room successes
     const [includeRegionInPrompt, setIncludeRegionInPrompt] = useState(true);
     const [rdCredits, setRdCredits] = useState(null);
+    const [imageProviderInfo, setImageProviderInfo] = useState(null);
     const [generatingNpcPortraits, setGeneratingNpcPortraits] = useState({}); // Track per-NPC portrait generation
     const [npcPortraitErrors, setNpcPortraitErrors] = useState({}); // Track per-NPC portrait errors
     const [npcPortraitSuccesses, setNpcPortraitSuccesses] = useState({}); // Track per-NPC portrait successes
@@ -1225,11 +1226,24 @@ export default function ArkyvAdminPanel() {
         setSaveError('');
         setIsDialogOpen(!!room);
         
-        // Fetch RetroDiffusion credits
+        // Fetch credits for RetroDiffusion or check the configured local image
+        // server. The same endpoint reports both provider types.
         fetch('/api/arkyv/get-credits')
-            .then(res => res.json())
-            .then(data => setRdCredits(data.credits))
-            .catch(() => setRdCredits(null));
+            .then(async (res) => {
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.message || data.error);
+                return data;
+            })
+            .then((data) => {
+                setImageProviderInfo(data);
+                setRdCredits(data.credits !== null && data.credits !== undefined && Number.isFinite(Number(data.credits))
+                    ? Number(data.credits)
+                    : null);
+            })
+            .catch(() => {
+                setImageProviderInfo(null);
+                setRdCredits(null);
+            });
     }, []);
 
     const handleEdgeClick = useCallback((event, edge) => {
@@ -2681,7 +2695,7 @@ export default function ArkyvAdminPanel() {
                 if (errorData.error === 'INSUFFICIENT_CREDITS') {
                     throw new Error('INSUFFICIENT_CREDITS');
                 }
-                throw new Error(errorData.error || 'Failed to generate image');
+                throw new Error(errorData.message || errorData.error || 'Failed to generate image');
             }
             
             const data = await response.json();
@@ -2694,8 +2708,15 @@ export default function ArkyvAdminPanel() {
             
             // Update credits
             if (data.creditsRemaining !== undefined) {
-                setRdCredits(data.creditsRemaining);
+                setRdCredits(data.creditsRemaining !== null && Number.isFinite(Number(data.creditsRemaining))
+                    ? Number(data.creditsRemaining)
+                    : null);
             }
+            setImageProviderInfo((current) => ({
+                ...current,
+                provider: data.provider,
+                providerLabel: data.providerLabel,
+            }));
             
             // Update the active room ONLY if we're still viewing the same room
             setActiveRoom(prev => prev?.id === roomId ? { ...prev, image_url: data.imageUrl } : prev);
@@ -2703,7 +2724,12 @@ export default function ArkyvAdminPanel() {
             // Trigger a reload to refresh the room data from database
             setReloadCounter(prev => prev + 1);
             
-            setRoomImageSuccesses(prev => ({ ...prev, [roomId]: `Image generated successfully! ${data.creditsRemaining ? `Credits remaining: ${data.creditsRemaining}` : ''}` }));
+            const providerResult = data.provider === 'local'
+                ? ' Generated with your local image model.'
+                : data.creditsRemaining !== null && data.creditsRemaining !== undefined && Number.isFinite(Number(data.creditsRemaining))
+                    ? ` Credits remaining: ${data.creditsRemaining}.`
+                    : '';
+            setRoomImageSuccesses(prev => ({ ...prev, [roomId]: `Image generated successfully!${providerResult}` }));
             
         } catch (err) {
             console.error('Failed to generate room image:', err);
@@ -2773,7 +2799,7 @@ export default function ArkyvAdminPanel() {
                 if (errorData.error === 'INSUFFICIENT_CREDITS') {
                     throw new Error('INSUFFICIENT_CREDITS');
                 }
-                throw new Error(errorData.error || 'Failed to generate portrait');
+                throw new Error(errorData.message || errorData.error || 'Failed to generate portrait');
             }
             
             const data = await response.json();
@@ -2786,8 +2812,15 @@ export default function ArkyvAdminPanel() {
             
             // Update credits
             if (data.creditsRemaining !== undefined) {
-                setRdCredits(data.creditsRemaining);
+                setRdCredits(data.creditsRemaining !== null && Number.isFinite(Number(data.creditsRemaining))
+                    ? Number(data.creditsRemaining)
+                    : null);
             }
+            setImageProviderInfo((current) => ({
+                ...current,
+                provider: data.provider,
+                providerLabel: data.providerLabel,
+            }));
             
             // Update the active NPC ONLY if we're still viewing the same NPC
             setActiveNpc(prev => prev?.id === npcId ? { ...prev, portrait_url: data.portraitUrl } : prev);
@@ -2795,7 +2828,12 @@ export default function ArkyvAdminPanel() {
             // Trigger a reload to refresh the NPC data from database
             setReloadCounter(prev => prev + 1);
             
-            setNpcPortraitSuccesses(prev => ({ ...prev, [npcId]: `Portrait generated successfully! ${data.creditsRemaining ? `Credits remaining: ${data.creditsRemaining}` : ''}` }));
+            const providerResult = data.provider === 'local'
+                ? ' Generated with your local image model.'
+                : data.creditsRemaining !== null && data.creditsRemaining !== undefined && Number.isFinite(Number(data.creditsRemaining))
+                    ? ` Credits remaining: ${data.creditsRemaining}.`
+                    : '';
+            setNpcPortraitSuccesses(prev => ({ ...prev, [npcId]: `Portrait generated successfully!${providerResult}` }));
             
         } catch (err) {
             console.error('Failed to generate NPC portrait:', err);
@@ -4183,7 +4221,7 @@ export default function ArkyvAdminPanel() {
                 </nav>
 
                 {/* Low Credit Warning */}
-                {rdCredits !== null && rdCredits < 20 && (
+                {imageProviderInfo?.provider === 'retrodiffusion' && rdCredits !== null && rdCredits < 20 && (
                     <div className="max-w-7xl mx-auto px-3 pt-4 sm:px-6 sm:pt-6">
                         <div className="bg-amber-500/10 border border-amber-400/40 rounded-xl p-4 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
                             <div className="flex items-center gap-3">
@@ -5686,7 +5724,7 @@ export default function ArkyvAdminPanel() {
                                             onClick={handleGenerateRoomImage}
                                             disabled={generatingRoomImages[activeRoom?.id] || !editRoom?.description}
                                             className="w-full px-4 py-2 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-400/50 rounded text-[0.7rem] tracking-[0.2em] uppercase text-purple-200 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                                            title={editRoom?.description ? (activeRoom?.image_url ? 'Regenerate image (costs credits)' : 'Generate a pixel art image based on room description') : 'Add a description first'}
+                                            title={editRoom?.description ? (activeRoom?.image_url ? 'Regenerate image with the configured provider' : 'Generate a pixel art image based on room description') : 'Add a description first'}
                                         >
                                             {generatingRoomImages[activeRoom?.id] ? (
                                                 <>
@@ -5695,7 +5733,7 @@ export default function ArkyvAdminPanel() {
                                                 </>
                                             ) : (
                                                 <>
-                                                    🎨 {activeRoom?.image_url ? 'Regenerate Image' : 'Generate Image'} {rdCredits !== null ? `(2 Credits / ${rdCredits} Left)` : '(2 Credits)'}
+                                                    🎨 {activeRoom?.image_url ? 'Regenerate Image' : 'Generate Image'} {imageProviderInfo?.provider === 'local' ? '(Local)' : rdCredits !== null ? `(2 Credits / ${rdCredits} Left)` : imageProviderInfo?.provider === 'retrodiffusion' ? '(2 Credits)' : ''}
                                                 </>
                                             )}
                                         </button>
@@ -6196,7 +6234,7 @@ export default function ArkyvAdminPanel() {
                                             onClick={handleGenerateNpcPortrait}
                                             disabled={generatingNpcPortraits[activeNpc?.id] || !editNpc?.description}
                                             className="w-full px-4 py-2 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-400/50 rounded text-[0.7rem] tracking-[0.2em] uppercase text-purple-200 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                                            title={editNpc?.description ? (activeNpc?.portrait_url ? 'Regenerate portrait (costs 2 credits)' : 'Generate a pixel art portrait based on NPC description') : 'Add a description first'}
+                                            title={editNpc?.description ? (activeNpc?.portrait_url ? 'Regenerate portrait with the configured provider' : 'Generate a pixel art portrait based on NPC description') : 'Add a description first'}
                                         >
                                             {generatingNpcPortraits[activeNpc?.id] ? (
                                                 <>
@@ -6205,7 +6243,7 @@ export default function ArkyvAdminPanel() {
                                                 </>
                                             ) : (
                                                 <>
-                                                    🎨 {activeNpc?.portrait_url ? 'Regenerate Portrait' : 'Generate Portrait'} {rdCredits !== null ? `(2 Credits / ${rdCredits} Left)` : '(2 Credits)'}
+                                                    🎨 {activeNpc?.portrait_url ? 'Regenerate Portrait' : 'Generate Portrait'} {imageProviderInfo?.provider === 'local' ? '(Local)' : rdCredits !== null ? `(2 Credits / ${rdCredits} Left)` : imageProviderInfo?.provider === 'retrodiffusion' ? '(2 Credits)' : ''}
                                                 </>
                                             )}
                                         </button>
@@ -7173,11 +7211,11 @@ export default function ArkyvAdminPanel() {
                                         AI Image Generation
                                     </h4>
                                     <div className="space-y-2 pl-7">
-                                        <p><strong className="text-purple-300">Room Images:</strong> In the room editor, click "Generate Image (2 Credits)" to create 16:9 pixel art based on the room description.</p>
+                                        <p><strong className="text-purple-300">Room Images:</strong> In the room editor, click "Generate Image" to create 16:9 pixel art based on the room description.</p>
                                         <p><strong className="text-purple-300">Region Mood/Style:</strong> Check "Include region mood/style" to add the region's atmosphere description to the image prompt for better thematic consistency.</p>
                                         <p><strong className="text-purple-300">NPC Portraits:</strong> In the NPC editor, generate pixel art portraits for your characters.</p>
-                                        <p><strong className="text-amber-300">Cost:</strong> Each image costs 2 RetroDiffusion API credits. Generated data URLs are saved on the room or NPC row in SpacetimeDB.</p>
-                                        <p><strong className="text-green-300">Regeneration:</strong> You can regenerate images anytime - the button will show "Regenerate Image (2 Credits)" if an image already exists.</p>
+                                        <p><strong className="text-amber-300">Provider:</strong> Use RetroDiffusion credits or a local Stable Diffusion checkpoint through an AUTOMATIC1111/Forge-compatible API. Local generation has no API-credit charge.</p>
+                                        <p><strong className="text-green-300">Storage:</strong> Generated data URLs are saved on the room, NPC, or item row in SpacetimeDB. You can regenerate them at any time.</p>
                                     </div>
                                 </section>
                                 
@@ -7191,25 +7229,30 @@ export default function ArkyvAdminPanel() {
                                         <div>
                                             <p className="text-cyan-300 font-semibold mb-1">Environment Variables (.env.local):</p>
                                             <code className="block text-[0.65rem] bg-slate-900/80 p-3 rounded border border-slate-700 font-mono text-slate-300 leading-relaxed">
-                                                # OpenAI Configuration<br />
-                                                OPENAI_API_KEY=<br />
+                                                # Text provider: openai, grok, or local<br />
+                                                AI_PROVIDER=local<br />
+                                                LOCAL_AI_BASE_URL=http://127.0.0.1:11434/v1<br />
+                                                LOCAL_AI_MODEL=qwen2.5:7b<br />
                                                 <br />
-                                                # Grok Configuration<br />
+                                                # Hosted text alternatives<br />
+                                                OPENAI_API_KEY=<br />
                                                 GROK_API_KEY=<br />
                                                 <br />
-                                                # Choose your AI provider: "openai" or "grok"<br />
-                                                AI_PROVIDER=<br />
+                                                # Image provider: retrodiffusion or local<br />
+                                                IMAGE_PROVIDER=local<br />
+                                                LOCAL_IMAGE_BASE_URL=http://127.0.0.1:7860<br />
+                                                # LOCAL_IMAGE_MODEL=checkpoint-name.safetensors<br />
                                                 <br />
                                                 # SpacetimeDB Configuration<br />
                                                 NEXT_PUBLIC_SPACETIMEDB_URI=http://127.0.0.1:3000<br />
                                                 NEXT_PUBLIC_SPACETIMEDB_DB_NAME=arkyv-engine<br />
                                                 <br />
-                                                # Retro Diffusion<br />
+                                                # Hosted image alternative<br />
                                                 RETRO_DIFFUSION_API_KEY=
                                             </code>
                                         </div>
                                         <div>
-                                            <p><strong className="text-pink-300">AI Provider Choice:</strong> Set <code className="text-xs bg-slate-900 px-1.5 py-0.5 rounded">AI_PROVIDER</code> to either "openai" or "grok" depending on which API key you have. You only need one provider configured.</p>
+                                            <p><strong className="text-pink-300">Local Text:</strong> Set <code className="text-xs bg-slate-900 px-1.5 py-0.5 rounded">AI_PROVIDER=local</code>, run an OpenAI-compatible server such as Ollama, and set its base URL and installed model name. NPC dialogue and every AI writing assistant use the same provider.</p>
                                         </div>
                                         <div>
                                             <p><strong className="text-pink-300">OpenAI API Key:</strong> Required if using OpenAI as your provider. Get yours at <a href="https://openai.com/api/" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300 underline">openai.com/api</a>.</p>
@@ -7218,7 +7261,10 @@ export default function ArkyvAdminPanel() {
                                             <p><strong className="text-pink-300">Grok API Key:</strong> Required if using Grok as your provider. Get yours at <a href="https://x.ai/api" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300 underline">x.ai/api</a>.</p>
                                         </div>
                                         <div>
-                                            <p><strong className="text-purple-300">RetroDiffusion API Key:</strong> Required for image generation. Sign up at <a href="https://retrodiffusion.ai" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300 underline">retrodiffusion.ai</a> to get your API key and credits.</p>
+                                            <p><strong className="text-purple-300">Local Images:</strong> Set <code className="text-xs bg-slate-900 px-1.5 py-0.5 rounded">IMAGE_PROVIDER=local</code> and start Stable Diffusion WebUI or Forge with <code className="text-xs bg-slate-900 px-1.5 py-0.5 rounded">--api</code>. The optional model setting selects a checkpoint for each request.</p>
+                                        </div>
+                                        <div>
+                                            <p><strong className="text-purple-300">RetroDiffusion API Key:</strong> Set <code className="text-xs bg-slate-900 px-1.5 py-0.5 rounded">IMAGE_PROVIDER=retrodiffusion</code> and provide a key from <a href="https://retrodiffusion.ai" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300 underline">retrodiffusion.ai</a> when using the hosted image provider.</p>
                                         </div>
                                         <div>
                                             <p><strong className="text-green-300">SpacetimeDB Configuration:</strong> Start SpacetimeDB locally, then run <code className="text-xs bg-slate-900 px-1.5 py-0.5 rounded">npm run spacetime:deploy</code>. See the setup guide for hosted deployment.</p>

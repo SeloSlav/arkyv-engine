@@ -12,17 +12,12 @@ services:
     environment:
       NEXT_PUBLIC_SPACETIMEDB_URI: ${NEXT_PUBLIC_SPACETIMEDB_URI:-http://127.0.0.1:3000}
       NEXT_PUBLIC_SPACETIMEDB_DB_NAME: ${NEXT_PUBLIC_SPACETIMEDB_DB_NAME:-arkyv-engine}
-      
-      # AI Provider Configuration
-      AI_PROVIDER: ${AI_PROVIDER:-openai}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      GROK_API_KEY: ${GROK_API_KEY}
-      
-      # RetroDiffusion (optional)
-      RETRO_DIFFUSION_API_KEY: ${RETRO_DIFFUSION_API_KEY}
+      # Server-only AI and image provider settings are loaded from .env.local.
     env_file:
       - path: .env.local
         required: false
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]

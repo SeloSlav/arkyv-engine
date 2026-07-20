@@ -1,4 +1,5 @@
 import { createChatCompletion } from '@/lib/aiProvider';
+import { generateImage, imageProviderErrorResponse } from '@/lib/imageProvider';
 
 // Helper function to classify entity type using AI
 async function classifyEntityType(description) {
@@ -42,12 +43,6 @@ export default async function handler(req, res) {
     }
 
     try {
-        // Call RetroDiffusion API
-        const rdApiKey = process.env.RETRO_DIFFUSION_API_KEY;
-        if (!rdApiKey) {
-            return res.status(500).json({ error: 'RetroDiffusion API key not configured' });
-        }
-
         console.log('Generating portrait for NPC:', npcName);
         
         // First, classify the entity type using AI
@@ -77,61 +72,24 @@ export default async function handler(req, res) {
         
         console.log('Portrait prompt:', portraitPrompt);
         
-        // Generate square aspect ratio image (256x256 for pixel art portrait)
-        const rdResponse = await fetch('https://api.retrodiffusion.ai/v1/inferences', {
-            method: 'POST',
-            headers: {
-                'X-RD-Token': rdApiKey,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                width: 256,
-                height: 256,
-                prompt: portraitPrompt,
-                num_images: 1,
-                prompt_style: 'rd_fast__default'
-            })
+        const generated = await generateImage({
+            prompt: portraitPrompt,
+            width: 256,
+            height: 256,
         });
-
-        if (!rdResponse.ok) {
-            const errorText = await rdResponse.text();
-            console.error('RetroDiffusion API error:', errorText);
-            
-            // Check if it's a credits issue
-            if (rdResponse.status === 402 || rdResponse.status === 403 || errorText.toLowerCase().includes('credit')) {
-                return res.status(402).json({ 
-                    error: 'INSUFFICIENT_CREDITS',
-                    message: 'Not enough credits to generate portrait. You need 2 credits.',
-                    details: errorText 
-                });
-            }
-            
-            return res.status(rdResponse.status).json({ 
-                error: 'Failed to generate portrait',
-                details: errorText 
-            });
-        }
-
-        const rdData = await rdResponse.json();
-        
-        if (!rdData.base64_images || rdData.base64_images.length === 0) {
-            return res.status(500).json({ error: 'No portrait generated' });
-        }
-
-        const portraitUrl = `data:image/png;base64,${rdData.base64_images[0]}`;
 
         return res.status(200).json({ 
             success: true,
-            portraitUrl,
-            creditsRemaining: rdData.remaining_credits
+            portraitUrl: generated.imageUrl,
+            provider: generated.provider,
+            providerLabel: generated.providerLabel,
+            creditsRemaining: generated.creditsRemaining,
         });
 
     } catch (error) {
         console.error('Error generating NPC portrait:', error);
-        return res.status(500).json({ 
-            error: 'Internal server error',
-            details: error.message 
-        });
+        const response = imageProviderErrorResponse(error, 'Unable to generate NPC portrait.');
+        return res.status(response.status).json(response.body);
     }
 }
 

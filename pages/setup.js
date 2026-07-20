@@ -31,7 +31,8 @@ export default function SetupPage({ cameFromHostedRuntime }) {
           <section className="space-y-4">
             <h2 className="text-2xl font-semibold text-cyan-300">2. Install and configure</h2>
             <Code>{`npm install\ncp .env.example .env.local`}</Code>
-            <p>The local defaults connect to <code className="text-cyan-300">http://127.0.0.1:3000</code> and database <code className="text-cyan-300">arkyv-engine</code>. Add one AI provider key for NPC dialogue.</p>
+            <p>The local defaults connect to <code className="text-cyan-300">http://127.0.0.1:3000</code> and database <code className="text-cyan-300">arkyv-engine</code>. Add an OpenAI or Grok key, or point Arkyv at a local OpenAI-compatible model server.</p>
+            <Code>{`# Fully local text with Ollama\nAI_PROVIDER=local\nLOCAL_AI_BASE_URL=http://127.0.0.1:11434/v1\nLOCAL_AI_MODEL=qwen2.5:7b\n\n# Optional local images with Stable Diffusion WebUI/Forge --api\nIMAGE_PROVIDER=local\nLOCAL_IMAGE_BASE_URL=http://127.0.0.1:7860`}</Code>
           </section>
 
           <section className="space-y-4">
@@ -60,7 +61,8 @@ export default function SetupPage({ cameFromHostedRuntime }) {
               <li>Connection refused: verify <code>NEXT_PUBLIC_SPACETIMEDB_URI</code> and keep <code>spacetime start</code> running.</li>
               <li>Schema mismatch: rerun <code>npm run spacetime:deploy</code> with CLI 2.0.1.</li>
               <li>Admin page redirects: only the first identity in a fresh database is admin.</li>
-              <li>NPCs use fallback dialogue without an OpenAI or Grok key.</li>
+              <li>Local text errors: verify the model is installed and <code>LOCAL_AI_BASE_URL</code> ends in <code>/v1</code>.</li>
+              <li>Local image errors: start Stable Diffusion WebUI/Forge with <code>--api</code> and verify <code>LOCAL_IMAGE_BASE_URL</code>.</li>
             </ul>
           </section>
         </main>

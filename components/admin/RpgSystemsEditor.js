@@ -436,8 +436,13 @@ export default function RpgSystemsEditor({ enabled, currentProfile }) {
             const data = await response.json();
             if (!response.ok) throw new Error(data.message || data.error || 'Item image generation failed.');
             setDefinitionForm((value) => ({ ...value, image_url: data.imageUrl }));
-            const credits = Number.isFinite(Number(data.creditsRemaining)) ? ` ${data.creditsRemaining} credits remain.` : '';
-            setMessage({ type: 'success', text: `Generated a ${data.width}×${data.height} inventory image.${credits}` });
+            const credits = data.creditsRemaining !== null
+                && data.creditsRemaining !== undefined
+                && Number.isFinite(Number(data.creditsRemaining))
+                ? ` ${data.creditsRemaining} credits remain.`
+                : '';
+            const provider = data.provider === 'local' ? ' Generated with your local image model.' : credits;
+            setMessage({ type: 'success', text: `Generated a ${data.width}×${data.height} inventory image.${provider}` });
         } catch (error) {
             setMessage({ type: 'error', text: error?.message || String(error) });
         } finally {
@@ -975,7 +980,7 @@ export default function RpgSystemsEditor({ enabled, currentProfile }) {
                                 {definitionForm.image_url ? <img src={definitionForm.image_url} alt={`${definitionForm.name || 'Object'} preview`} className="h-full w-full object-cover [image-rendering:pixelated]" /> : definitionForm.icon || '◇'}
                             </div>
                             <div className="min-w-0 space-y-3">
-                                <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">Inventory artwork</p><p className="mt-1 text-xs leading-5 text-slate-500">RetroDiffusion generates a crisp 128×128 item icon, suitable for inventory cards and pixel-perfect scaling.</p></div>
+                                <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">Inventory artwork</p><p className="mt-1 text-xs leading-5 text-slate-500">The configured image provider generates a crisp 128×128 item icon, suitable for inventory cards and pixel-perfect scaling.</p></div>
                                 <Field label="Image URL or generated data"><input className={inputClass} value={definitionForm.image_url} onChange={(event) => setDefinitionForm((value) => ({ ...value, image_url: event.target.value }))} placeholder="Generate art or paste an image URL" /></Field>
                                 <div className="flex flex-wrap gap-2"><button type="button" onClick={generateItemImage} disabled={generatingImage || busy} className={buttonClass}>{generatingImage ? 'Generating…' : 'Generate item art'}</button>{definitionForm.image_url && <button type="button" onClick={() => setDefinitionForm((value) => ({ ...value, image_url: '' }))} className="rounded-md border border-slate-600 px-3 py-2 text-xs uppercase tracking-[0.16em] text-slate-400 hover:text-white">Remove</button>}</div>
                             </div>

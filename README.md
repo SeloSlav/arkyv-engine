@@ -10,7 +10,7 @@ This repository uses **SpacetimeDB 2.0.1** for its authoritative backend. The pr
 
 - Realtime multiplayer room and region chat
 - Rust reducers for commands, movement, profiles, characters, and world editing
-- AI-powered NPC conversations with OpenAI or Grok
+- AI-powered NPC conversations with OpenAI, Grok, or a local OpenAI-compatible model server
 - Visual region, room, exit, NPC, and RPG systems editor
 - Admin-authored NPC patrol routes, friendly/neutral/hostile disposition, guards, attack-on-sight behavior, combat cadence, and respawning
 - Region-level safe/PvP rules, persistent wanted states, guard enforcement, and configurable fallback recovery rooms
@@ -30,7 +30,7 @@ This repository uses **SpacetimeDB 2.0.1** for its authoritative backend. The pr
 - Local saved worlds backed by persistent SpacetimeDB identity tokens
 - Explicit identity backup and restore through a local JSON file (the file contains tokens and must be kept secret)
 - Multiple characters per saved world
-- Optional RetroDiffusion room scenes, NPC portraits, and inventory item art
+- Optional RetroDiffusion or local Stable Diffusion room scenes, NPC portraits, and inventory item art
 - Self-hosted persistent state with no email/password service
 
 ## Stack
@@ -39,16 +39,16 @@ This repository uses **SpacetimeDB 2.0.1** for its authoritative backend. The pr
 - Backend: SpacetimeDB 2.0.1 and a Rust WASM module
 - Realtime: generated SpacetimeDB TypeScript bindings
 - Identity: SpacetimeDB signed tokens stored in browser localStorage
-- AI: OpenAI or Grok
-- Image generation: RetroDiffusion, with generated data URLs stored in SpacetimeDB
+- AI: OpenAI, Grok, or a local OpenAI-compatible server such as Ollama
+- Image generation: RetroDiffusion or a local Stable Diffusion WebUI/Forge API, with generated data URLs stored in SpacetimeDB
 
 ## Prerequisites
 
 - Node.js 18 or newer
 - Rust and the `wasm32-unknown-unknown` target
 - [SpacetimeDB](https://spacetimedb.com/install) CLI **2.0.1**
-- An OpenAI or Grok API key for dynamic NPC dialogue
-- A RetroDiffusion API key only if image generation is needed
+- An OpenAI or Grok API key, or a locally running OpenAI-compatible text model server, for dynamic NPC dialogue and editor writing tools
+- A RetroDiffusion API key or a locally running Stable Diffusion WebUI/Forge API only if image generation is needed
 
 Install and select the pinned SpacetimeDB release:
 
@@ -92,6 +92,7 @@ The output should report `spacetimedb tool version 2.0.1`.
    # GROK_API_KEY=your-key
 
    # Optional
+   IMAGE_PROVIDER=retrodiffusion
    RETRO_DIFFUSION_API_KEY=your-key
    ```
 
@@ -120,6 +121,44 @@ The output should report `spacetimedb tool version 2.0.1`.
 The first identity connected to a fresh database becomes its administrator and can open `/admin`.
 
 `NEXT_PUBLIC_ARKYV_SITE_MODE=runtime` enables the saved-world, play, profile, and editor routes on self-hosted domains. A project/marketing deployment that does not provide world hosting should set it to `marketing`; those routes then redirect to the self-hosting guide and the browser never opens a SpacetimeDB connection. The canonical `arkyv.org` and `www.arkyv.org` hostnames always use marketing mode.
+
+### Fully local AI
+
+All text-generation features use the same provider setting: NPC responses, room and region writing, NPC names/descriptions/personalities, and palette suggestions. The easiest local setup is [Ollama's OpenAI-compatible API](https://docs.ollama.com/api/openai-compatibility):
+
+```bash
+ollama pull qwen2.5:7b
+ollama serve
+```
+
+Then use:
+
+```env
+AI_PROVIDER=local
+LOCAL_AI_BASE_URL=http://127.0.0.1:11434/v1
+LOCAL_AI_MODEL=qwen2.5:7b
+```
+
+`LOCAL_AI_API_KEY` is optional and can remain blank for a default Ollama installation. `LOCAL_AI_FAST_MODEL`, `LOCAL_AI_SMART_MODEL`, and `LOCAL_AI_VISION_MODEL` can override the default model for particular task classes. The same configuration works with llama.cpp, LM Studio, vLLM, LocalAI, or another server that implements OpenAI-compatible `POST /v1/chat/completions`; change the base URL and model name to match that server.
+
+For fully local room, portrait, and item images, install [AUTOMATIC1111 Stable Diffusion WebUI](https://github.com/AUTOMATIC1111/stable-diffusion-webui) or its API-compatible [Forge variant](https://github.com/lllyasviel/stable-diffusion-webui-forge), add a checkpoint whose license fits your use, and launch the server with its API enabled:
+
+```text
+COMMANDLINE_ARGS=--api
+```
+
+On Windows, put `set COMMANDLINE_ARGS=--api` in `webui-user.bat`. Then configure Arkyv:
+
+```env
+IMAGE_PROVIDER=local
+LOCAL_IMAGE_BASE_URL=http://127.0.0.1:7860
+# Optional: exact checkpoint name shown in the WebUI
+LOCAL_IMAGE_MODEL=
+```
+
+Arkyv calls the WebUI-compatible `POST /sdapi/v1/txt2img` endpoint and continues storing the returned PNG as a SpacetimeDB data URL. `LOCAL_IMAGE_STEPS`, `LOCAL_IMAGE_CFG_SCALE`, `LOCAL_IMAGE_SAMPLER`, `LOCAL_IMAGE_PROMPT_PREFIX`, and `LOCAL_IMAGE_NEGATIVE_PROMPT` are optional quality/style controls. If the image API uses `--api-auth`, set `LOCAL_IMAGE_API_AUTH=username:password`.
+
+Keep local model servers bound to a trusted interface. They normally do not need to be reachable by players or by the public internet; only the Arkyv Next.js server needs access.
 
 ### Clean local reset
 
@@ -331,7 +370,7 @@ spacetime generate --no-config --include-private -p ./spacetimedb -l typescript 
 
 Game state never passes through the AI provider. NPC conversation requests contain only the NPC prompt, recent conversation context, and the player's current message. The response is committed through an authenticated SpacetimeDB reducer. Every `/api/arkyv/*` provider request must also present the active saved-world token; middleware validates it through SpacetimeDB and applies identity-scoped request limits before a provider key can be used. Provider keys remain server-only.
 
-RetroDiffusion returns base64 PNGs. Arkyv stores them as data URLs in `room.image_url`, `npc.portrait_url`, or `object_definition.image_url`, avoiding a separate object-storage service. The object editor requests centered 128×128 pixel-art assets so inventory cards remain readable and scale cleanly with nearest-neighbor rendering. Large or numerous images will increase replicated database size; production operators may replace this with their own object storage and persist only URLs.
+RetroDiffusion and the local Stable Diffusion adapter return base64 PNGs. Arkyv stores them as data URLs in `room.image_url`, `npc.portrait_url`, or `object_definition.image_url`, avoiding a separate object-storage service. The object editor requests centered 128×128 pixel-art assets so inventory cards remain readable and scale cleanly with nearest-neighbor rendering. Large or numerous images will increase replicated database size; production operators may replace this with their own object storage and persist only URLs.
 
 ## Docker
 
@@ -342,6 +381,15 @@ NEXT_PUBLIC_SPACETIMEDB_URI=http://127.0.0.1:3000
 ```
 
 `NEXT_PUBLIC_` values are embedded during `docker compose build`. For a hosted deployment, set this variable to the public browser-reachable SpacetimeDB endpoint and rebuild the image.
+
+Docker Desktop users should point local providers at the host rather than at the application container:
+
+```env
+LOCAL_AI_BASE_URL=http://host.docker.internal:11434/v1
+LOCAL_IMAGE_BASE_URL=http://host.docker.internal:7860
+```
+
+The Compose file maps `host.docker.internal` to the host gateway on Linux as well. Server-only provider settings are loaded from `.env.local`.
 
 ## Project structure
 

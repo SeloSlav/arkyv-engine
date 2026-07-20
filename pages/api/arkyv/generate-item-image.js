@@ -1,3 +1,5 @@
+import { generateImage, imageProviderErrorResponse } from '@/lib/imageProvider';
+
 const ITEM_IMAGE_SIZE = 128;
 
 const clean = (value, maxLength) => String(value || '').trim().slice(0, maxLength);
@@ -18,11 +20,6 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Item name and description are required.' });
     }
 
-    const apiKey = process.env.RETRO_DIFFUSION_API_KEY;
-    if (!apiKey) {
-        return res.status(500).json({ error: 'RetroDiffusion API key not configured.' });
-    }
-
     const prompt = [
         `Single ${primitiveKind} inventory item: ${name}.`,
         description,
@@ -31,51 +28,24 @@ export default async function handler(req, res) {
     ].filter(Boolean).join(' ');
 
     try {
-        const response = await fetch('https://api.retrodiffusion.ai/v1/inferences', {
-            method: 'POST',
-            headers: {
-                'X-RD-Token': apiKey,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                width: ITEM_IMAGE_SIZE,
-                height: ITEM_IMAGE_SIZE,
-                prompt,
-                num_images: 1,
-                prompt_style: 'rd_fast__default',
-            }),
+        const generated = await generateImage({
+            prompt,
+            width: ITEM_IMAGE_SIZE,
+            height: ITEM_IMAGE_SIZE,
         });
-
-        if (!response.ok) {
-            const details = await response.text();
-            const insufficientCredits = response.status === 402
-                || response.status === 403
-                || details.toLowerCase().includes('credit');
-            return res.status(insufficientCredits ? 402 : response.status).json({
-                error: insufficientCredits ? 'INSUFFICIENT_CREDITS' : 'Failed to generate item art.',
-                message: insufficientCredits ? 'RetroDiffusion does not have enough credit for this generation.' : undefined,
-                details,
-            });
-        }
-
-        const data = await response.json();
-        const image = data.base64_images?.[0];
-        if (!image) {
-            return res.status(500).json({ error: 'RetroDiffusion returned no image.' });
-        }
 
         return res.status(200).json({
             success: true,
-            imageUrl: `data:image/png;base64,${image}`,
+            imageUrl: generated.imageUrl,
             width: ITEM_IMAGE_SIZE,
             height: ITEM_IMAGE_SIZE,
-            creditsRemaining: data.remaining_credits,
+            provider: generated.provider,
+            providerLabel: generated.providerLabel,
+            creditsRemaining: generated.creditsRemaining,
         });
     } catch (error) {
         console.error('Error generating item art:', error);
-        return res.status(500).json({
-            error: 'Unable to generate item art.',
-            details: error instanceof Error ? error.message : String(error),
-        });
+        const response = imageProviderErrorResponse(error, 'Unable to generate item art.');
+        return res.status(response.status).json(response.body);
     }
 }
