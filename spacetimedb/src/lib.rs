@@ -2248,8 +2248,9 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                 if faction.as_ref().map(|faction_id| ctx.db.faction_definition().id().find(faction_id).is_none()).unwrap_or(false) {
                     return Err("NPC faction does not exist.".to_string());
                 }
+                let authored_reply = optional_string(&row, "authored_reply").map(|value| value.trim().to_string()).filter(|value| !value.is_empty());
                 ctx.db.npc().insert(Npc {
-                    id,
+                    id: id.clone(),
                     name: string(&row, "name", "Unnamed NPC"),
                     description: optional_string(&row, "description"),
                     current_room: optional_string(&row, "current_room"),
@@ -2278,6 +2279,20 @@ pub fn insert_rows(ctx: &ReducerContext, table_name: String, payload_json: Strin
                     protect_faction_members: bool_value(&row, "protect_faction_members", true),
                     guard_wanted_seconds: u32_value(&row, "guard_wanted_seconds", 120),
                 });
+                if let Some(text) = authored_reply {
+                    ctx.db.dialogue_node().insert(DialogueNode {
+                        id: format!("{id}-default-dialogue"),
+                        npc_id: id,
+                        text,
+                        entry_node: true,
+                        required_quest_id: None,
+                        required_faction_id: None,
+                        required_reputation: 0,
+                        sort_order: 100,
+                        created_at: ctx.timestamp,
+                        updated_at: ctx.timestamp,
+                    });
+                }
             }
         }
         "exits" => {
@@ -3197,6 +3212,17 @@ pub fn delete_rows(ctx: &ReducerContext, table_name: String, ids_json: String) -
                 }
                 let loot_ids = ctx.db.loot_table_entry().iter().filter(|entry| entry.npc_id == id).map(|entry| entry.id).collect::<Vec<_>>();
                 for loot_id in loot_ids { ctx.db.loot_table_entry().id().delete(&loot_id); }
+                let dialogue_node_ids = ctx.db.dialogue_node().iter().filter(|node| node.npc_id == id).map(|node| node.id).collect::<Vec<_>>();
+                for node_id in dialogue_node_ids {
+                    let dialogue_choice_ids = ctx.db.dialogue_choice().iter()
+                        .filter(|choice| choice.node_id == node_id || choice.next_node_id.as_deref() == Some(node_id.as_str()))
+                        .map(|choice| choice.id)
+                        .collect::<Vec<_>>();
+                    for choice_id in dialogue_choice_ids { ctx.db.dialogue_choice().id().delete(&choice_id); }
+                    ctx.db.dialogue_node().id().delete(&node_id);
+                }
+                let dialogue_state_actor_ids = ctx.db.actor_dialogue_state().iter().filter(|state| state.npc_id == id).map(|state| state.actor_id).collect::<Vec<_>>();
+                for actor_id in dialogue_state_actor_ids { ctx.db.actor_dialogue_state().actor_id().delete(&actor_id); }
                 delete_actor_rpg_state(ctx, &id);
                 ctx.db.npc().id().delete(&id);
             }
@@ -6517,11 +6543,16 @@ pub fn submit_command(
     } else if let Some(rest) = raw.strip_prefix("talk ") {
         let alias = rest.split_whitespace().next().unwrap_or_default();
         if let Some(npc) = ctx.db.npc().iter().find(|npc| npc.current_room.as_deref() == Some(room_id.as_str()) && npc_matches(npc, alias)) {
-            advance_quest_event(ctx, &actor_id, "talk_npc", &npc.id, 1);
-            add_message(ctx, Some(room_id), Some(actor_id), None, None, "npc_typing", format!("{} is thinking...", npc.name), None, None);
-            return Ok(());
+            if expansion::npc_uses_authored_dialogue(ctx, &npc.id) {
+                add_message(ctx, Some(room_id), Some(actor_id), None, None, "npc_speech", format!("{} has nothing to say to you right now.", npc.name), None, None);
+            } else {
+                advance_quest_event(ctx, &actor_id, "talk_npc", &npc.id, 1);
+                add_message(ctx, Some(room_id), Some(actor_id), None, None, "npc_typing", format!("{} is thinking...", npc.name), None, None);
+                return Ok(());
+            }
+        } else {
+            add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", format!("There is no one named \"{alias}\" here to talk to. Use 'who' to see who's present."), None, None);
         }
-        add_message(ctx, Some(room_id), Some(actor_id.clone()), None, None, "system", format!("There is no one named \"{alias}\" here to talk to. Use 'who' to see who's present."), None, None);
     } else if raw == "__GREET" {
         handle_room_entry(ctx, &room_id, &actor_id, &actor_name, character_id.clone(), is_profile);
     } else if let Some(exit) = ctx.db.exit().iter().find(|exit| {

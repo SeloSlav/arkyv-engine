@@ -179,6 +179,10 @@ async function main() {
         await command('runtime-talk-mentor', 'talk mentor');
         await command('runtime-learn-recipe', 'respond runtime-learn-recipe');
         assert([...connection.db.actor_learned_recipe.iter()].some((row: any) => row.actorId === heroId && row.recipeId === 'runtime-recipe'), 'Authored dialogue did not teach the recipe.');
+        await insert('npcs', { id: 'runtime-greeter', name: 'Runtime Greeter', alias: 'greeter', description: 'Repeats one authored line without AI.', authored_reply: 'The road is quiet today.', current_room: roomA, spawn_room: roomA, behavior_type: 'static', disposition: 'friendly', respawn_seconds: 0 });
+        await command('runtime-talk-greeter-first', 'talk greeter');
+        await command('runtime-talk-greeter-second', 'talk greeter');
+        assert([...connection.db.room_message.iter()].filter((row: any) => row.body.includes('Runtime Greeter: "The road is quiet today."')).length === 2, 'A one-line authored dialogue did not repeat on each conversation.');
 
         await command('runtime-safe-pvp', 'attack Runtime Rival');
         const safeHealth = [...connection.db.actor_stat.iter()].find((row: any) => row.id === `${rivalId}::health`)?.currentValue;

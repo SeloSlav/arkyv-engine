@@ -8,6 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import Tooltip from '@/components/ui/Tooltip';
 import HamburgerIcon from '@/components/HamburgerIcon';
 import RpgSystemsEditor from '@/components/admin/RpgSystemsEditor';
+import NpcDialogueEditor from '@/components/admin/NpcDialogueEditor';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCircleInfo, faGamepad } from '@fortawesome/free-solid-svg-icons';
 import '@xyflow/react/dist/style.css';
@@ -135,6 +136,30 @@ const COLUMN_SPACING = 500;
 const ROW_SPACING = 350;
 const COMPONENT_SPACING = 600;
 const LAYER_SPACING = 360;
+const ROOM_IMAGE_MAX_BYTES = 1_500_000;
+const ROOM_IMAGE_MAX_DIMENSION = 4096;
+const ROOM_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('Could not read that image file.'));
+        reader.readAsDataURL(file);
+    });
+}
+
+function readImageDimensions(dataUrl) {
+    return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve({
+            width: image.naturalWidth,
+            height: image.naturalHeight,
+        });
+        image.onerror = () => reject(new Error('That file could not be decoded as an image.'));
+        image.src = dataUrl;
+    });
+}
 
 function normalizeDirectionKey(input = '') {
     if (!input) {
@@ -517,6 +542,7 @@ export default function ArkyvAdminPanel() {
     const [isEditGeneratingRoomName, setIsEditGeneratingRoomName] = useState(false);
     const [editDescriptionOperation, setEditDescriptionOperation] = useState(null); // 'suggest' | 'refine' | null
     const [generatingRoomImages, setGeneratingRoomImages] = useState({}); // Track per-room generation state
+    const [uploadingRoomImages, setUploadingRoomImages] = useState({}); // Track per-room upload/removal state
     const [roomImageErrors, setRoomImageErrors] = useState({}); // Track per-room errors
     const [roomImageSuccesses, setRoomImageSuccesses] = useState({}); // Track per-room successes
     const [includeRegionInPrompt, setIncludeRegionInPrompt] = useState(true);
@@ -612,6 +638,7 @@ export default function ArkyvAdminPanel() {
         protect_faction_members: true,
         guard_wanted_seconds: 120,
         spawn_room: '',
+        authored_reply: '',
         personality: ''
     });
     const [isCreatingNpc, setIsCreatingNpc] = useState(false);
@@ -2750,6 +2777,90 @@ export default function ArkyvAdminPanel() {
         }
     }, [activeRoom, editRoom, includeRegionInPrompt, spacetime]);
 
+    const handleUploadRoomImage = useCallback(async (event) => {
+        const input = event.currentTarget;
+        const file = input.files?.[0];
+        input.value = '';
+
+        if (!file || !activeRoom) return;
+
+        const roomId = activeRoom.id;
+
+        try {
+            setUploadingRoomImages(prev => ({ ...prev, [roomId]: true }));
+            setRoomImageErrors(prev => ({ ...prev, [roomId]: '' }));
+            setRoomImageSuccesses(prev => ({ ...prev, [roomId]: '' }));
+
+            if (!ROOM_IMAGE_TYPES.has(file.type)) {
+                throw new Error('Choose a PNG, JPEG, or WebP image.');
+            }
+            if (file.size > ROOM_IMAGE_MAX_BYTES) {
+                throw new Error('Room images must be 1.5 MB or smaller.');
+            }
+
+            const dataUrl = await readFileAsDataUrl(file);
+            const dimensions = await readImageDimensions(dataUrl);
+
+            if (
+                dimensions.width > ROOM_IMAGE_MAX_DIMENSION
+                || dimensions.height > ROOM_IMAGE_MAX_DIMENSION
+            ) {
+                throw new Error('Room images must be no larger than 4096×4096 pixels.');
+            }
+
+            const { error: imageUpdateError } = await spacetime
+                .from('rooms')
+                .update({ image_url: dataUrl })
+                .eq('id', roomId);
+            if (imageUpdateError) throw imageUpdateError;
+
+            setActiveRoom(prev => prev?.id === roomId ? { ...prev, image_url: dataUrl } : prev);
+            setReloadCounter(prev => prev + 1);
+            setRoomImageSuccesses(prev => ({
+                ...prev,
+                [roomId]: `Uploaded ${dimensions.width}×${dimensions.height} room image.`,
+            }));
+        } catch (err) {
+            console.error('Failed to upload room image:', err);
+            setRoomImageErrors(prev => ({
+                ...prev,
+                [roomId]: err.message || 'Failed to upload image',
+            }));
+        } finally {
+            setUploadingRoomImages(prev => ({ ...prev, [roomId]: false }));
+        }
+    }, [activeRoom, spacetime]);
+
+    const handleRemoveRoomImage = useCallback(async () => {
+        if (!activeRoom || !window.confirm('Remove this room image?')) return;
+
+        const roomId = activeRoom.id;
+
+        try {
+            setUploadingRoomImages(prev => ({ ...prev, [roomId]: true }));
+            setRoomImageErrors(prev => ({ ...prev, [roomId]: '' }));
+            setRoomImageSuccesses(prev => ({ ...prev, [roomId]: '' }));
+
+            const { error: imageUpdateError } = await spacetime
+                .from('rooms')
+                .update({ image_url: null })
+                .eq('id', roomId);
+            if (imageUpdateError) throw imageUpdateError;
+
+            setActiveRoom(prev => prev?.id === roomId ? { ...prev, image_url: null } : prev);
+            setReloadCounter(prev => prev + 1);
+            setRoomImageSuccesses(prev => ({ ...prev, [roomId]: 'Room image removed.' }));
+        } catch (err) {
+            console.error('Failed to remove room image:', err);
+            setRoomImageErrors(prev => ({
+                ...prev,
+                [roomId]: err.message || 'Failed to remove image',
+            }));
+        } finally {
+            setUploadingRoomImages(prev => ({ ...prev, [roomId]: false }));
+        }
+    }, [activeRoom, spacetime]);
+
     const handleGenerateNpcPortrait = useCallback(async () => {
         if (!activeNpc || !editNpc?.description) return;
         
@@ -3456,6 +3567,7 @@ export default function ArkyvAdminPanel() {
             protect_faction_members: true,
             guard_wanted_seconds: 120,
             spawn_room: roomId,
+            authored_reply: '',
             personality: ''
         });
         setNpcRoomSearch('');
@@ -3492,6 +3604,7 @@ export default function ArkyvAdminPanel() {
                 protect_faction_members: newNpc.protect_faction_members !== false,
                 guard_wanted_seconds: Math.max(1, Number(newNpc.guard_wanted_seconds) || 120),
                 spawn_room: newNpc.spawn_room || newNpc.current_room || null,
+                authored_reply: newNpc.authored_reply?.trim() || null,
                 dialogue_tree: {
                     personality: newNpc.personality?.trim() || ''
                 }
@@ -3525,6 +3638,7 @@ export default function ArkyvAdminPanel() {
                 protect_faction_members: true,
                 guard_wanted_seconds: 120,
                 spawn_room: '',
+                authored_reply: '',
                 personality: ''
             });
             setNpcRoomSearch('');
@@ -5695,7 +5809,7 @@ export default function ArkyvAdminPanel() {
                                     />
                                 </label>
                                 
-                                {/* Room Image Generation */}
+                                {/* Room Image */}
                                 <div className="flex flex-col gap-2 text-xs uppercase tracking-[0.25em] text-slate-400 sm:col-span-2">
                                     <span>Room Image</span>
                                     <div className="bg-slate-800/70 border border-slate-600/60 rounded-md px-3 py-2">
@@ -5704,11 +5818,55 @@ export default function ArkyvAdminPanel() {
                                                 <img 
                                                     src={activeRoom.image_url} 
                                                     alt={editRoom?.name || 'Room preview'}
-                                                    className="w-full rounded border border-slate-700/50"
+                                                    className="w-full rounded border border-slate-700/50 object-cover"
                                                     style={{ aspectRatio: '16/9' }}
                                                 />
                                             </div>
                                         )}
+                                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                            <label
+                                                className={`flex items-center justify-center gap-2 rounded border border-cyan-400/50 bg-cyan-500/10 px-4 py-2 text-[0.7rem] uppercase tracking-[0.2em] text-cyan-200 transition ${
+                                                    uploadingRoomImages[activeRoom?.id] || generatingRoomImages[activeRoom?.id]
+                                                        ? 'cursor-not-allowed opacity-50'
+                                                        : 'cursor-pointer hover:bg-cyan-500/20'
+                                                }`}
+                                                title="Upload a PNG, JPEG, or WebP image from your computer"
+                                            >
+                                                <input
+                                                    type="file"
+                                                    accept="image/png,image/jpeg,image/webp"
+                                                    className="sr-only"
+                                                    onChange={handleUploadRoomImage}
+                                                    disabled={uploadingRoomImages[activeRoom?.id] || generatingRoomImages[activeRoom?.id]}
+                                                />
+                                                {uploadingRoomImages[activeRoom?.id] ? (
+                                                    <>
+                                                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-cyan-300 border-t-transparent"></div>
+                                                        Saving...
+                                                    </>
+                                                ) : (
+                                                    activeRoom?.image_url ? 'Upload Replacement' : 'Upload Your Image'
+                                                )}
+                                            </label>
+                                            {activeRoom?.image_url && (
+                                                <button
+                                                    type="button"
+                                                    onClick={handleRemoveRoomImage}
+                                                    disabled={uploadingRoomImages[activeRoom?.id] || generatingRoomImages[activeRoom?.id]}
+                                                    className="rounded border border-rose-400/40 bg-rose-500/10 px-4 py-2 text-[0.7rem] uppercase tracking-[0.2em] text-rose-200 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                                                >
+                                                    Remove Image
+                                                </button>
+                                            )}
+                                        </div>
+                                        <p className="mt-2 text-[0.6rem] normal-case tracking-normal text-slate-500">
+                                            PNG, JPEG, or WebP · up to 1.5 MB · no AI provider required
+                                        </p>
+                                        <div className="my-3 flex items-center gap-3 text-[0.6rem] text-slate-500">
+                                            <span className="h-px flex-1 bg-slate-700"></span>
+                                            <span>Or generate with AI (optional)</span>
+                                            <span className="h-px flex-1 bg-slate-700"></span>
+                                        </div>
                                         <label className="flex items-center gap-2 mb-3 text-[0.65rem] text-slate-400 cursor-pointer hover:text-purple-300 transition">
                                             <input
                                                 type="checkbox"
@@ -5722,7 +5880,7 @@ export default function ArkyvAdminPanel() {
                                         <button
                                             type="button"
                                             onClick={handleGenerateRoomImage}
-                                            disabled={generatingRoomImages[activeRoom?.id] || !editRoom?.description}
+                                            disabled={generatingRoomImages[activeRoom?.id] || uploadingRoomImages[activeRoom?.id] || !editRoom?.description}
                                             className="w-full px-4 py-2 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-400/50 rounded text-[0.7rem] tracking-[0.2em] uppercase text-purple-200 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                                             title={editRoom?.description ? (activeRoom?.image_url ? 'Regenerate image with the configured provider' : 'Generate a pixel art image based on room description') : 'Add a description first'}
                                         >
@@ -6457,10 +6615,16 @@ export default function ArkyvAdminPanel() {
 
                                 <NpcBehaviorEditor value={editNpc} rooms={allRooms} factions={factionDefinitions} onChange={updateNpcField} />
 
+                                <NpcDialogueEditor
+                                    npcId={editNpc.id}
+                                    npcName={editNpc.name}
+                                    npcAlias={editNpc.alias}
+                                />
+
                                 <label className="flex flex-col gap-2 text-xs uppercase tracking-[0.25em] text-slate-400 md:col-span-2">
                                     <span className="flex items-center justify-between">
                                         <span className="flex items-center gap-2">
-                                            Personality / Dialogue
+                                            AI Personality
                                             <span className="relative inline-block group">
                                                 <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-cyan-400/20 border border-cyan-400/40 text-cyan-300 text-[0.6rem] font-bold cursor-help leading-none text-center pt-[1px] pl-[3px]">
                                                     ?
@@ -6480,7 +6644,7 @@ export default function ArkyvAdminPanel() {
                                             </span>
                                         </span>
                                         <span className="text-[0.65rem] text-slate-500">
-                                            Stored as personality in dialogue_tree
+                                            Used only when no authored opening line applies
                                         </span>
                                     </span>
                                     <textarea
@@ -6856,9 +7020,26 @@ export default function ArkyvAdminPanel() {
                                 <NpcBehaviorEditor value={newNpc} rooms={allRooms} factions={factionDefinitions} onChange={(key, nextValue) => setNewNpc((previous) => ({ ...previous, [key]: nextValue }))} />
 
                                 <label className="flex flex-col gap-2 text-xs uppercase tracking-[0.25em] text-slate-400 md:col-span-2">
+                                    <span className="flex items-center justify-between gap-3">
+                                        <span>Default authored reply</span>
+                                        <span className="text-[0.65rem] normal-case tracking-normal text-cyan-300">Optional · no AI required</span>
+                                    </span>
+                                    <textarea
+                                        value={newNpc?.authored_reply ?? ''}
+                                        onChange={(e) => setNewNpc((previous) => ({ ...previous, authored_reply: e.target.value }))}
+                                        rows={3}
+                                        placeholder="Welcome, traveler. The northern road is closed today."
+                                        className="font-sans bg-slate-800/70 border border-slate-600/60 rounded-md px-3 py-2 text-slate-100 leading-relaxed placeholder:text-slate-500 normal-case tracking-normal"
+                                    />
+                                    <span className="text-[0.65rem] normal-case tracking-normal leading-relaxed text-slate-500">
+                                        If set, this becomes the NPC's opening dialogue and repeats every time a player talks to them. After creation, open the NPC again to add branches and player responses.
+                                    </span>
+                                </label>
+
+                                <label className="flex flex-col gap-2 text-xs uppercase tracking-[0.25em] text-slate-400 md:col-span-2">
                                     <span className="flex items-center justify-between">
                                         <span className="flex items-center gap-2">
-                                            Personality / Dialogue
+                                            AI Personality
                                             <span className="relative inline-block group">
                                                 <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-cyan-400/20 border border-cyan-400/40 text-cyan-300 text-[0.6rem] font-bold cursor-help leading-none text-center pt-[1px] pl-[3px]">
                                                     ?
@@ -6878,7 +7059,7 @@ export default function ArkyvAdminPanel() {
                                             </span>
                                         </span>
                                         <span className="text-[0.65rem] text-slate-500">
-                                            Stored as personality in dialogue_tree
+                                            Used only when no authored opening line applies
                                         </span>
                                     </span>
                                     <textarea
@@ -7208,14 +7389,15 @@ export default function ArkyvAdminPanel() {
                                 <section>
                                     <h4 className="font-terminal text-cyan-200 tracking-[0.25em] uppercase text-xs mb-3 flex items-center gap-2">
                                         <span className="text-lg">🎨</span>
-                                        AI Image Generation
+                                        Room Images and AI Generation
                                     </h4>
                                     <div className="space-y-2 pl-7">
-                                        <p><strong className="text-purple-300">Room Images:</strong> In the room editor, click "Generate Image" to create 16:9 pixel art based on the room description.</p>
+                                        <p><strong className="text-cyan-300">Upload Your Own:</strong> In the room editor, upload a PNG, JPEG, or WebP file up to 1.5 MB. This works without an image provider or API key.</p>
+                                        <p><strong className="text-purple-300">Optional AI:</strong> Click "Generate Image" to create 16:9 pixel art based on the room description.</p>
                                         <p><strong className="text-purple-300">Region Mood/Style:</strong> Check "Include region mood/style" to add the region's atmosphere description to the image prompt for better thematic consistency.</p>
                                         <p><strong className="text-purple-300">NPC Portraits:</strong> In the NPC editor, generate pixel art portraits for your characters.</p>
                                         <p><strong className="text-amber-300">Provider:</strong> Use RetroDiffusion credits or a local Stable Diffusion checkpoint through an AUTOMATIC1111/Forge-compatible API. Local generation has no API-credit charge.</p>
-                                        <p><strong className="text-green-300">Storage:</strong> Generated data URLs are saved on the room, NPC, or item row in SpacetimeDB. You can regenerate them at any time.</p>
+                                        <p><strong className="text-green-300">Storage:</strong> Uploaded and generated data URLs are saved on the room, NPC, or item row in SpacetimeDB.</p>
                                     </div>
                                 </section>
                                 
@@ -7226,6 +7408,15 @@ export default function ArkyvAdminPanel() {
                                         Required Configuration
                                     </h4>
                                     <div className="space-y-3 pl-7">
+                                        <div>
+                                            <p className="text-green-300 font-semibold mb-1">Fast local setup:</p>
+                                            <code className="block text-[0.65rem] bg-slate-900/80 p-3 rounded border border-green-400/20 font-mono text-slate-300 leading-relaxed">
+                                                npm run setup:local -- --text=local --image=local<br />
+                                                npm run setup:check<br />
+                                                npm run dev:all
+                                            </code>
+                                            <p className="mt-1 text-xs text-slate-400">The image option is optional. The all-in-one development command starts or reuses SpacetimeDB and an installed Ollama service, publishes the module, regenerates bindings, and starts the web app.</p>
+                                        </div>
                                         <div>
                                             <p className="text-cyan-300 font-semibold mb-1">Environment Variables (.env.local):</p>
                                             <code className="block text-[0.65rem] bg-slate-900/80 p-3 rounded border border-slate-700 font-mono text-slate-300 leading-relaxed">
@@ -7267,7 +7458,7 @@ export default function ArkyvAdminPanel() {
                                             <p><strong className="text-purple-300">RetroDiffusion API Key:</strong> Set <code className="text-xs bg-slate-900 px-1.5 py-0.5 rounded">IMAGE_PROVIDER=retrodiffusion</code> and provide a key from <a href="https://retrodiffusion.ai" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300 underline">retrodiffusion.ai</a> when using the hosted image provider.</p>
                                         </div>
                                         <div>
-                                            <p><strong className="text-green-300">SpacetimeDB Configuration:</strong> Start SpacetimeDB locally, then run <code className="text-xs bg-slate-900 px-1.5 py-0.5 rounded">npm run spacetime:deploy</code>. See the setup guide for hosted deployment.</p>
+                                            <p><strong className="text-green-300">SpacetimeDB Configuration:</strong> For local development, use <code className="text-xs bg-slate-900 px-1.5 py-0.5 rounded">npm run dev:all</code>. Use separate <code className="text-xs bg-slate-900 px-1.5 py-0.5 rounded">spacetime start</code>, deploy, and web processes only for advanced or hosted setups.</p>
                                         </div>
                                         <div className="pt-2 border-t border-amber-400/20">
                                             <p><strong className="text-amber-300">Production Deployment:</strong> Publish the module to your hosted SpacetimeDB database and set its URI and database name in the frontend environment.</p>

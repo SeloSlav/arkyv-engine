@@ -29,25 +29,38 @@ export default function SetupPage({ cameFromHostedRuntime }) {
           </section>
 
           <section className="space-y-4">
-            <h2 className="text-2xl font-semibold text-cyan-300">2. Install and configure</h2>
-            <Code>{`npm install\ncp .env.example .env.local`}</Code>
-            <p>The local defaults connect to <code className="text-cyan-300">http://127.0.0.1:3000</code> and database <code className="text-cyan-300">arkyv-engine</code>. Add an OpenAI or Grok key, or point Arkyv at a local OpenAI-compatible model server.</p>
-            <Code>{`# Fully local text with Ollama\nAI_PROVIDER=local\nLOCAL_AI_BASE_URL=http://127.0.0.1:11434/v1\nLOCAL_AI_MODEL=qwen2.5:7b\n\n# Optional local images with Stable Diffusion WebUI/Forge --api\nIMAGE_PROVIDER=local\nLOCAL_IMAGE_BASE_URL=http://127.0.0.1:7860`}</Code>
+            <h2 className="text-2xl font-semibold text-cyan-300">2. Pick your AI setup</h2>
+            <p>Install <a className="text-cyan-300 underline" href="https://ollama.com/download" target="_blank" rel="noreferrer">Ollama</a>, install project dependencies, create <code className="text-cyan-300">.env.local</code>, and preset local text generation:</p>
+            <Code>{`npm install\nnpm run setup:local -- --text=local\nollama pull qwen2.5:7b`}</Code>
+            <p>Ollama normally serves its OpenAI-compatible endpoint automatically. If it is not already running, use <code className="text-cyan-300">ollama serve</code>.</p>
+            <div className="rounded-xl border border-purple-400/20 bg-purple-400/[0.05] p-4 text-sm leading-6 text-slate-300">
+              <p className="font-semibold text-purple-200">Optional local images</p>
+              <p className="mt-1">Install <a className="text-purple-200 underline" href="https://github.com/AUTOMATIC1111/stable-diffusion-webui" target="_blank" rel="noreferrer">Stable Diffusion WebUI</a> or <a className="text-purple-200 underline" href="https://github.com/lllyasviel/stable-diffusion-webui-forge" target="_blank" rel="noreferrer">Forge</a>, add a checkpoint, launch it with <code>--api</code>, then run:</p>
+              <Code>npm run setup:local -- --image=local</Code>
+              <p className="mt-2 text-slate-400">You can skip image generation setup entirely and upload your own PNG, JPEG, or WebP room images from the admin room editor. Uploading requires no model or API key.</p>
+            </div>
+            <p>To preset both local providers at once, run <code className="text-cyan-300">npm run setup:local -- --text=local --image=local</code>. For hosted text, use <code className="text-cyan-300">--text=openai</code> or <code className="text-cyan-300">--text=grok</code>, then add the corresponding key to <code className="text-cyan-300">.env.local</code>.</p>
           </section>
 
           <section className="space-y-4">
-            <h2 className="text-2xl font-semibold text-cyan-300">3. Start and publish SpacetimeDB</h2>
-            <p>Keep the standalone node running in one terminal:</p>
-            <Code>spacetime start</Code>
-            <p>In a second terminal, publish the Rust module and regenerate the checked-in TypeScript bindings:</p>
-            <Code>npm run spacetime:deploy</Code>
-            <p>Use <code className="text-cyan-300">npm run spacetime:deploy:clean</code> only when you intentionally want to wipe the local database.</p>
+            <h2 className="text-2xl font-semibold text-cyan-300">3. Check the setup</h2>
+            <Code>npm run setup:check</Code>
+            <p>This checks Node, Rust, the WASM target, SpacetimeDB 2.0.1, provider selection, and whether configured local model servers are reachable. It does not display provider keys.</p>
           </section>
 
           <section className="space-y-4">
-            <h2 className="text-2xl font-semibold text-cyan-300">4. Run Arkyv</h2>
-            <Code>npm run dev</Code>
+            <h2 className="text-2xl font-semibold text-cyan-300">4. Start everything</h2>
+            <Code>npm run dev:all</Code>
+            <p>This single command starts or reuses local SpacetimeDB, publishes the module without wiping world data, regenerates client bindings, starts an installed Ollama service when selected, checks optional local image generation, and starts Next.js. It never downloads a large model without you asking. Press <code className="text-cyan-300">Ctrl+C</code> once to stop what it started.</p>
             <p>Open <a className="text-cyan-300 underline" href="http://localhost:3005">http://localhost:3005</a>, create a named saved world, then enter it. The first identity created in a fresh database is the administrator.</p>
+            <p className="text-sm text-slate-400">After the first successful publish, <code className="text-cyan-300">npm run dev:all:fast</code> is available for frontend-only work. pnpm users can run the same scripts as <code className="text-cyan-300">pnpm setup:local</code> and <code className="text-cyan-300">pnpm dev:all</code>.</p>
+          </section>
+
+          <section className="space-y-4">
+            <h2 className="text-2xl font-semibold text-cyan-300">Manual three-terminal mode</h2>
+            <p>Use this advanced path when connecting to a remote database or a local node on a custom port:</p>
+            <Code>{`# Terminal 1\nspacetime start\n\n# Terminal 2\nnpm run spacetime:deploy\n\n# Terminal 3\nnpm run dev`}</Code>
+            <p>Use <code className="text-cyan-300">npm run spacetime:deploy:clean</code> only when you intentionally want to wipe the local database.</p>
           </section>
 
           <section className="space-y-4">
@@ -60,6 +73,7 @@ export default function SetupPage({ cameFromHostedRuntime }) {
             <ul className="list-disc space-y-2 pl-6 text-slate-400">
               <li>Connection refused: verify <code>NEXT_PUBLIC_SPACETIMEDB_URI</code> and keep <code>spacetime start</code> running.</li>
               <li>Schema mismatch: rerun <code>npm run spacetime:deploy</code> with CLI 2.0.1.</li>
+              <li>Prerequisite uncertainty: run <code>npm run setup:check</code> for an actionable status list.</li>
               <li>Admin page redirects: only the first identity in a fresh database is admin.</li>
               <li>Local text errors: verify the model is installed and <code>LOCAL_AI_BASE_URL</code> ends in <code>/v1</code>.</li>
               <li>Local image errors: start Stable Diffusion WebUI/Forge with <code>--api</code> and verify <code>LOCAL_IMAGE_BASE_URL</code>.</li>

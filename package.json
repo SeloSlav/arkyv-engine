@@ -4,6 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack -p 3005",
+    "dev:all": "node scripts/local-dev.mjs",
+    "dev:all:fast": "node scripts/local-dev.mjs --skip-deploy",
+    "setup:local": "node scripts/local-setup.mjs",
+    "setup:check": "node scripts/local-setup.mjs --check",
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint",

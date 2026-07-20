@@ -1188,12 +1188,20 @@ pub fn configure_engine_record(ctx: &ReducerContext, table_name: String, payload
         }
         "dialogue_nodes" => {
             let npc_id = string(&row, "npc_id", ""); if ctx.db.npc().id().find(&npc_id).is_none() { return Err("Dialogue NPC does not exist.".to_string()); }
-            let value = DialogueNode { id: record_id.clone(), npc_id, text: string(&row, "text", ""), entry_node: bool_value(&row, "entry_node", false), required_quest_id: clean_optional(&row, "required_quest_id"), required_faction_id: clean_optional(&row, "required_faction_id"), required_reputation: i32_value(&row, "required_reputation", 0), sort_order: u32_value(&row, "sort_order", 100), created_at: ctx.db.dialogue_node().id().find(&record_id).map(|old| old.created_at).unwrap_or(ctx.timestamp), updated_at: ctx.timestamp };
+            let text = string(&row, "text", "").trim().to_string(); if text.is_empty() { return Err("Dialogue text is required.".to_string()); }
+            let value = DialogueNode { id: record_id.clone(), npc_id, text, entry_node: bool_value(&row, "entry_node", false), required_quest_id: clean_optional(&row, "required_quest_id"), required_faction_id: clean_optional(&row, "required_faction_id"), required_reputation: i32_value(&row, "required_reputation", 0), sort_order: u32_value(&row, "sort_order", 100), created_at: ctx.db.dialogue_node().id().find(&record_id).map(|old| old.created_at).unwrap_or(ctx.timestamp), updated_at: ctx.timestamp };
             if ctx.db.dialogue_node().id().find(&record_id).is_some() { ctx.db.dialogue_node().id().update(value); } else { ctx.db.dialogue_node().insert(value); }
         }
         "dialogue_choices" => {
             let node_id = string(&row, "node_id", ""); if ctx.db.dialogue_node().id().find(&node_id).is_none() { return Err("Dialogue node does not exist.".to_string()); }
-            let value = DialogueChoice { id: record_id.clone(), node_id, label: string(&row, "label", "Continue"), next_node_id: clean_optional(&row, "next_node_id"), action_kind: string(&row, "action_kind", "none"), action_reference_id: clean_optional(&row, "action_reference_id"), action_value: i32_value(&row, "action_value", 0), sort_order: u32_value(&row, "sort_order", 100), created_at: ctx.db.dialogue_choice().id().find(&record_id).map(|old| old.created_at).unwrap_or(ctx.timestamp), updated_at: ctx.timestamp };
+            let label = string(&row, "label", "").trim().to_string(); if label.is_empty() { return Err("Dialogue response text is required.".to_string()); }
+            let next_node_id = clean_optional(&row, "next_node_id");
+            if let Some(next_id) = next_node_id.as_ref() {
+                let source_npc_id = ctx.db.dialogue_node().id().find(&node_id).map(|node| node.npc_id).unwrap_or_default();
+                let next_node = ctx.db.dialogue_node().id().find(next_id).ok_or_else(|| "The next dialogue node does not exist.".to_string())?;
+                if next_node.npc_id != source_npc_id { return Err("A dialogue response cannot lead to another NPC's dialogue.".to_string()); }
+            }
+            let value = DialogueChoice { id: record_id.clone(), node_id, label, next_node_id, action_kind: string(&row, "action_kind", "none"), action_reference_id: clean_optional(&row, "action_reference_id"), action_value: i32_value(&row, "action_value", 0), sort_order: u32_value(&row, "sort_order", 100), created_at: ctx.db.dialogue_choice().id().find(&record_id).map(|old| old.created_at).unwrap_or(ctx.timestamp), updated_at: ctx.timestamp };
             if ctx.db.dialogue_choice().id().find(&record_id).is_some() { ctx.db.dialogue_choice().id().update(value); } else { ctx.db.dialogue_choice().insert(value); }
         }
         "exit_rules" => {
@@ -1229,7 +1237,13 @@ pub fn delete_engine_record(ctx: &ReducerContext, table_name: String, record_id:
         "vendor_restock_rules" => { ctx.db.vendor_restock_rule().vendor_stock_id().delete(&record_id); }
         "profession_definitions" => { if ctx.db.recipe_rule().iter().any(|row| row.profession_id.as_deref() == Some(&record_id)) { return Err("Profession is used by a recipe rule.".to_string()); } ctx.db.profession_definition().id().delete(&record_id); }
         "recipe_rules" => { ctx.db.recipe_rule().recipe_id().delete(&record_id); }
-        "dialogue_nodes" => { let ids = ctx.db.dialogue_choice().iter().filter(|row| row.node_id == record_id).map(|row| row.id).collect::<Vec<_>>(); for id in ids { ctx.db.dialogue_choice().id().delete(&id); } ctx.db.dialogue_node().id().delete(&record_id); }
+        "dialogue_nodes" => {
+            let ids = ctx.db.dialogue_choice().iter().filter(|row| row.node_id == record_id || row.next_node_id.as_deref() == Some(record_id.as_str())).map(|row| row.id).collect::<Vec<_>>();
+            for id in ids { ctx.db.dialogue_choice().id().delete(&id); }
+            let actor_ids = ctx.db.actor_dialogue_state().iter().filter(|row| row.node_id == record_id).map(|row| row.actor_id).collect::<Vec<_>>();
+            for actor_id in actor_ids { ctx.db.actor_dialogue_state().actor_id().delete(&actor_id); }
+            ctx.db.dialogue_node().id().delete(&record_id);
+        }
         "dialogue_choices" => { ctx.db.dialogue_choice().id().delete(&record_id); }
         "exit_rules" => { ctx.db.exit_rule().exit_id().delete(&record_id); }
         "world_triggers" => { ctx.db.world_trigger().id().delete(&record_id); }

@@ -23,14 +23,14 @@ This repository uses **SpacetimeDB 2.0.1** for its authoritative backend. The pr
 - Authoritative inventory limits, multi-item ring/trinket slots, weapon attack speed, durability/repair, ability costs/cooldowns/cast times, hit/crit/dodge/parry/block/resistance, threat, assists, defeat, chests, and enemy loot
 - Authored currencies, NPC vendors, player item/gold transfers, banks, crafting stations, recipes, and ingredients
 - Talent-gated abilities, class/origin restrictions, prerequisite abilities, profession ranks, learned recipes, item rarity/level/binding, two-handed equipment, finite bank capacity, and automatic vendor restocking
-- Authored dialogue trees, conditional responses, doors, locks, keys, traps, room-entry triggers, and scheduled or turn-driven world simulation
+- NPC-level authored dialogue trees with repeatable one-line replies, conditional responses, doors, locks, keys, traps, room-entry triggers, and scheduled or turn-driven world simulation
 - Parties with shared kill credit, assist XP, leader/round-robin/free-for-all loot, guilds, friends, blocks, private party/guild chat, and bilateral server-validated player trade
 - Private whispers, player reports, mutes, bans, kicks, administrator audits, content validation, server snapshots, and portable world export/import
 - Permissioned administrator roles for world, systems, quests, economy, lifecycle, moderation, and role management
 - Local saved worlds backed by persistent SpacetimeDB identity tokens
 - Explicit identity backup and restore through a local JSON file (the file contains tokens and must be kept secret)
 - Multiple characters per saved world
-- Optional RetroDiffusion or local Stable Diffusion room scenes, NPC portraits, and inventory item art
+- Uploaded room scenes, plus optional RetroDiffusion or local Stable Diffusion generation for rooms, NPC portraits, and inventory item art
 - Self-hosted persistent state with no email/password service
 
 ## Stack
@@ -40,7 +40,7 @@ This repository uses **SpacetimeDB 2.0.1** for its authoritative backend. The pr
 - Realtime: generated SpacetimeDB TypeScript bindings
 - Identity: SpacetimeDB signed tokens stored in browser localStorage
 - AI: OpenAI, Grok, or a local OpenAI-compatible server such as Ollama
-- Image generation: RetroDiffusion or a local Stable Diffusion WebUI/Forge API, with generated data URLs stored in SpacetimeDB
+- Images: direct room uploads or optional generation through RetroDiffusion or a local Stable Diffusion WebUI/Forge API, with data URLs stored in SpacetimeDB
 
 ## Prerequisites
 
@@ -48,7 +48,7 @@ This repository uses **SpacetimeDB 2.0.1** for its authoritative backend. The pr
 - Rust and the `wasm32-unknown-unknown` target
 - [SpacetimeDB](https://spacetimedb.com/install) CLI **2.0.1**
 - An OpenAI or Grok API key, or a locally running OpenAI-compatible text model server, for dynamic NPC dialogue and editor writing tools
-- A RetroDiffusion API key or a locally running Stable Diffusion WebUI/Forge API only if image generation is needed
+- A RetroDiffusion API key or a locally running Stable Diffusion WebUI/Forge API only if AI image generation is wanted; manual room uploads need neither
 
 Install and select the pinned SpacetimeDB release:
 
@@ -68,59 +68,80 @@ The output should report `spacetimedb tool version 2.0.1`.
 
 ## Local setup
 
+The easiest path uses one setup command and one development command.
+
 1. Install JavaScript dependencies:
 
    ```bash
    npm install
    ```
 
-2. Copy the environment template:
+2. Create `.env.local` and choose a text provider. For local Ollama:
 
    ```bash
-   cp .env.example .env.local
+   npm run setup:local -- --text=local
+   ollama pull qwen2.5:7b
    ```
 
-3. Configure `.env.local`:
-
-   ```env
-   NEXT_PUBLIC_ARKYV_SITE_MODE=runtime
-   NEXT_PUBLIC_SPACETIMEDB_URI=http://127.0.0.1:3000
-   NEXT_PUBLIC_SPACETIMEDB_DB_NAME=arkyv-engine
-
-   AI_PROVIDER=openai
-   OPENAI_API_KEY=sk-your-key
-   # GROK_API_KEY=your-key
-
-   # Optional
-   IMAGE_PROVIDER=retrodiffusion
-   RETRO_DIFFUSION_API_KEY=your-key
-   ```
-
-4. Start the standalone SpacetimeDB node and leave it running:
+   For OpenAI or Grok instead:
 
    ```bash
-   spacetime start
+   npm run setup:local -- --text=openai
+   # or: npm run setup:local -- --text=grok
    ```
 
-5. Publish the module and regenerate TypeScript bindings:
+   Then add the selected hosted key to `.env.local`. The setup script never replaces existing secrets.
+
+3. Optionally select local image generation:
 
    ```bash
-   npm run spacetime:deploy
+   npm run setup:local -- --image=local
    ```
 
-   This publishes database `arkyv-engine` from `spacetimedb/` and generates the client in `generated/`.
-
-6. Start Next.js:
+   This presets the AUTOMATIC1111/Forge API at `http://127.0.0.1:7860`. You can combine both local selections in one command:
 
    ```bash
-   npm run dev
+   npm run setup:local -- --text=local --image=local
    ```
 
-7. Open [http://localhost:3005](http://localhost:3005), visit **Saved Worlds**, and create a save.
+4. Verify prerequisites and configuration:
+
+   ```bash
+   npm run setup:check
+   ```
+
+5. Start everything:
+
+   ```bash
+   npm run dev:all
+   ```
+
+`dev:all` reuses or starts the local SpacetimeDB node, waits for it to become ready, publishes the `arkyv-engine` module without deleting data, regenerates TypeScript bindings, starts Ollama when local text is selected and Ollama is installed, checks optional image generation, and starts Next.js. Press `Ctrl+C` once to stop the processes it started. It does not pull large models automatically. For frontend-only restarts after a successful publish, `npm run dev:all:fast` skips publish and binding generation.
+
+Open [http://localhost:3005](http://localhost:3005), visit **Saved Worlds**, and create a save.
 
 The first identity connected to a fresh database becomes its administrator and can open `/admin`.
 
 `NEXT_PUBLIC_ARKYV_SITE_MODE=runtime` enables the saved-world, play, profile, and editor routes on self-hosted domains. A project/marketing deployment that does not provide world hosting should set it to `marketing`; those routes then redirect to the self-hosting guide and the browser never opens a SpacetimeDB connection. The canonical `arkyv.org` and `www.arkyv.org` hostnames always use marketing mode.
+
+The commands are ordinary package scripts, so pnpm users can run `pnpm setup:local -- --text=local` and `pnpm dev:all`. The repository continues to use `package-lock.json` and documents npm as its default.
+
+### Manual multi-terminal mode
+
+If you prefer to manage each process separately:
+
+```bash
+# Terminal 1
+spacetime start
+
+# Terminal 2
+npm run spacetime:deploy
+
+# Terminal 3
+npm run dev
+```
+
+Use this mode for remote databases or a local SpacetimeDB node on a custom port. `dev:all` is deliberately limited to the default loopback node on port `3000` so it cannot accidentally manage or publish to a remote service.
 
 ### Fully local AI
 
@@ -268,7 +289,7 @@ The studio includes these authoring surfaces:
 
 The XP requirement for each level starts at `base_xp` and is multiplied by `100% + growth_percent` for each subsequent level. XP is stored as progress within the current level, so changing the curve does not rewrite historical totals. When an NPC is defeated, its authored XP reward goes to the defeating player; crossing one or more thresholds applies every stat's per-level gain and reveals auto-learned abilities.
 
-Region dialogs define whether player-versus-player combat is allowed throughout that region and a legacy recovery-room fallback used only when no eligible spawn point exists. NPC dialogs define faction membership; friendly, neutral, or hostile disposition; guard status and greeting; whether the guard protects players and NPCs; wanted duration; attack-on-sight policy; attack and respawn timing; XP reward; and an ordered patrol route. Patrol stops must be joined by directed exits. World behavior advances deterministically as players issue commands, and `wait` explicitly advances a turn without taking another action.
+Region dialogs define whether player-versus-player combat is allowed throughout that region and a legacy recovery-room fallback used only when no eligible spawn point exists. NPC dialogs define faction membership; friendly, neutral, or hostile disposition; guard status and greeting; whether the guard protects players and NPCs; wanted duration; attack-on-sight policy; attack and respawn timing; XP reward; an ordered patrol route; and an authored dialogue tree. An authored opening line takes priority over AI for that NPC. A line with no player responses simply repeats whenever a player talks to the NPC, while responses can lead to follow-up lines or end the conversation. Patrol stops must be joined by directed exits. World behavior advances deterministically as players issue commands, and `wait` explicitly advances a turn without taking another action.
 
 Friendly NPCs cannot be damaged, but attempting to attack them still counts as a negative action. Neutral NPCs can be attacked and retaliate. Hostile NPCs may attack automatically when configured. In safe regions, attempted player attacks and attacks on protected NPCs create a timed wanted state; a present guard responds immediately, and guards in the same region remain hostile until that state expires. Attacking or killing a non-hostile faction NPC also applies the faction's authored reputation penalty. A faction guard attacks actors whose standing is at or below its hostile threshold. Basic attacks use the equipped weapon's server-enforced cooldown. Abilities apply the same law and reputation rules before enforcing learning, valid targets, costs, cooldown/cast pacing, scaling, and mitigation. Defeated NPCs leave authored drops in the room and either remain defeated or return to their spawn room after their configured delay.
 
@@ -347,6 +368,10 @@ All runtime mutations occur in the Rust module. The browser only sends commands 
 ## Development commands
 
 ```bash
+npm run setup:local                # Create/preset .env.local without replacing secrets
+npm run setup:check                # Check prerequisites and configured local providers
+npm run dev:all                    # Start DB, publish/generate, and run Next.js
+npm run dev:all:fast               # Reuse DB and skip publish/generate
 npm run dev                       # Next.js on port 3005
 npm run build                     # Production build
 npm run lint                      # ESLint
@@ -370,7 +395,7 @@ spacetime generate --no-config --include-private -p ./spacetimedb -l typescript 
 
 Game state never passes through the AI provider. NPC conversation requests contain only the NPC prompt, recent conversation context, and the player's current message. The response is committed through an authenticated SpacetimeDB reducer. Every `/api/arkyv/*` provider request must also present the active saved-world token; middleware validates it through SpacetimeDB and applies identity-scoped request limits before a provider key can be used. Provider keys remain server-only.
 
-RetroDiffusion and the local Stable Diffusion adapter return base64 PNGs. Arkyv stores them as data URLs in `room.image_url`, `npc.portrait_url`, or `object_definition.image_url`, avoiding a separate object-storage service. The object editor requests centered 128×128 pixel-art assets so inventory cards remain readable and scale cleanly with nearest-neighbor rendering. Large or numerous images will increase replicated database size; production operators may replace this with their own object storage and persist only URLs.
+Room authors can upload their own PNG, JPEG, or WebP scene directly in the room editor without configuring an image provider. RetroDiffusion and the local Stable Diffusion adapter are optional and return base64 PNGs. Arkyv stores uploaded and generated images as data URLs in `room.image_url`, `npc.portrait_url`, or `object_definition.image_url`, avoiding a separate object-storage service. Room uploads are limited to 1.5 MB and 4096×4096 pixels. The object editor requests centered 128×128 pixel-art assets so inventory cards remain readable and scale cleanly with nearest-neighbor rendering. Large or numerous images will increase replicated database size; production operators may replace this with their own object storage and persist only URLs.
 
 ## Docker
 
